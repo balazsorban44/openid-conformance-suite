@@ -1,5 +1,7 @@
 import { type JsonArray, type JsonObject, type JsonValue, isJsonObject, parseJsonObject } from "./json.ts";
 
+type PrimitiveTypes = { string: string; number: number; boolean: boolean };
+
 /**
  * Port of testmodule/Environment.java
  *
@@ -73,25 +75,13 @@ export class Environment {
 	}
 
 	private putElement(key: string, path: string, value: JsonValue): void {
-		let o: JsonObject = this.getObject(key) ?? {};
-		if (!this.containsObject(key)) {
+		let o = this.getObject(key);
+		if (o == null) {
+			o = {};
 			this.putObject(key, o);
 		}
-		const pathSegments = path.split(".");
-		const lastSegment = pathSegments.pop() as string;
-		for (const pathSegment of pathSegments) {
-			let nextO: JsonValue | undefined = o[pathSegment];
-			if (nextO === undefined) {
-				nextO = {};
-				o[pathSegment] = nextO;
-			} else if (!isJsonObject(nextO)) {
-				throw new UnexpectedTypeException(
-					`putObject(${key}, ${path}, obj) found a non-object of type ${typeName(nextO)} in the path at ${pathSegment}`,
-				);
-			}
-			o = nextO;
-		}
-		o[lastSegment] = value;
+		const [parent, lastSegment] = walkToParent(o, key, path, (missingIn, segment) => (missingIn[segment] = {}));
+		parent[lastSegment] = value;
 	}
 
 	putArray(key: string, path: string, value: JsonArray): void {
@@ -100,24 +90,15 @@ export class Environment {
 
 	/** Remove an element at the given dot-separated path within an object */
 	removeElement(key: string, path: string): void {
-		let o: JsonObject | null = this.getObject(key);
+		const notFound = () => new NoSuchElementException(`No object with key ${key} found in path ${path}`);
+		const o = this.getObject(key);
 		if (o == null) {
-			throw new NoSuchElementException(`No object with key ${key} found in path ${path}`);
+			throw notFound();
 		}
-		const pathSegments = path.split(".");
-		const lastSegment = pathSegments.pop() as string;
-		for (const pathSegment of pathSegments) {
-			const nextO: JsonValue | undefined = o[pathSegment];
-			if (nextO === undefined) {
-				throw new NoSuchElementException(`No object with key ${key} found in path ${path}`);
-			} else if (!isJsonObject(nextO)) {
-				throw new UnexpectedTypeException(
-					`putObject(${key}, ${path}, obj) found a non-object of type ${typeName(nextO)} in the path at ${pathSegment}`,
-				);
-			}
-			o = nextO;
-		}
-		delete o[lastSegment];
+		const [parent, lastSegment] = walkToParent(o, key, path, () => {
+			throw notFound();
+		});
+		delete parent[lastSegment];
 	}
 
 	putObjectFromJsonString(key: string, json: string): JsonObject | null;
@@ -137,29 +118,22 @@ export class Environment {
 	 * is not found, or the object does not contain any element at the path. A present JSON null is returned as null.
 	 */
 	getElementFromObject(key: string, path: string): JsonValue | undefined {
-		let e: JsonValue | undefined = this.getObject(key) ?? undefined;
-		if (e === undefined) {
+		let e: JsonValue | null = this.getObject(key);
+		if (e == null) {
 			return undefined;
 		}
-		const parts = path.split(".");
-		for (let i = 0; i < parts.length; i++) {
-			const p = parts[i];
-			if (isJsonObject(e)) {
-				if (Object.prototype.hasOwnProperty.call(e, p)) {
-					e = e[p];
-					if (i === parts.length - 1) {
-						return e;
-					}
-				} else {
-					break;
-				}
-			} else {
+		for (const p of path.split(".")) {
+			if (!isJsonObject(e)) {
 				throw new UnexpectedTypeException(
 					`An object is required for ${key}.${path} but ${typeName(e)} was found whilst traversing the path`,
 				);
 			}
+			if (!Object.hasOwn(e, p)) {
+				return undefined;
+			}
+			e = e[p];
 		}
-		return undefined;
+		return e;
 	}
 
 	/**
@@ -167,52 +141,44 @@ export class Environment {
 	 * With a single argument, reads from the native value store.
 	 */
 	getString(key: string, path?: string): string | null {
-		if (path === undefined) {
-			return this.getString(Environment.NATIVE_VALUES, key);
-		}
-		const e = this.getElementFromObject(key, path);
-		if (e == null) {
-			return null;
-		}
-		if (typeof e === "string") {
-			return e;
-		}
-		throw new UnexpectedTypeException(
-			`If present, a string is expected for ${key} ${path} but ${typeName(e)} was found`,
-		);
+		return this.getPrimitive(key, path, "string", "If present, a string is expected");
 	}
 
 	getInteger(key: string, path?: string): number | null {
-		if (path === undefined) {
-			return this.getInteger(Environment.NATIVE_VALUES, key);
-		}
-		const e = this.getElementFromObject(key, path);
-		if (e == null) {
-			return null;
-		}
-		if (typeof e === "number") {
-			return Math.trunc(e);
-		}
-		throw new UnexpectedTypeException(`A number is required for ${key} ${path} but ${typeName(e)} was found`);
+		const n = this.getPrimitive(key, path, "number", "A number is required");
+		return n == null ? null : Math.trunc(n);
 	}
 
 	getBoolean(key: string, path?: string): boolean | null {
+		return this.getPrimitive(key, path, "boolean", "A boolean is required");
+	}
+
+	/** Java's getLong: the same as getInteger (JavaScript has one number type) */
+	getLong(key: string, path?: string): number | null {
+		return this.getInteger(key, path);
+	}
+
+	/**
+	 * The element at key/path (the native value `key` when there is no path) if it has the given type; null when
+	 * missing or JSON null; UnexpectedTypeException("<expectation> for <key> <path> but <type> was found") otherwise.
+	 */
+	private getPrimitive<T extends keyof PrimitiveTypes>(
+		key: string,
+		path: string | undefined,
+		type: T,
+		expectation: string,
+	): PrimitiveTypes[T] | null {
 		if (path === undefined) {
-			return this.getBoolean(Environment.NATIVE_VALUES, key);
+			return this.getPrimitive(Environment.NATIVE_VALUES, key, type, expectation);
 		}
 		const e = this.getElementFromObject(key, path);
 		if (e == null) {
 			return null;
 		}
-		if (typeof e === "boolean") {
-			return e;
+		if (typeof e === type) {
+			return e as PrimitiveTypes[T];
 		}
-		throw new UnexpectedTypeException(`A boolean is required for ${key} ${path} but ${typeName(e)} was found`);
-	}
-
-	/** Java Integer and Long are both JS numbers: same lookup and error as getInteger() */
-	getLong(key: string, path?: string): number | null {
-		return this.getInteger(key, path);
+		throw new UnexpectedTypeException(`${expectation} for ${key} ${path} but ${typeName(e)} was found`);
 	}
 
 	toString(): string {
@@ -255,12 +221,7 @@ export class Environment {
 
 	/** Test if a key has had another key mapped over it (key is a "to" value in mapKey) */
 	isKeyShadowed(key: string): boolean {
-		for (const v of this.keyMap.values()) {
-			if (v === key) {
-				return true;
-			}
-		}
-		return false;
+		return [...this.keyMap.values()].includes(key);
 	}
 
 	/** Test if a given key is mapped to another value (key is a "from" value in mapKey) */
@@ -308,6 +269,33 @@ export class Environment {
 	private natives(): JsonObject {
 		return this.store.get(Environment.NATIVE_VALUES) as JsonObject;
 	}
+}
+
+/**
+ * Follows the dot-separated path to the object holding its last segment; returns that object and the segment.
+ * `onMissing` handles an absent intermediate object (returning the object to continue with, or throwing).
+ */
+function walkToParent(
+	o: JsonObject,
+	key: string,
+	path: string,
+	onMissing: (o: JsonObject, segment: string) => JsonObject,
+): [JsonObject, string] {
+	const pathSegments = path.split(".");
+	const lastSegment = pathSegments.pop() as string;
+	for (const pathSegment of pathSegments) {
+		const next = o[pathSegment];
+		if (next === undefined) {
+			o = onMissing(o, pathSegment);
+		} else if (isJsonObject(next)) {
+			o = next;
+		} else {
+			throw new UnexpectedTypeException(
+				`putObject(${key}, ${path}, obj) found a non-object of type ${typeName(next)} in the path at ${pathSegment}`,
+			);
+		}
+	}
+	return [o, lastSegment];
 }
 
 function typeName(v: JsonValue | undefined): string {

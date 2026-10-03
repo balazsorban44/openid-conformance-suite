@@ -1,5 +1,5 @@
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
-import { mapToJsonObject, type LogArgs } from "./DataUtils.ts";
+import { headersFromJson, mapToJsonObject, type LogArgs } from "./DataUtils.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
 import type { JsonObject } from "./json.ts";
 import type { TestLockManager } from "./TestLockManager.ts";
@@ -20,7 +20,8 @@ import type { TestLockManager } from "./TestLockManager.ts";
 export interface HttpRequest {
 	url: string;
 	method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
-	headers?: Headers | Record<string, string | string[]> | JsonObject | null;
+	/** A Headers object, or a JSON object of header values (strings or arrays of strings, see headersFromJson) */
+	headers?: Headers | JsonObject | null;
 	/** A string body is sent as-is; URLSearchParams as application/x-www-form-urlencoded; an object as JSON */
 	body?: string | URLSearchParams | Uint8Array | JsonObject | null;
 }
@@ -34,6 +35,11 @@ export interface HttpResponse {
 	bodyBytes: Uint8Array;
 	/** The final request URL */
 	url: string;
+	/**
+	 * Set when the response was replayed from the external endpoint cache instead of fetched (Java:
+	 * CachedHttpResponseMarker); the response is then logged as "Using cached HTTP response".
+	 */
+	cacheAgeSeconds?: number;
 }
 
 export class HttpClientException extends Error {
@@ -50,7 +56,7 @@ export type HttpInterceptor = (
 ) => Promise<HttpResponse>;
 
 export interface HttpClientOptions {
-	/** Wraps the network call; may return a replayed response implementing getCacheAgeSeconds() */
+	/** Wraps the network call; may return a replayed response with `cacheAgeSeconds` set */
 	interceptor?: HttpInterceptor | null;
 	/** The log source (normally the condition class name) */
 	source: string;
@@ -64,22 +70,23 @@ export interface HttpClientOptions {
 
 export class HttpClient {
 	private readonly opts: HttpClientOptions;
+	private readonly timeoutMs: number;
 	private readonly dispatcher: Dispatcher;
 
 	constructor(opts: HttpClientOptions) {
 		this.opts = opts;
-		const timeout = (opts.timeoutSeconds ?? 60) * 1000;
+		this.timeoutMs = (opts.timeoutSeconds ?? 60) * 1000;
 		const mtls = opts.mutualTls;
 		this.dispatcher = new Agent({
 			connect: {
 				rejectUnauthorized: false,
 				minVersion: opts.restrictAllowedTLSVersions === false ? undefined : "TLSv1.2",
-				timeout,
-				cert: typeof mtls?.["cert"] === "string" ? (mtls["cert"] as string) : undefined,
-				key: typeof mtls?.["key"] === "string" ? (mtls["key"] as string) : undefined,
+				timeout: this.timeoutMs,
+				cert: stringOrUndefined(mtls?.["cert"]),
+				key: stringOrUndefined(mtls?.["key"]),
 			},
-			headersTimeout: timeout,
-			bodyTimeout: timeout,
+			headersTimeout: this.timeoutMs,
+			bodyTimeout: this.timeoutMs,
 			// a fresh connection per call is deliberate upstream ("No HTTP connection pooling")
 			pipelining: 0,
 			connections: 1,
@@ -88,36 +95,8 @@ export class HttpClient {
 
 	async exchange(req: HttpRequest): Promise<HttpResponse> {
 		const method = req.method ?? "GET";
-		const headers = new Headers();
-		if (req.headers instanceof Headers) {
-			req.headers.forEach((v, k) => headers.append(k, v));
-		} else if (req.headers) {
-			for (const [k, v] of Object.entries(req.headers)) {
-				if (Array.isArray(v)) {
-					for (const x of v) {
-						headers.append(k, String(x));
-					}
-				} else if (v != null) {
-					headers.set(k, String(v));
-				}
-			}
-		}
-		let body: string | Uint8Array | undefined;
-		if (req.body == null) {
-			body = undefined;
-		} else if (typeof req.body === "string" || req.body instanceof Uint8Array) {
-			body = req.body;
-		} else if (req.body instanceof URLSearchParams) {
-			body = req.body.toString();
-			if (!headers.has("content-type")) {
-				headers.set("content-type", "application/x-www-form-urlencoded;charset=UTF-8");
-			}
-		} else {
-			body = JSON.stringify(req.body);
-			if (!headers.has("content-type")) {
-				headers.set("content-type", "application/json");
-			}
-		}
+		const headers = req.headers instanceof Headers ? new Headers(req.headers) : headersFromJson(req.headers);
+		const body = encodeBody(req.body, headers);
 		if (body !== undefined && !headers.has("content-length")) {
 			headers.set("content-length", String(typeof body === "string" ? Buffer.byteLength(body) : body.byteLength));
 		}
@@ -145,7 +124,6 @@ export class HttpClient {
 		}
 		this.opts.log.log(this.opts.source, reqLog);
 
-		const lockManager = this.opts.lockManager;
 		let bodyException = null as Error | null;
 		const doFetch = async (): Promise<HttpResponse> => {
 			let response: Response;
@@ -154,21 +132,20 @@ export class HttpClient {
 				response = (await undiciFetch(req.url, {
 					method,
 					headers: [...headers.entries()],
-					body: body as string | Uint8Array | undefined,
+					body,
 					redirect: "manual",
 					dispatcher: this.dispatcher,
-					signal: AbortSignal.timeout((this.opts.timeoutSeconds ?? 60) * 1000),
+					signal: AbortSignal.timeout(this.timeoutMs),
 				})) as unknown as Response;
 			} catch (e) {
 				const cause = (e as Error).cause;
 				const detail = cause instanceof Error ? cause.message : (e as Error).message;
 				throw new HttpClientException(`I/O error on ${method} request for "${req.url}": ${detail}`, { cause: e });
 			}
-			let bytes: Uint8Array;
+			let bytes = new Uint8Array();
 			try {
 				bytes = new Uint8Array(await response.arrayBuffer());
 			} catch (e) {
-				bytes = new Uint8Array();
 				bodyException = e as Error;
 			}
 			return {
@@ -180,31 +157,27 @@ export class HttpClient {
 				url: response.url || req.url,
 			};
 		};
-		if (lockManager) {
-			await lockManager.releaseLock();
-		}
+		const lockManager = this.opts.lockManager;
+		await lockManager?.releaseLock();
 		let result: HttpResponse;
 		try {
 			const interceptor = this.opts.interceptor;
 			result = interceptor ? await interceptor({ method, url: req.url, headers }, doFetch) : await doFetch();
 		} finally {
-			if (lockManager) {
-				await lockManager.reacquireLock();
-			}
+			await lockManager?.reacquireLock();
 		}
 
-		const cacheAge = (result as unknown as { getCacheAgeSeconds?: () => number }).getCacheAgeSeconds?.();
 		const resLog: LogArgs = {
 			response_status_code: String(result.status),
 			response_status_text: result.statusText,
 			response_headers: mapToJsonObject(result.headers, true),
 		};
 		addBodyProperty(resLog, "response_body", result.bodyBytes);
-		if (cacheAge !== undefined) {
-			resLog["msg"] = "Using cached HTTP response";
-			resLog["cache_age_seconds"] = cacheAge;
-		} else {
+		if (result.cacheAgeSeconds === undefined) {
 			resLog["msg"] = "HTTP response";
+		} else {
+			resLog["msg"] = "Using cached HTTP response";
+			resLog["cache_age_seconds"] = result.cacheAgeSeconds;
 		}
 		resLog["http"] = "response";
 		if (bodyException) {
@@ -220,11 +193,31 @@ export class HttpClient {
 	}
 }
 
-function decodeBody(bytes: Uint8Array): string | null {
-	if (bytes.byteLength === 0) {
-		return null;
+function stringOrUndefined(v: unknown): string | undefined {
+	return typeof v === "string" ? v : undefined;
+}
+
+/** The request body as sent; sets the content-type for form and JSON bodies unless the caller did */
+function encodeBody(body: HttpRequest["body"], headers: Headers): string | Uint8Array | undefined {
+	if (body == null) {
+		return undefined;
 	}
-	return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+	if (typeof body === "string" || body instanceof Uint8Array) {
+		return body;
+	}
+	const [encoded, contentType] =
+		body instanceof URLSearchParams
+			? [body.toString(), "application/x-www-form-urlencoded;charset=UTF-8"]
+			: [JSON.stringify(body), "application/json"];
+	if (!headers.has("content-type")) {
+		headers.set("content-type", contentType);
+	}
+	return encoded;
+}
+
+/** The response body as UTF-8 text, null when there was none */
+export function decodeBody(bytes: Uint8Array): string | null {
+	return bytes.byteLength === 0 ? null : new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
 const PREVIEW_BYTES = 32;

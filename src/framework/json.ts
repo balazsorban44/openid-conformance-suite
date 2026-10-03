@@ -67,7 +67,7 @@ export function isJsonNull(v: unknown): v is null {
 
 /** Gson's obj.has(key) */
 export function has(obj: JsonObject | null | undefined, key: string): boolean {
-	return obj != null && Object.prototype.hasOwnProperty.call(obj, key);
+	return obj != null && Object.hasOwn(obj, key);
 }
 
 /** Gson's JsonParser.parseString() */
@@ -90,10 +90,7 @@ export function parseJsonObject(text: string): JsonObject {
 
 /** Gson's el.deepCopy() */
 export function deepCopy<T extends JsonValue | undefined>(v: T): T {
-	if (v === undefined || v === null) {
-		return v;
-	}
-	return structuredClone(v);
+	return v == null ? v : structuredClone(v);
 }
 
 /** Structural equality of two JSON values (Gson's JsonElement.equals) */
@@ -106,8 +103,7 @@ export function jsonEquals(a: JsonValue | undefined, b: JsonValue | undefined): 
 	}
 	if (isJsonObject(a) && isJsonObject(b)) {
 		const ka = Object.keys(a);
-		const kb = Object.keys(b);
-		return ka.length === kb.length && ka.every((k) => has(b, k) && jsonEquals(a[k], b[k]));
+		return ka.length === Object.keys(b).length && ka.every((k) => has(b, k) && jsonEquals(a[k], b[k]));
 	}
 	return false;
 }
@@ -115,6 +111,18 @@ export function jsonEquals(a: JsonValue | undefined, b: JsonValue | undefined): 
 /** Gson's JsonArray.contains(new JsonPrimitive(x)) */
 export function jsonArrayContains(arr: JsonArray | null | undefined, value: JsonValue): boolean {
 	return arr != null && arr.some((x) => jsonEquals(x, value));
+}
+
+type PrimitiveTypes = { number: number; string: string; boolean: boolean };
+
+/** The value if it is of the given primitive type, otherwise "<method> called on something that is not a <type>" */
+function expectType<T extends keyof PrimitiveTypes>(method: string, type: T, json: unknown): PrimitiveTypes[T] {
+	if (typeof json !== type) {
+		throw new UnexpectedJsonTypeException(
+			`${method} called on something that is not a ${type}: ${JSON.stringify(json)}`,
+		);
+	}
+	return json as PrimitiveTypes[T];
 }
 
 /**
@@ -125,60 +133,29 @@ export function jsonArrayContains(arr: JsonArray | null | undefined, value: Json
  */
 export const OIDFJSON = {
 	getNumber(json: unknown): number {
-		if (typeof json !== "number") {
-			throw new UnexpectedJsonTypeException(
-				"getNumber called on something that is not a number: " + JSON.stringify(json),
-			);
-		}
-		return json;
+		return expectType("getNumber", "number", json);
 	},
 	getInt(json: unknown): number {
-		if (typeof json !== "number") {
-			throw new UnexpectedJsonTypeException("getInt called on something that is not a number: " + JSON.stringify(json));
-		}
-		return Math.trunc(json);
+		return Math.trunc(expectType("getInt", "number", json));
 	},
 	getLong(json: unknown): number {
-		if (typeof json !== "number") {
-			throw new UnexpectedJsonTypeException(
-				"getLong called on something that is not a number: " + JSON.stringify(json),
-			);
-		}
-		return Math.trunc(json);
+		return Math.trunc(expectType("getLong", "number", json));
 	},
 	getDouble(json: unknown): number {
-		if (typeof json !== "number") {
-			throw new UnexpectedJsonTypeException(
-				"getDouble called on something that is not a number: " + JSON.stringify(json),
-			);
-		}
-		return json;
+		return expectType("getDouble", "number", json);
 	},
 	getString(json: unknown): string {
-		if (typeof json !== "string") {
-			throw new UnexpectedJsonTypeException(
-				"getString called on something that is not a string: " + JSON.stringify(json),
-			);
-		}
-		return json;
+		return expectType("getString", "string", json);
 	},
 	getStringOrNull(json: unknown): string | null {
-		if (json == null) {
-			return null;
-		}
-		return OIDFJSON.getString(json);
+		return json == null ? null : OIDFJSON.getString(json);
 	},
 	/** True when the element is a non-null JSON string primitive — the precondition for getString. */
 	isString(json: unknown): json is string {
 		return typeof json === "string";
 	},
 	getBoolean(json: unknown): boolean {
-		if (typeof json !== "boolean") {
-			throw new UnexpectedJsonTypeException(
-				"getBoolean called on something that is not a boolean: " + JSON.stringify(json),
-			);
-		}
-		return json;
+		return expectType("getBoolean", "boolean", json);
 	},
 	forceConversionToString(json: unknown): string {
 		if (typeof json !== "string" && typeof json !== "number") {
@@ -212,10 +189,7 @@ export const OIDFJSON = {
 		);
 	},
 	tryGetString(json: unknown): string | null {
-		if (json == null) {
-			return null;
-		}
-		return OIDFJSON.getString(json);
+		return json == null ? null : OIDFJSON.getString(json);
 	},
 	convertMapToJsonObject(map: Record<string, unknown>): JsonObject {
 		return JSON.parse(JSON.stringify(map)) as JsonObject;

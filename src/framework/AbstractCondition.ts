@@ -1,8 +1,8 @@
 import { ConditionError, ConditionResult, type Condition, type EnvironmentRequirements } from "./Condition.ts";
-import { args, ex, mapToJsonObject, type LogArgs } from "./DataUtils.ts";
+import { ex, mapToJsonObject, type LogArgs } from "./DataUtils.ts";
 import { Environment, UnexpectedTypeException } from "./Environment.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
-import { HttpClient, type HttpResponse } from "./http.ts";
+import { HttpClient, type HttpInterceptor, type HttpResponse } from "./http.ts";
 import {
 	isJsonArray,
 	isJsonObject,
@@ -26,6 +26,24 @@ const UNEXPECTED =
 	" with the full details)";
 
 /**
+ * The @PreEnvironment / @PostEnvironment checks, in the order Java runs them: each kind of requirement, how it
+ * is satisfied, and the noun used in the log message.
+ */
+const ENVIRONMENT_CHECKS: {
+	type: keyof EnvironmentRequirements;
+	noun: string;
+	isPresent: (env: Environment, key: string) => boolean;
+}[] = [
+	{ type: "required", noun: "object", isPresent: (env, key) => env.containsObject(key) },
+	{ type: "strings", noun: "string", isPresent: (env, key) => env.getString(key) != null },
+	{ type: "integers", noun: "integer", isPresent: (env, key) => env.getInteger(key) != null },
+];
+
+const ERROR_LIMIT = 50;
+const LOG_SOFT_LIMIT = 1000; // we stop logging here
+const LOG_HARD_LIMIT = 10000; // we abort execution here
+
+/**
  * Port of condition/AbstractCondition.java
  *
  * Subclasses implement evaluate(env) (sync or async) and declare their environment requirements as static
@@ -42,7 +60,7 @@ export abstract class AbstractCondition implements Condition {
 	static post?: EnvironmentRequirements;
 
 	private testId = "";
-	private _log!: TestInstanceEventLog;
+	private eventLog!: TestInstanceEventLog;
 	private requirements = new Set<string>();
 	private conditionResultOnFailure: ConditionResult = ConditionResult.FAILURE;
 	private lockManager: TestLockManager | null = null;
@@ -57,7 +75,7 @@ export abstract class AbstractCondition implements Condition {
 		requirements: string[],
 	): void {
 		this.testId = testId;
-		this._log = log;
+		this.eventLog = log;
 		this.conditionResultOnFailure = conditionResultOnFailure;
 		this.requirements = new Set(requirements);
 	}
@@ -74,87 +92,14 @@ export abstract class AbstractCondition implements Condition {
 		return this.constructor.name;
 	}
 
-	/** The event log this condition writes to (Java: private field `log`) */
-	protected get eventLog(): TestInstanceEventLog {
-		return this._log;
-	}
-
-	private requirementsOf(kind: "pre" | "post"): EnvironmentRequirements | undefined {
-		return (this.constructor as typeof AbstractCondition)[kind];
-	}
-
 	async execute(env: Environment): Promise<void> {
 		try {
-			const pre = this.requirementsOf("pre");
-			if (pre) {
-				for (const req of pre.required ?? []) {
-					if (!env.containsObject(req)) {
-						this._log.log(
-							this.getMessage(),
-							args(
-								"msg",
-								UNEXPECTED + " - couldn't find required object in environment before evaluation: " + req,
-								"expected",
-								req,
-								"result",
-								ConditionResult.FAILURE,
-								"mapped",
-								env.isKeyShadowed(req) ? env.getEffectiveKey(req) : null,
-								"requirements",
-								this.getRequirements(),
-							),
-						);
-						throw this.alreadyLoggedPrePostError(
-							"[pre] " + UNEXPECTED + " - couldn't find object in environment: " + req,
-						);
-					}
-				}
-				for (const s of pre.strings ?? []) {
-					if (env.getString(s) == null) {
-						this._log.log(
-							this.getMessage(),
-							args(
-								"msg",
-								UNEXPECTED + " - couldn't find required string in environment before evaluation: " + s,
-								"expected",
-								s,
-								"result",
-								ConditionResult.FAILURE,
-								"requirements",
-								this.getRequirements(),
-							),
-						);
-						throw this.alreadyLoggedPrePostError(
-							"[pre] " + UNEXPECTED + " - couldn't find string in environment: " + s,
-						);
-					}
-				}
-				for (const i of pre.integers ?? []) {
-					if (env.getInteger(i) == null) {
-						this._log.log(
-							this.getMessage(),
-							args(
-								"msg",
-								UNEXPECTED + " - couldn't find required integer in environment before evaluation: " + i,
-								"expected",
-								i,
-								"result",
-								ConditionResult.FAILURE,
-								"requirements",
-								this.getRequirements(),
-							),
-						);
-						throw this.alreadyLoggedPrePostError(
-							"[pre] " + UNEXPECTED + " - couldn't find integer in environment: " + i,
-						);
-					}
-				}
-			}
+			this.checkEnvironment("pre", env);
 
 			// evaluate the condition and assign its results back to our environment
 			env = await this.evaluate(env);
 			if (this.logged === 0) {
-				this._log.log(this.getMessage(), args("msg", "Condition ran but did not log anything"));
+				this.eventLog.log(this.getMessage(), { msg: "Condition ran but did not log anything" });
 			}
 			if (this.errorsLogged > 0) {
 				// the condition has logged a warning/failure so must throw an error, otherwise the test result will
@@ -163,76 +108,39 @@ export abstract class AbstractCondition implements Condition {
 			}
 
 			// check the environment to make sure the condition did what it claimed to
-			const post = this.requirementsOf("post");
-			if (post) {
-				for (const req of post.required ?? []) {
-					if (!env.containsObject(req)) {
-						this._log.log(
-							this.getMessage(),
-							args(
-								"msg",
-								UNEXPECTED + " - couldn't find required object in environment after evaluation: " + req,
-								"expected",
-								req,
-								"result",
-								ConditionResult.FAILURE,
-								"mapped",
-								env.isKeyShadowed(req) ? env.getEffectiveKey(req) : null,
-								"requirements",
-								this.getRequirements(),
-							),
-						);
-						throw this.alreadyLoggedPrePostError(
-							"[post] " + UNEXPECTED + " - couldn't find object in environment: " + req,
-						);
-					}
-				}
-				for (const s of post.strings ?? []) {
-					if (env.getString(s) == null) {
-						this._log.log(
-							this.getMessage(),
-							args(
-								"msg",
-								UNEXPECTED + " - couldn't find required string in environment after evaluation: " + s,
-								"expected",
-								s,
-								"result",
-								ConditionResult.FAILURE,
-								"requirements",
-								this.getRequirements(),
-							),
-						);
-						throw this.alreadyLoggedPrePostError(
-							"[post] " + UNEXPECTED + " - couldn't find string in environment: " + s,
-						);
-					}
-				}
-				for (const i of post.integers ?? []) {
-					if (env.getInteger(i) == null) {
-						this._log.log(
-							this.getMessage(),
-							args(
-								"msg",
-								UNEXPECTED + " - couldn't find required integer in environment after evaluation: " + i,
-								"expected",
-								i,
-								"result",
-								ConditionResult.FAILURE,
-								"requirements",
-								this.getRequirements(),
-							),
-						);
-						throw this.alreadyLoggedPrePostError(
-							"[post] " + UNEXPECTED + " - couldn't find integer in environment: " + i,
-						);
-					}
-				}
-			}
+			this.checkEnvironment("post", env);
 		} catch (e) {
 			if (e instanceof UnexpectedTypeException) {
 				throw this.error(e.message, e);
 			}
 			throw e;
+		}
+	}
+
+	/** The @PreEnvironment / @PostEnvironment checks: log and throw for the first missing value */
+	private checkEnvironment(kind: "pre" | "post", env: Environment): void {
+		const declared = (this.constructor as typeof AbstractCondition)[kind];
+		if (!declared) {
+			return;
+		}
+		const when = kind === "pre" ? "before" : "after";
+		for (const { type, noun, isPresent } of ENVIRONMENT_CHECKS) {
+			for (const key of declared[type] ?? []) {
+				if (isPresent(env, key)) {
+					continue;
+				}
+				const entry: LogArgs = {
+					msg: `${UNEXPECTED} - couldn't find required ${noun} in environment ${when} evaluation: ${key}`,
+					expected: key,
+					result: ConditionResult.FAILURE,
+				};
+				if (type === "required") {
+					entry["mapped"] = env.isKeyShadowed(key) ? env.getEffectiveKey(key) : null;
+				}
+				entry["requirements"] = this.getRequirements();
+				this.eventLog.log(this.getMessage(), entry);
+				throw this.alreadyLoggedPrePostError(`[${kind}] ${UNEXPECTED} - couldn't find ${noun} in environment: ${key}`);
+			}
 		}
 	}
 
@@ -248,12 +156,9 @@ export abstract class AbstractCondition implements Condition {
 
 	/** Get a string from the environment, throwing a condition error if missing/not a string */
 	protected getStringFromEnvironment(env: Environment, key: string, path: string, friendlyName: string): string {
-		const value = env.getElementFromObject(key, path);
-		if (value == null) {
-			throw this.error(friendlyName + " is missing", args(key, env.getObject(key)));
-		}
+		const value = this.getElementFromEnvironment(env, key, path, friendlyName);
 		if (typeof value !== "string") {
-			throw this.error(friendlyName + " is not a string", args("value", value));
+			throw this.error(friendlyName + " is not a string", { value });
 		}
 		return value;
 	}
@@ -265,12 +170,9 @@ export abstract class AbstractCondition implements Condition {
 		path: string,
 		friendlyName: string,
 	): JsonObject {
-		const value = env.getElementFromObject(key, path);
-		if (value == null) {
-			throw this.error(friendlyName + " is missing", args(key, env.getObject(key)));
-		}
+		const value = this.getElementFromEnvironment(env, key, path, friendlyName);
 		if (!isJsonObject(value)) {
-			throw this.error(friendlyName + " is not a JSON object", args("value", value));
+			throw this.error(friendlyName + " is not a JSON object", { value });
 		}
 		return value;
 	}
@@ -282,15 +184,20 @@ export abstract class AbstractCondition implements Condition {
 		friendlyName: string,
 		failIfEmpty = false,
 	): JsonArray {
-		const value = env.getElementFromObject(key, path);
-		if (value == null) {
-			throw this.error(friendlyName + " is missing", args(key, env.getObject(key)));
-		}
+		const value = this.getElementFromEnvironment(env, key, path, friendlyName);
 		if (!isJsonArray(value)) {
-			throw this.error(friendlyName + " is not a JSON array", args("value", value));
+			throw this.error(friendlyName + " is not a JSON array", { value });
 		}
 		if (failIfEmpty && value.length === 0) {
-			throw this.error(friendlyName + " is empty", args("value", value));
+			throw this.error(friendlyName + " is empty", { value });
+		}
+		return value;
+	}
+
+	private getElementFromEnvironment(env: Environment, key: string, path: string, friendlyName: string): JsonValue {
+		const value = env.getElementFromObject(key, path);
+		if (value == null) {
+			throw this.error(friendlyName + " is missing", { [key]: env.getObject(key) });
 		}
 		return value;
 	}
@@ -304,10 +211,6 @@ export abstract class AbstractCondition implements Condition {
 	 * @returns true if this message should not be logged
 	 */
 	private reachedLoggingLimits(result: string | null): boolean {
-		const errorLimit = 50;
-		const logSoftLimit = 1000; // we stop logging here
-		const logHardLimit = 10000; // we abort execution here
-
 		this.logged++;
 
 		if (
@@ -317,65 +220,53 @@ export abstract class AbstractCondition implements Condition {
 			result !== ConditionResult.REVIEW
 		) {
 			this.errorsLogged++;
-			if (this.errorsLogged > errorLimit) {
-				const msg = "This condition has logged over " + errorLimit + " errors and has been aborted.";
-				this._log.log(this.getMessage(), args("msg", msg, "result", this.conditionResultOnFailure));
-				throw new ConditionError(this.testId, this.getMessage() + ": " + msg);
+			if (this.errorsLogged > ERROR_LIMIT) {
+				this.abortForLoggingLimit("This condition has logged over " + ERROR_LIMIT + " errors and has been aborted.");
 			}
 			return false;
 		}
-		if (this.logged >= logSoftLimit) {
+		if (this.logged >= LOG_SOFT_LIMIT) {
 			if (!this.loggedSoftLimitMsg) {
-				this._log.log(
+				this.eventLog.log(
 					this.getMessage(),
-					"This condition has logged over " + logSoftLimit + " log entries. Further entries will be suppressed.",
+					"This condition has logged over " + LOG_SOFT_LIMIT + " log entries. Further entries will be suppressed.",
 				);
 				this.loggedSoftLimitMsg = true;
 			}
-			if (this.logged >= logHardLimit) {
-				const msg = "This condition attempted to log over " + logHardLimit + " log entries and has been aborted.";
-				this._log.log(this.getMessage(), args("msg", msg, "result", this.conditionResultOnFailure));
-				throw new ConditionError(this.testId, this.getMessage() + ": " + msg);
+			if (this.logged >= LOG_HARD_LIMIT) {
+				this.abortForLoggingLimit(
+					"This condition attempted to log over " + LOG_HARD_LIMIT + " log entries and has been aborted.",
+				);
 			}
 			return true;
 		}
 		return false;
 	}
 
-	private withRequirements(input: LogArgs): LogArgs {
-		const out: LogArgs = { ...input };
-		if (this.requirements.size > 0 && !("requirements" in out)) {
-			out["requirements"] = [...this.requirements];
-		}
-		return out;
+	private abortForLoggingLimit(msg: string): never {
+		this.eventLog.log(this.getMessage(), { msg, result: this.conditionResultOnFailure });
+		throw new ConditionError(this.testId, this.getMessage() + ": " + msg);
 	}
 
 	/**
 	 * log(msg) / log(map) / log(msg, map)
 	 */
 	protected log(msgOrMap: string | LogArgs, map?: LogArgs): void {
-		let out: LogArgs;
-		if (typeof msgOrMap === "string") {
-			out = this.withRequirements({ ...(map ?? {}), msg: msgOrMap });
-		} else {
-			out = this.withRequirements(msgOrMap);
+		const out: LogArgs = toLogArgs(msgOrMap, map);
+		if (this.requirements.size > 0 && !("requirements" in out)) {
+			out["requirements"] = [...this.requirements];
 		}
-		const result = "result" in out && out["result"] != null ? String(out["result"]) : null;
-		if (this.reachedLoggingLimits(result)) {
+		if (this.reachedLoggingLimits(out["result"] == null ? null : String(out["result"]))) {
 			return;
 		}
-		this._log.log(this.getMessage(), out);
+		this.eventLog.log(this.getMessage(), out);
 	}
 
 	/**
 	 * logSuccess(msg) / logSuccess(map) / logSuccess(msg, map)
 	 */
 	protected logSuccess(msgOrMap: string | LogArgs, map?: LogArgs): void {
-		if (typeof msgOrMap === "string") {
-			this.log({ ...(map ?? {}), msg: msgOrMap, result: ConditionResult.SUCCESS });
-		} else {
-			this.log({ ...msgOrMap, result: ConditionResult.SUCCESS });
-		}
+		this.log({ ...toLogArgs(msgOrMap, map), result: ConditionResult.SUCCESS });
 	}
 
 	/**
@@ -387,11 +278,7 @@ export abstract class AbstractCondition implements Condition {
 	 * failed.
 	 */
 	protected logFailure(msgOrMap: string | LogArgs, map?: LogArgs): void {
-		if (typeof msgOrMap === "string") {
-			this.log({ ...(map ?? {}), msg: msgOrMap, result: this.conditionResultOnFailure });
-		} else {
-			this.log({ ...msgOrMap, result: this.conditionResultOnFailure });
-		}
+		this.log({ ...toLogArgs(msgOrMap, map), result: this.conditionResultOnFailure });
 	}
 
 	/*
@@ -399,8 +286,8 @@ export abstract class AbstractCondition implements Condition {
 	 */
 
 	/** Return a ConditionError for failures in the Pre/Post Environment checks (already logged) */
-	private alreadyLoggedPrePostError(message: string, cause?: unknown): ConditionError {
-		return new ConditionError(this.testId, this.getMessage() + ": " + message, { cause, isPreOrPostError: true });
+	private alreadyLoggedPrePostError(message: string): ConditionError {
+		return new ConditionError(this.testId, this.getMessage() + ": " + message, { isPreOrPostError: true });
 	}
 
 	/**
@@ -419,22 +306,19 @@ export abstract class AbstractCondition implements Condition {
 	protected error(cause: Error): ConditionError;
 	protected error(cause: Error, map: LogArgs): ConditionError;
 	protected error(a: string | Error, b?: unknown, c?: LogArgs): ConditionError {
-		if (typeof a === "string") {
-			if (b === undefined) {
-				this.logFailure(a);
-				return new ConditionError(this.testId, this.getMessage() + ": " + a);
-			}
-			if (isPlainArgs(b) && c === undefined) {
-				this.logFailure(a, b as LogArgs);
-				return new ConditionError(this.testId, this.getMessage() + ": " + a);
-			}
-			// b is a cause
-			this.logFailure(a, ex(b, c ?? {}));
-			return new ConditionError(this.testId, this.getMessage() + ": " + a, { cause: b });
+		if (typeof a !== "string") {
+			// a is a cause
+			this.logFailure(a.message, ex(a, (b as LogArgs | undefined) ?? {}));
+			return new ConditionError(this.testId, this.getMessage(), { cause: a });
 		}
-		// a is a cause
-		this.logFailure(a.message, ex(a, (b as LogArgs | undefined) ?? {}));
-		return new ConditionError(this.testId, this.getMessage(), { cause: a });
+		const message = this.getMessage() + ": " + a;
+		if (b === undefined || (isPlainArgs(b) && c === undefined)) {
+			this.logFailure(a, b);
+			return new ConditionError(this.testId, message);
+		}
+		// b is a cause
+		this.logFailure(a, ex(b, c ?? {}));
+		return new ConditionError(this.testId, message, { cause: b });
 	}
 
 	/** Get the list of requirements that this test would fulfill if it passed */
@@ -444,10 +328,11 @@ export abstract class AbstractCondition implements Condition {
 
 	protected createBrowserInteractionPlaceholder(msg?: string): string {
 		const placeholder = RandomStringUtils.nextAlphanumeric(10);
+		const entry = { upload: placeholder, result: ConditionResult.REVIEW };
 		if (msg !== undefined) {
-			this.log(msg, args("upload", placeholder, "result", ConditionResult.REVIEW));
+			this.log(msg, entry);
 		} else {
-			this.log(args("upload", placeholder, "result", ConditionResult.REVIEW));
+			this.log(entry);
 		}
 		return placeholder;
 	}
@@ -470,15 +355,21 @@ export abstract class AbstractCondition implements Condition {
 	/**
 	 * Create an HTTP client for use in calling outbound to other services (Java: createRestTemplate(env)).
 	 * All requests/responses made through it are logged; redirects are not followed; no status is an error.
+	 * `interceptor` wraps the network call (Java: an extra ClientHttpRequestInterceptor after the logging one).
 	 */
-	protected createHttpClient(env: Environment, restrictAllowedTLSVersions = true): HttpClient {
+	protected createHttpClient(
+		env: Environment,
+		restrictAllowedTLSVersions = true,
+		interceptor?: HttpInterceptor,
+	): HttpClient {
 		return new HttpClient({
 			source: this.getMessage(),
-			log: this._log,
+			log: this.eventLog,
 			lockManager: this.lockManager,
 			mutualTls: this.useMtlsForHttpRequests() ? env.getObject("mutual_tls_authentication") : null,
 			restrictAllowedTLSVersions,
 			timeoutSeconds: this.getHttpClientTimeoutSeconds(),
+			interceptor,
 		});
 	}
 
@@ -488,16 +379,8 @@ export abstract class AbstractCondition implements Condition {
 	 */
 	protected async createRestTemplateWithCache(env: Environment): Promise<HttpClient> {
 		const { CachingHttpInterceptor } = await import("../condition/client/CachingHttpInterceptor.ts");
-		const interceptor = new CachingHttpInterceptor(env);
-		return new HttpClient({
-			source: this.getMessage(),
-			log: this._log,
-			lockManager: this.lockManager,
-			mutualTls: this.useMtlsForHttpRequests() ? env.getObject("mutual_tls_authentication") : null,
-			restrictAllowedTLSVersions: true,
-			timeoutSeconds: this.getHttpClientTimeoutSeconds(),
-			interceptor: (req, exec) => interceptor.intercept(req, exec),
-		});
+		const cache = new CachingHttpInterceptor(env);
+		return this.createHttpClient(env, true, (req, exec) => cache.intercept(req, exec));
 	}
 
 	/** Alias to keep ported code close to the Java (createRestTemplate(env)) */
@@ -506,12 +389,12 @@ export abstract class AbstractCondition implements Condition {
 	}
 
 	protected convertResponseForEnvironment(endpointName: string, response: HttpResponse): JsonObject {
-		const responseInfo: JsonObject = {};
-		responseInfo["status"] = response.status;
-		responseInfo["endpoint_name"] = endpointName; // for use in further logging
-		responseInfo["headers"] = mapToJsonObject(response.headers, true);
-		responseInfo["body"] = response.body;
-		return responseInfo;
+		return {
+			status: response.status,
+			endpoint_name: endpointName, // for use in further logging
+			headers: mapToJsonObject(response.headers, true),
+			body: response.body,
+		};
 	}
 
 	protected convertJsonResponseForEnvironment(
@@ -531,27 +414,30 @@ export abstract class AbstractCondition implements Condition {
 		try {
 			jsonRoot = parseJson(jsonString);
 		} catch (e) {
-			if (e instanceof JsonParseException) {
-				if (allowParseFailure) {
-					return responseInfo;
-				}
-				throw this.error(
-					"Response from " + endpointName + " endpoint does not appear to be JSON.",
-					e,
-					args("response", jsonString),
-				);
+			if (!(e instanceof JsonParseException)) {
+				throw e;
 			}
-			throw e;
-		}
-		if (jsonRoot == null || !(isJsonObject(jsonRoot) || isJsonArray(jsonRoot))) {
 			if (allowParseFailure) {
 				return responseInfo;
 			}
-			throw this.error(endpointName + " endpoint did not return a JSON object.", args("response", jsonString));
+			throw this.error("Response from " + endpointName + " endpoint does not appear to be JSON.", e, {
+				response: jsonString,
+			});
+		}
+		if (!isJsonObject(jsonRoot) && !isJsonArray(jsonRoot)) {
+			if (allowParseFailure) {
+				return responseInfo;
+			}
+			throw this.error(endpointName + " endpoint did not return a JSON object.", { response: jsonString });
 		}
 		responseInfo["body_json"] = jsonRoot;
 		return responseInfo;
 	}
+}
+
+/** log(msg, map) / log(map) arguments as one map (msg after the map's own keys, as Java's put order) */
+function toLogArgs(msgOrMap: string | LogArgs, map?: LogArgs): LogArgs {
+	return typeof msgOrMap === "string" ? { ...map, msg: msgOrMap } : { ...msgOrMap };
 }
 
 function isPlainArgs(v: unknown): v is LogArgs {

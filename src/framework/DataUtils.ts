@@ -1,5 +1,5 @@
 import { ConditionResult } from "./Condition.ts";
-import type { JsonObject, JsonValue } from "./json.ts";
+import type { JsonObject } from "./json.ts";
 
 /**
  * Port of testmodule/DataUtils.java (static helpers rather than a mixin interface).
@@ -36,41 +36,35 @@ export function mapToJsonObject(
 	headers: Headers | Record<string, string | string[] | undefined> | Iterable<[string, string]>,
 	lowercase: boolean,
 ): JsonObject {
-	const o: JsonObject = {};
 	const multi = new Map<string, string[]>();
-	let entries: Iterable<[string, string | string[] | undefined]>;
-	if (headers instanceof Headers) {
-		const list: [string, string][] = [];
-		headers.forEach((value, key) => list.push([key, value]));
-		const setCookie = headers.getSetCookie();
-		if (setCookie.length > 1) {
-			// Headers joins duplicate set-cookie values; restore them as individual values
-			const filtered = list.filter(([k]) => k.toLowerCase() !== "set-cookie");
-			for (const c of setCookie) {
-				filtered.push(["set-cookie", c]);
-			}
-			entries = filtered;
-		} else {
-			entries = list;
-		}
-	} else if (Symbol.iterator in headers) {
-		entries = headers as Iterable<[string, string]>;
-	} else {
-		entries = Object.entries(headers);
-	}
-	for (const [rawKey, value] of entries) {
+	for (const [rawKey, value] of headerEntries(headers)) {
 		if (value === undefined) {
 			continue;
 		}
 		const key = lowercase ? rawKey.toLowerCase() : rawKey;
-		const values = Array.isArray(value) ? value : [value];
-		const existing = multi.get(key) ?? [];
-		multi.set(key, existing.concat(values));
+		multi.set(key, (multi.get(key) ?? []).concat(value));
 	}
+	const o: JsonObject = {};
 	for (const [key, values] of multi) {
 		o[key] = values.length > 1 ? values : values[0];
 	}
 	return o;
+}
+
+function headerEntries(
+	headers: Headers | Record<string, string | string[] | undefined> | Iterable<[string, string]>,
+): Iterable<[string, string | string[] | undefined]> {
+	if (headers instanceof Headers) {
+		const list: [string, string][] = [];
+		headers.forEach((value, key) => list.push([key, value]));
+		const setCookie = headers.getSetCookie();
+		if (setCookie.length <= 1) {
+			return list;
+		}
+		// Headers joins duplicate set-cookie values; restore them as individual values (after the other headers)
+		return [...list.filter(([k]) => k !== "set-cookie"), ...setCookie.map((c): [string, string] => ["set-cookie", c])];
+	}
+	return Symbol.iterator in headers ? (headers as Iterable<[string, string]>) : Object.entries(headers);
 }
 
 function stackOf(e: Error): string[] {
@@ -112,8 +106,7 @@ export function ex(exception: unknown, input: LogArgs = {}): LogArgs {
  */
 export function headersFromJson(headerJson: JsonObject | null | undefined, headers: Headers = new Headers()): Headers {
 	if (headerJson != null) {
-		for (const header of Object.keys(headerJson)) {
-			const v: JsonValue = headerJson[header];
+		for (const [header, v] of Object.entries(headerJson)) {
 			if (Array.isArray(v)) {
 				headers.delete(header);
 				for (const x of v) {

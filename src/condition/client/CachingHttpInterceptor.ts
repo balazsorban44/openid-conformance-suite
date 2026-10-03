@@ -1,13 +1,15 @@
-import type { Environment, HttpResponse } from "../../framework/index.ts";
+import { decodeBody, type Environment, type HttpResponse } from "../../framework/index.ts";
 import { Entry, ExternalEndpointCache } from "./ExternalEndpointCache.ts";
 
 /**
  * Port of logging/CachedHttpResponseMarker.java: implemented by synthesized responses that replay a
  * previously cached response, so the HTTP logging can label the resulting log entry as a cache hit
  * rather than emitting a separate one.
+ *
+ * Port note: the marker is HttpResponse's optional `cacheAgeSeconds` field, which HttpClient checks.
  */
 export interface CachedHttpResponseMarker {
-	getCacheAgeSeconds(): number;
+	readonly cacheAgeSeconds: number;
 }
 
 /** The parts of Spring's HttpRequest that the interceptor looks at (method, URI and headers) */
@@ -164,10 +166,7 @@ class ReplayedClientHttpResponse implements HttpResponse {
 	}
 
 	get body(): string | null {
-		if (this.entry.body.byteLength === 0) {
-			return null;
-		}
-		return new TextDecoder("utf-8", { fatal: false }).decode(this.entry.body);
+		return decodeBody(this.entry.body);
 	}
 }
 
@@ -177,7 +176,10 @@ class ReplayedClientHttpResponse implements HttpResponse {
  *  {@link net.openid.conformance.logging.LoggingRequestInterceptor} to
  *  relabel its log entry as "Using cached HTTP response". */
 export class CachedClientHttpResponse extends ReplayedClientHttpResponse implements CachedHttpResponseMarker {
-	getCacheAgeSeconds(): number {
-		return this.entry.ageSeconds();
+	readonly cacheAgeSeconds: number;
+
+	constructor(entry: Entry, url: string) {
+		super(entry, url);
+		this.cacheAgeSeconds = entry.ageSeconds();
 	}
 }
