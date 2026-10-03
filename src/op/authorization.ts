@@ -1019,3 +1019,25 @@ export function addUserInfoEssentialNameClaimToAuthorizationEndpointRequest(
 		requirements,
 	);
 }
+
+/**
+ * The OP answered a prompt=none request for a user who is not logged in with one of the errors that say a user
+ * interface is needed (https://openid.net/specs/openid-connect-core-1_0.html#AuthError).
+ *
+ * upstream: condition/client/CheckErrorFromAuthorizationEndpointIsOneThatRequiredAUserInterface.java
+ */
+export function checkErrorFromAuthorizationEndpointIsOneThatRequiredAUserInterface(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckErrorFromAuthorizationEndpointIsOneThatRequiredAUserInterface", ...requirements);
+	const permitted = ["interaction_required", "login_required", "account_selection_required", "consent_required"];
+	const error = str(response.params, "error");
+	if (!error) {
+		c.failure("Expected 'error' field not found");
+	}
+	if (!permitted.includes(error)) {
+		c.failure("'error' field has an unexpected value", { permitted, actual: error });
+	}
+	c.success("Authorization endpoint returned one of the permitted errors", { permitted, actual: error });
+}

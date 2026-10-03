@@ -360,7 +360,7 @@ export function validateIdTokenFromTokenResponseEncryption(
 }
 
 /** upstream: condition/client/AbstractVerifyJweEncryption.java; true when encrypted to one of the client's keys */
-function verifyJweEncryption(c: Condition, token: string, jwks: unknown, tokenName: string): boolean {
+export function verifyJweEncryption(c: Condition, token: string, jwks: unknown, tokenName: string): boolean {
 	try {
 		const jwt = JWTUtil.parseJWT(token);
 		if (jwt.type !== "encrypted") {

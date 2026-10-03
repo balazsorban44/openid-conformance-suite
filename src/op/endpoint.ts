@@ -143,3 +143,8 @@ export function validateErrorUri(
 	}
 	c.success(responseName + " returned valid 'error_uri' field", { error_uri: errorUri });
 }
+
+/** upstream: condition/client/EnsureHttpStatusCodeIs400.java */
+export function ensureHttpStatusCodeIs400(res: EndpointResponse, ...requirements: string[]): void {
+	ensureHttpStatusCode("EnsureHttpStatusCodeIs400", res, 400, ...requirements);
+}

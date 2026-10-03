@@ -7,6 +7,7 @@ import { endpointResponse, HttpError, jsonBody, request, type EndpointResponse }
 import type { TestConfig } from "../suite/config.ts";
 import type { Op } from "./op.ts";
 import type { Client } from "./registration.ts";
+import { checkContentType } from "./endpoint.ts";
 
 /** The OP's metadata (upstream env "server"): the discovery document or the configured `server` object */
 export interface ServerMetadata {
@@ -341,4 +342,160 @@ export function scopesNotSupportedReason(op: Pick<Op, "metadata" | "variant">, c
 	return supported
 		? null
 		: "scopes_supported from the discovery endpoint indicates the server doesn't support the scopes required for this test; so the test has been skipped";
+}
+
+/** upstream: condition/client/EnsureDiscoveryEndpointResponseStatusCodeIs200.java */
+export function ensureDiscoveryEndpointResponseStatusCodeIs200(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureDiscoveryEndpointResponseStatusCodeIs200", ...requirements);
+	if (response.status !== 200) {
+		c.failure("discovery_endpoint_response returned an unexpected status code", { http_status: response.status });
+	}
+	c.success("discovery_endpoint_response returned http 200 as expected", { http_status: response.status });
+}
+
+/** upstream: condition/client/CheckDiscoveryEndpointReturnedJsonContentType.java */
+export function checkDiscoveryEndpointReturnedJsonContentType(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	checkContentType(
+		"CheckDiscoveryEndpointReturnedJsonContentType",
+		"discovery_endpoint_response",
+		response.headers["content-type"],
+		"application/json",
+		...requirements,
+	);
+}
+
+/**
+ * The metadata value `key` is a URL with the https scheme.
+ *
+ * upstream: condition/client/AbstractJsonUriIsValidAndHttps.java (validate)
+ */
+function validateJsonUriIsHttps(c: Condition, metadata: ServerMetadata, key: string): void {
+	const value = metadata[key];
+	if (value == null) {
+		c.failure(key + ": URL not found");
+	}
+	if (typeof value !== "string") {
+		c.failure(key + " is expected to be a string containing a URL", { actual: value });
+	}
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch (e) {
+		c.failure(key + " is not a valid URL", { actual: value, parse_error: (e as Error).message });
+	}
+	// Java's URL.getProtocol() has no trailing colon
+	const protocol = url.protocol.replace(/:$/, "");
+	if (protocol !== "https") {
+		c.failure(key + " must use the https scheme", { required: "https", actual_scheme: protocol, actual: value });
+	}
+	c.success(key, { actual: value });
+}
+
+/**
+ * Every `*_endpoint` in the metadata uses https (upstream's equivalent of the python suite's
+ * VerifyOPEndpointsUseHTTPS); one entry per endpoint, stopping at the first that does not.
+ *
+ * upstream: condition/client/CheckDiscEndpointAllEndpointsAreHttps.java
+ */
+export function checkDiscEndpointAllEndpointsAreHttps(metadata: ServerMetadata, ...requirements: string[]): void {
+	const c: Condition = condition("CheckDiscEndpointAllEndpointsAreHttps", ...requirements);
+	for (const key of Object.keys(metadata)) {
+		if (key.endsWith("_endpoint")) {
+			validateJsonUriIsHttps(c, metadata, key);
+		}
+	}
+}
+
+/** upstream: condition/client/CheckDiscEndSessionEndpoint.java */
+export function checkDiscEndSessionEndpoint(metadata: ServerMetadata, ...requirements: string[]): void {
+	validateJsonUriIsHttps(condition("CheckDiscEndSessionEndpoint", ...requirements), metadata, "end_session_endpoint");
+}
+
+/** upstream: condition/client/CheckDiscCheckSessionIframe.java */
+export function checkDiscCheckSessionIframe(metadata: ServerMetadata, ...requirements: string[]): void {
+	validateJsonUriIsHttps(condition("CheckDiscCheckSessionIframe", ...requirements), metadata, "check_session_iframe");
+}
+
+/** upstream: condition/client/AbstractValidateJsonBoolean.java */
+function validateJsonBoolean(
+	c: Condition,
+	metadata: ServerMetadata,
+	key: string,
+	defaultValue: boolean,
+	requiredValue: boolean,
+): void {
+	const value = metadata[key];
+	let error: string | null = null;
+	if (value === undefined) {
+		if (defaultValue !== requiredValue) {
+			error = `'${key}' should be '${requiredValue}', but is absent and the default value is '${defaultValue}'.`;
+		}
+	} else if (typeof value !== "boolean") {
+		error = key + ": incorrect type, must be a boolean.";
+	} else if (value !== requiredValue) {
+		error = key + " must be: " + requiredValue;
+	}
+	if (error != null) {
+		c.failure(error, { discovery_metadata_key: key, expected: requiredValue, actual: value ?? null });
+	}
+	c.success(key + " has correct value", { [key]: value ?? null });
+}
+
+/** upstream: condition/client/CheckDiscEndpointBackchannelLogoutSupported.java */
+export function checkDiscEndpointBackchannelLogoutSupported(metadata: ServerMetadata, ...requirements: string[]): void {
+	validateJsonBoolean(
+		condition("CheckDiscEndpointBackchannelLogoutSupported", ...requirements),
+		metadata,
+		"backchannel_logout_supported",
+		false,
+		true,
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointBackchannelLogoutSessionSupported.java */
+export function checkDiscEndpointBackchannelLogoutSessionSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonBoolean(
+		condition("CheckDiscEndpointBackchannelLogoutSessionSupported", ...requirements),
+		metadata,
+		"backchannel_logout_session_supported",
+		false,
+		true,
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointFrontchannelLogoutSupported.java */
+export function checkDiscEndpointFrontchannelLogoutSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonBoolean(
+		condition("CheckDiscEndpointFrontchannelLogoutSupported", ...requirements),
+		metadata,
+		"frontchannel_logout_supported",
+		false,
+		true,
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointFrontchannelLogoutSessionSupported.java */
+export function checkDiscEndpointFrontchannelLogoutSessionSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonBoolean(
+		condition("CheckDiscEndpointFrontchannelLogoutSessionSupported", ...requirements),
+		metadata,
+		"frontchannel_logout_session_supported",
+		false,
+		true,
+	);
 }

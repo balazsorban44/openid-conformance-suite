@@ -4,7 +4,7 @@
  */
 import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
-import { endpointResponse, HttpError, request, type EndpointResponse } from "../suite/http.ts";
+import { endpointResponse, HttpError, jsonBody, request, type EndpointResponse } from "../suite/http.ts";
 import { generateRsaJwk, privateJwks, publicJwks, type Jwks } from "../suite/jose.ts";
 import { JWKUtil } from "../util/JWKUtil.ts";
 import { ParseException } from "../util/nimbus/errors.ts";
@@ -305,6 +305,8 @@ export async function registerClient(opts: {
 	responseType: string;
 	clientAuthType: string;
 	redirectUri: string;
+	/** What the module adds to the registration request (upstream createDynamicClientRegistrationRequest overrides) */
+	customize?: (registrationRequest: Record<string, unknown>) => void;
 }): Promise<RegisteredClient> {
 	const original = storeOriginalClientConfiguration(opts.config, opts.configKey);
 	const clientName = extractClientNameFromStoredConfig(original);
@@ -319,6 +321,7 @@ export async function registerClient(opts: {
 		redirectUri: opts.redirectUri,
 		publicJwks: keys.publicJwks,
 	});
+	opts.customize?.(registrationRequest);
 
 	const response = await callDynamicRegistrationEndpoint(
 		opts.metadata,
@@ -529,4 +532,149 @@ export function setScopeInClientConfigurationToOpenIdPhone(client: Client): void
 /** upstream: condition/client/SetScopeInClientConfigurationToOpenIdProfile.java */
 export function setScopeInClientConfigurationToOpenIdProfile(client: Client): void {
 	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdProfile", client, "openid profile");
+}
+
+/**
+ * Reads the client's registration from the client configuration endpoint (registration_client_uri, with the
+ * registration_access_token); any status is a response, the body must be JSON.
+ *
+ * upstream: condition/client/CallClientConfigurationEndpoint.java
+ */
+export async function callClientConfigurationEndpoint(
+	client: Client,
+	...requirements: string[]
+): Promise<EndpointResponse> {
+	const c: Condition = condition("CallClientConfigurationEndpoint", ...requirements);
+	const accessToken = client.registration_access_token;
+	if (!accessToken) {
+		c.failure("Couldn't find registration_access_token in client object.");
+	}
+	const uri = client.registration_client_uri;
+	if (!uri) {
+		c.failure("Couldn't find registration_client_uri in client object.");
+	}
+	let res;
+	try {
+		res = await request(c.name, {
+			url: uri,
+			method: "GET",
+			headers: { Accept: "application/json", "Accept-Charset": "utf-8", Authorization: "Bearer " + accessToken },
+		});
+	} catch (e) {
+		if (e instanceof HttpError) {
+			const cause = e.cause instanceof Error ? e.cause.message : e.message;
+			c.failureFrom("Call to registration_client_uri " + uri + " failed - " + cause, e);
+		}
+		throw e;
+	}
+	// AbstractCondition.convertJsonResponseForEnvironment without allowParseFailure
+	const response = endpointResponse("registration_client_uri", res);
+	if (!res.body) {
+		c.failure("Empty response from the registration_client_uri endpoint");
+	}
+	const parsed = jsonBody(res);
+	if (!parsed.ok) {
+		c.failureFrom(
+			"Response from registration_client_uri endpoint does not appear to be JSON.",
+			new SyntaxError(parsed.error),
+			{
+				response: res.body,
+			},
+		);
+	}
+	if (response.body_json === undefined) {
+		c.failure("registration_client_uri endpoint did not return a JSON object.", { response: res.body });
+	}
+	c.success("Called registration_client_uri", { ...response });
+	return response;
+}
+
+/** upstream: condition/client/CheckRegistrationClientEndpointContentTypeHttpStatus200.java */
+export function checkRegistrationClientEndpointContentTypeHttpStatus200(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckRegistrationClientEndpointContentTypeHttpStatus200", ...requirements);
+	const expected = 200;
+	if (response.status == null) {
+		c.failure("Http status can not be null.");
+	}
+	if (response.status !== expected) {
+		c.failure("Invalid http status", { actual: response.status, expected });
+	}
+	c.success("registration_client_endpoint_response http status code was " + expected);
+}
+
+/** upstream: condition/client/CheckRegistrationClientEndpointContentType.java */
+export function checkRegistrationClientEndpointContentType(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckRegistrationClientEndpointContentType", ...requirements);
+	const contentType = response.headers["content-type"];
+	if (typeof contentType !== "string" || !contentType) {
+		c.failure("Couldn't find content-type header in registration_client_endpoint_response");
+	}
+	const expected = "application/json";
+	if (contentType.split(";")[0].trim() !== expected) {
+		c.failure("Invalid content-type header in registration_client_endpoint_response", {
+			expected,
+			actual: contentType,
+		});
+	}
+	c.success("registration_client_endpoint_response Content-Type: header is " + expected);
+}
+
+/**
+ * upstream: condition/client/CheckErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata.java
+ * (AbstractCheckErrorFromDynamicRegistrationEndpoint)
+ */
+export function checkErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata", ...requirements);
+	const permitted = ["invalid_client_metadata"];
+	const error = (response.body_json as Record<string, unknown> | undefined)?.["error"];
+	if (typeof error !== "string" || !error) {
+		c.failure("'error' field not found in response from dynamic registration endpoint");
+	}
+	if (!permitted.includes(error)) {
+		c.failure("'error' field has unexpected value", { permitted, actual: error });
+	}
+	c.success("Dynamic registration endpoint returned 'error'", { permitted, error });
+}
+
+/**
+ * A JWK set holding the client secret as a symmetric signing key (`client_secret_jwt_alg`, default HS256), for
+ * clients that have no keys of their own.
+ *
+ * upstream: condition/client/GenerateJWKsFromClientSecret.java
+ */
+export function generateJWKsFromClientSecret(client: Client): Jwks {
+	const c: Condition = condition("GenerateJWKsFromClientSecret");
+	const secret = client.client_secret;
+	if (!secret) {
+		c.failure("Couldn't find client secret");
+	}
+	const configuredAlg = client["client_secret_jwt_alg"];
+	const alg = typeof configuredAlg === "string" && configuredAlg ? configuredAlg : "HS256";
+	const bytes = Buffer.from(secret, "utf8");
+	// the secret might be too short to sign with (issue #1196)
+	const minSize = alg.toUpperCase() === "HS256" ? 32 : alg.toUpperCase() === "HS384" ? 48 : 64;
+	if (bytes.length < minSize) {
+		c.failure(
+			"The client secret configured in the test plan is too short to sign a JWT with. The " +
+				alg.toUpperCase() +
+				" requires a secret with at least " +
+				minSize +
+				" bytes and the provided secret is " +
+				bytes.length +
+				" bytes.",
+		);
+	}
+	// new OctetSequenceKey.Builder(secret).algorithm(alg).keyUse(KeyUse.SIGNATURE).build(): no key id
+	const jwks = privateJwks({ keys: [{ kty: "oct", use: "sig", alg, k: bytes.toString("base64url") }] });
+	c.success("Generated JWK Set from symmetric key", { client_jwks: jwks });
+	return jwks;
 }

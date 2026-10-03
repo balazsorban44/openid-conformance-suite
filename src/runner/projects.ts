@@ -38,6 +38,41 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 			"oidcc-id-token-hint",
 		],
 	},
+	"oidcc-rp-initiated-logout-certification-test-plan": {
+		spec: "tests/op/rp-initiated-logout.spec.ts",
+		modules: [
+			"oidcc-rp-initiated-logout-discovery-endpoint-verification",
+			"oidcc-rp-initiated-logout",
+			"oidcc-rp-initiated-logout-bad-post-logout-redirect-uri",
+			"oidcc-rp-initiated-logout-modified-id-token-hint",
+			"oidcc-rp-initiated-logout-no-id-token-hint",
+			"oidcc-rp-initiated-logout-no-params",
+			"oidcc-rp-initiated-logout-no-post-logout-redirect-uri",
+			"oidcc-rp-initiated-logout-no-state",
+			"oidcc-rp-initiated-logout-only-state",
+			"oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri",
+			"oidcc-rp-initiated-logout-bad-id-token-hint",
+		],
+	},
+	"oidcc-backchannel-rp-initiated-logout-certification-test-plan": {
+		spec: "tests/op/backchannel-logout.spec.ts",
+		modules: ["oidcc-backchannel-logout-discovery-endpoint-verification", "oidcc-backchannel-rp-initiated-logout"],
+	},
+	"oidcc-frontchannel-rp-initiated-logout-certification-test-plan": {
+		spec: "tests/op/frontchannel-logout.spec.ts",
+		modules: ["oidcc-frontchannel-logout-discovery-endpoint-verification", "oidcc-frontchannel-rp-initiated-logout"],
+	},
+	"oidcc-session-management-certification-test-plan": {
+		spec: "tests/op/session-management.spec.ts",
+		modules: [
+			"oidcc-session-management-discovery-endpoint-verification",
+			"oidcc-session-management-rp-initiated-logout",
+		],
+	},
+	"oidcc-3rdparty-init-login-certification-test-plan": {
+		spec: "tests/op/3rdparty-init-login.spec.ts",
+		modules: ["oidcc-3rd_party-init-login", "oidcc-3rd_party-init-login-nohttps"],
+	},
 };
 
 export interface ConformanceProject {

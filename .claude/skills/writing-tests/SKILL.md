@@ -32,9 +32,14 @@ src/op/               helpers for testing an OpenID Provider, one file per conce
   id-token.ts         PerformStandardIdTokenChecks and the per-module id_token checks
   userinfo.ts         callProtectedResource()
   endpoint.ts         checks shared by every endpoint response (status, content type, error fields)
+  logout.ts           RP-initiated / back-channel / front-channel logout: end_session request, post logout redirect,
+                      logout token and front-channel request checks, the first login of the logout modules
+  session.ts          session management: session_state, the suite's session check pages (check_session_iframe)
+  initiate-login.ts   third-party-initiated login: initiate_login_uri in the registration / client configuration
 src/rp/               (to come) the emulated OP for RP tests and its request checks
 tests/fixtures.ts     the `test` with the `op`, `client`, `client2`, `variant`, `plan` fixtures
-tests/op/*.spec.ts    one file per OP plan (basic.spec.ts so far)
+tests/op/*.spec.ts    one file per OP plan (basic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
+                      session-management, 3rdparty-init-login so far)
 tests/plan.spec.ts    the old framework, for the modules not rewritten yet (see "Transition")
 ```
 
@@ -139,7 +144,15 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 null (client_jwks), dynamic }`: registered (`registerClient`) or from the config, SetScopeInClientConfiguration,
   EnsureServerConfigurationSupports<auth type> (discovery only); a registered client is unregistered after the
   test in the block "Unregister dynamically registered client".
-- `variant: OpVariant`, `plan: { name, variant }` (option).
+- `configureClient(customizeRegistration?)`: the same client set up where the test calls it, for modules that add
+  to the dynamic registration request (upstream createDynamicClientRegistrationRequest overrides: the callback gets
+  the request after the OIDCC defaults, before it is sent) or run conditions before the client is configured
+  (upstream configureClient overrides, e.g. CreatePostLogoutRedirectUri: call them before it). Unregistered after the
+  test like `client`.
+- `conformance` (testName, log, config, server, browser) without discovery or keys, for modules whose own flow
+  fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`).
+- `variant: OpVariant`, `plan: { name, variant }` (option). A plan whose module lists fix different variants
+  (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list.
 - Worker scope: the config is loaded and `target` started once per worker, on a free port. Per test: a fresh log,
   a suite server on a free port (https with CONFORMANCE_TLS=1), the browser automation on Playwright's `context`.
 - After the test the fixture attaches `log.json`, `log.html`, `module-report.json`, `target-output.txt`,
@@ -222,7 +235,14 @@ export function validateIdTokenNonce(
   Complete" task waiting for `#submission_complete`, as upstream's configs do. `authorizeExpectingErrorPageOrRedirect`
   is the variant for requests the OP may answer with an error page (a REVIEW placeholder filled by
   `update-image-placeholder`).
-- `op.browser.visit(url, { method: "POST" })` drives any other front-channel URL (logout, 3rd-party login).
+- `op.browser.visit(url, { method: "POST" })` drives any other front-channel URL (logout, 3rd-party login). To
+  capture what the browser's trip causes, register the waits first and await them together:
+  `const [redirect] = await Promise.all([op.server.waitFor("post_logout_redirect", page), op.browser.visit(url)])`
+  (src/op/logout.ts: redirectToEndSessionEndpoint*, src/op/session.ts: checkSessionState). The `respond` handler of
+  `waitFor` runs between the logged incoming request and response, where upstream's handleHttp logs its messages.
+- Suite URLs the OP must call over https (backchannel_logout_uri, initiate_login_uri at oidc-provider) need
+  CONFORMANCE_TLS=1, which `openid-conformance ci` sets; the server then adds x-ssl-protocol / x-ssl-cipher to incoming
+  requests (EnsureIncomingTls*).
 
 ## Running
 
