@@ -54,11 +54,33 @@
 					"task": "process user choice, wait for redirect back",
 					"optional": true,
 					"match": "https://localhost:3000/session/end/confirm",
-					"commands": [["wait", "contains", "/test/*/post", 10]]
+					"commands": [["wait", "match", "/test/.*/post", 10]]
 				},
 				{
 					"task": "Verify Complete",
 					"match": "*/test/*/post*"
+				}
+			]
+		},
+		{
+			"comment": "the suite's own session check page: the check_session_iframe answer sends the browser to the session_result page",
+			"match": "*/session_verify*",
+			"tasks": [
+				{
+					"task": "Verify Complete",
+					"match": "*/session_result*",
+					"commands": [["wait", "xpath", "//h1", 10, "Result captured"]]
+				}
+			]
+		},
+		{
+			"comment": "the suite's own session check page: the check_session_iframe answer sends the browser to the session_result page",
+			"match": "*/second_session_verify*",
+			"tasks": [
+				{
+					"task": "Verify Complete",
+					"match": "*/second_session_result*",
+					"commands": [["wait", "xpath", "//h1", 10, "Result captured"]]
 				}
 			]
 		}

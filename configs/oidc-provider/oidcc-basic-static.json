@@ -60,7 +60,7 @@
 					"task": "process user choice, wait for redirect back",
 					"optional": true,
 					"match": "https://localhost:3000/session/end/confirm",
-					"commands": [["wait", "contains", "/test/*/post", 10]]
+					"commands": [["wait", "match", "/test/.*/post", 10]]
 				},
 				{
 					"task": "Verify Complete",
