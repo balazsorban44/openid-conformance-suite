@@ -8,8 +8,12 @@ import { block, condition, skipped, soft, type Condition } from "../suite/condit
 import type { ParsedJwt } from "../suite/jose.ts";
 import { escapeHtml } from "../suite/log.ts";
 import { htmlResponse, type IncomingRequest } from "../suite/server.ts";
-import { encodeQueryParam, toUriString } from "../util/UriComponentsBuilder.ts";
-import { RedirectURIValidationUtil } from "../util/validation/RedirectURIValidationUtil.ts";
+import {
+	encodeQueryParam,
+	toUriString,
+	requireHttpsIfWebAndResponseTypeNotCode,
+	dontAllowHttpIfNativeAndNotLocalhost,
+} from "../suite/uri.ts";
 import { calculateCHash, createIdToken } from "./id-token.ts";
 import type { EmulatedOp } from "./op.ts";
 import type { RpClient } from "./registration.ts";
@@ -301,13 +305,7 @@ export function ensureValidRedirectUriForAuthorizationEndpointRequest(
 		}
 		const applicationType = typeof client["application_type"] === "string" ? client["application_type"] : null;
 		// https is required if application_type is web and response_type is not code
-		if (
-			!RedirectURIValidationUtil.requireHttpsIfWebAndResponseTypeNotCode(
-				applicationType,
-				param(params, "response_type"),
-				actual,
-			)
-		) {
+		if (!requireHttpsIfWebAndResponseTypeNotCode(applicationType, param(params, "response_type"), actual)) {
 			c.failure(
 				"redirect_uri is one of the registered uris but uses http scheme which is not allowed when application_type is web and response type is not code",
 				{ actual, expected: redirectUris },
@@ -315,7 +313,7 @@ export function ensureValidRedirectUriForAuthorizationEndpointRequest(
 		}
 		let allowed: boolean;
 		try {
-			allowed = RedirectURIValidationUtil.dontAllowHttpIfNativeAndNotLocalhost(applicationType, actual);
+			allowed = dontAllowHttpIfNativeAndNotLocalhost(applicationType, actual);
 		} catch (e) {
 			c.failureFrom("Invalid redirect_uri syntax", e, { actual });
 		}

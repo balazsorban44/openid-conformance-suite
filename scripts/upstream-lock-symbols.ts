@@ -1,25 +1,24 @@
 #!/usr/bin/env node
 /**
- * Maps upstream Java files to the functions (and tests) that port them in the rewritten suite, and records the
- * mapping in upstream.lock.json under `symbols` (several Java files can map to one TS file, one Java file to one
- * symbol):
+ * Maps upstream Java files to the functions, classes and tests that port them, and records the mapping in
+ * upstream.lock.json under `symbols` (several Java files can map to one TS file, one Java file to one symbol):
  *
  *   "symbols": {
  *     "src/main/java/net/openid/conformance/condition/client/ValidateIdTokenNonce.java":
  *       { "blob": "...", "loc": 41, "ts": "src/op/id-token.ts", "symbol": "validateIdTokenNonce" }
  *   }
  *
- * The source of truth is the `upstream:` reference in the doc comment (or line comment) right before an exported
- * function, or before a `test("<module>: ...")` in a spec:
+ * The source of truth is the `upstream:` reference in the doc comment (or line comment) right before a function or
+ * class, or before a `test("<module>: ...")` in a spec:
  *
  *   /** upstream: condition/client/ValidateIdTokenNonce.java *\/
  *   export function validateIdTokenNonce(...)
  *
  *   /** ... upstream: sequence/client/PerformStandardIdTokenChecks.java with condition/client/A.java, B.java *\/
  *
- * (a bare `B.java` is in the directory of the reference before it). The blob is taken from the `files` entry of the
- * same Java file when it is pinned there (same upstream commit), else hashed from the upstream checkout
- * ($UPSTREAM or .upstream/, at the pinned commit).
+ * (a bare `B.java` is in the directory of the reference before it). The blob of a Java file already in the lock is
+ * kept (it is the one of the pinned commit; `sync-upstream --pin` moves them); a new one is hashed from the
+ * upstream checkout ($UPSTREAM or .upstream/, at the pinned commit).
  *
  *   node scripts/upstream-lock-symbols.ts           # report what would change
  *   node scripts/upstream-lock-symbols.ts --write   # update upstream.lock.json
@@ -33,7 +32,7 @@ const root = resolve(import.meta.dirname, "..");
 const lockPath = join(root, "upstream.lock.json");
 const upstreamDir = process.env["UPSTREAM"] ?? join(root, ".upstream");
 const JAVA_ROOT = "src/main/java/net/openid/conformance/";
-/** Where rewritten code lives (the old 1:1 ports under src/condition etc. are tracked in `files`) */
+/** Where ported code lives */
 const SCAN = ["src/suite", "src/op", "src/rp", "tests"];
 
 export interface SymbolEntry {
@@ -43,10 +42,9 @@ export interface SymbolEntry {
 	symbol: string;
 }
 
-interface LockFile {
+export interface LockFile {
 	upstream: { repo: string; commit: string; date: string };
-	files: Record<string, { java: string; blob: string; loc: number }>;
-	symbols?: Record<string, SymbolEntry>;
+	symbols: Record<string, SymbolEntry>;
 }
 
 /** The Java files named after "upstream:" in a comment ("A.java, B.java" share A's directory) */
@@ -68,15 +66,15 @@ export function javaReferences(comment: string): string[] {
 
 /**
  * [java path relative to the conformance package, symbol, primary] for every reference in a TS source; `primary`
- * when the function ports that file (the only file its comment names, or the first one followed by "with ..."),
- * rather than listing it among the conditions a group calls
+ * when the function or class ports that file (the only file its comment names, or the first one followed by
+ * "with ..."), rather than listing it among the conditions a group calls
  */
 export function referencesIn(source: string): [string, string, boolean][] {
 	const out: [string, string, boolean][] = [];
-	// a comment block (one /** ... */ or // lines) directly followed by a function (exported or a module-private
-	// helper that several exported checks share) or a test
+	// a comment block (one /** ... */ or // lines) directly followed by a function or class (exported or a
+	// module-private helper that several exported checks share) or a test
 	const re =
-		/((?:\/\*\*(?:[^*]|\*(?!\/))*\*\/|(?:[ \t]*\/\/[^\n]*\n)+))\s*(?:(?:export\s+)?(?:async\s+)?function\s+(\w+)|test(?:\.\w+)?\(\s*["'`]([\w.-]+):)/g;
+		/((?:\/\*\*(?:[^*]|\*(?!\/))*\*\/|(?:[ \t]*\/\/[^\n]*\n)+))\s*(?:(?:export\s+)?(?:async\s+)?(?:function|class)\s+(\w+)|test(?:\.\w+)?\(\s*["'`]([\w.-]+):)/g;
 	for (const m of source.matchAll(re)) {
 		const symbol = m[2] ?? m[3];
 		const refs = javaReferences(m[1]);
@@ -97,7 +95,7 @@ function walk(dir: string): string[] {
 }
 
 function blobOf(javaPath: string, lock: LockFile): { blob: string; loc: number } | null {
-	const pinned = Object.values(lock.files).find((f) => f.java === javaPath);
+	const pinned = lock.symbols[javaPath];
 	if (pinned) {
 		return { blob: pinned.blob, loc: pinned.loc };
 	}
@@ -118,6 +116,7 @@ function blobOf(javaPath: string, lock: LockFile): { blob: string; loc: number }
 
 function main(argv: string[]): number {
 	const lock = JSON.parse(readFileSync(lockPath, "utf8")) as LockFile;
+	lock.symbols ??= {};
 	const wanted: Record<string, SymbolEntry> = {};
 	const primary = new Set<string>();
 	const problems: string[] = [];
@@ -131,7 +130,7 @@ function main(argv: string[]): number {
 			}
 			const pin = blobOf(javaPath, lock);
 			if (!pin) {
-				problems.push(`${ts}#${symbol}: ${javaPath} is neither pinned in "files" nor in the upstream checkout`);
+				problems.push(`${ts}#${symbol}: ${javaPath} is neither in the lock nor in the upstream checkout`);
 				continue;
 			}
 			wanted[javaPath] = { ...pin, ts, symbol };
@@ -140,7 +139,7 @@ function main(argv: string[]): number {
 			}
 		}
 	}
-	const current = lock.symbols ?? {};
+	const current = lock.symbols;
 	const sorted = Object.fromEntries(Object.entries(wanted).sort(([a], [b]) => a.localeCompare(b)));
 	const changes = [
 		...Object.keys(sorted)

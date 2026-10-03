@@ -2,20 +2,21 @@
 /**
  * openid-conformance: run the OpenID Connect OP/RP conformance tests (TypeScript port of the OIDF suite).
  *
- *   openid-conformance list [--plans|--modules|--variants]
+ *   openid-conformance list [--modules|--variants]
  *   openid-conformance run --plan <name> --config <file> [--variant k=v]... [--module <glob>] [--tls] [--headed] [--report-dir <dir>] [-- <playwright args>]
  *   openid-conformance ci --project <name> [-- <playwright args>]
  *   openid-conformance projects [--json]
  *
- * `run` and `ci` execute Playwright with the matching CONFORMANCE_* environment; playwright.config.ts picks the spec
- * files (tests/op/*.spec.ts for ported modules, tests/plan.spec.ts for the rest).
+ * `run` and `ci` execute Playwright with the matching CONFORMANCE_* environment; playwright.config.ts picks the
+ * plan's spec file (`plans` in src/runner/projects.ts: tests/op/*.spec.ts, tests/rp/*.spec.ts).
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
-import { projects } from "../src/runner/projects.ts";
+import { list } from "../src/runner/list.ts";
+import { plans, projects } from "../src/runner/projects.ts";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -55,14 +56,11 @@ Examples:
 
 program
 	.command("list")
-	.description("list the test plans (default), modules or variant parameters")
-	.option("--plans", "the test plans and their user-selectable variants")
-	.option("--modules", "the test modules")
-	.option("--variants", "the variant parameters and their values")
-	.action(async (opts: { modules?: boolean; variants?: boolean }) => {
-		const { listRegistry } = await import("../src/runner/list.ts");
-		const what = opts.modules ? "modules" : opts.variants ? "variants" : "plans";
-		console.log(listRegistry(what).join("\n"));
+	.description("list the test plans (spec file, variant parameters, CI projects), their modules or the variants")
+	.option("--modules", "also each plan's test modules")
+	.option("--variants", "the variant parameters: the values the plans accept and the values the CI projects use")
+	.action((opts: { modules?: boolean; variants?: boolean }) => {
+		console.log(list(opts.variants ? "variants" : opts.modules ? "modules" : "plans").join("\n"));
 	});
 
 program
@@ -82,6 +80,9 @@ program
 	.option("--report-dir <dir>", "where results.json and summary.md are written")
 	.argument("[playwright...]", "extra Playwright arguments (after --)")
 	.action((extra: string[], opts: RunOptions) => {
+		if (!plans[opts.plan]) {
+			program.error(`unknown plan '${opts.plan}'; known: ${Object.keys(plans).join(", ")}`);
+		}
 		const configPath = resolve(process.cwd(), opts.config);
 		if (!existsSync(configPath)) {
 			program.error(`config not found: ${configPath}`);

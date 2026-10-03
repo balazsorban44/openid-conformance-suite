@@ -7,10 +7,12 @@ driven by [Playwright](https://playwright.dev) and built to run in GitHub Action
 Provider / OAuth 2.0 authorization server or at your Relying Party / client and get the same checks, the same
 log messages and the same spec references as the official suite, as a CI job with a readable summary.
 
+Every upstream test module is one Playwright test that reads like the test it is (`tests/op/*.spec.ts`,
+`tests/rp/*.spec.ts`); upstream's conditions are plain functions grouped by concern (`src/op`, `src/rp`).
+
 Currently ported: the **OpenID Connect Core** OP and RP plans (basic, config, dynamic client registration,
 RP-initiated / back-channel / front-channel logout, session management and 3rd-party-initiated login).
-FAPI and other families are not ported yet; the structure makes adding them a matter of porting more files
-(see [Maintaining](#maintaining)).
+FAPI and other families are not ported yet (see [Maintaining](#maintaining)).
 
 ## Test your OP in GitHub Actions
 
@@ -108,7 +110,7 @@ For RP plans the suite emulates an OP and your RP must be driven through it, onc
 }
 ```
 
-The runner calls `GET {startUrl}?issuer=<emulated OP url>&module=<test name>&variant=<json>&...` and your RP must
+The suite calls `GET {startUrl}?issuer=<emulated OP url>&module=<test name>&variant=<json>&...` and your RP must
 perform the login against that issuer and respond once it is done; see
 [`targets/openid-client-rp/README.md`](targets/openid-client-rp/README.md) for the exact contract and a reference
 implementation built on [`openid-client`](https://github.com/panva/openid-client).
@@ -120,7 +122,7 @@ npm i -g pnpm                                          # pnpm 12 (or the standal
 pnpm add -D @balazsorban44/openid-conformance-suite   # or: npm i -D @balazsorban44/openid-conformance-suite
 pnpm exec playwright install --with-deps chromium
 
-pnpm exec openid-conformance list                        # plans, their variants
+pnpm exec openid-conformance list [--modules]            # plans, their variants (and modules)
 pnpm exec openid-conformance run --plan oidcc-basic-certification-test-plan \
    --variant server_metadata=discovery --variant client_registration=static_client \
    --config ./conformance/my-op.json [--module 'oidcc-server*'] [--headed]
@@ -130,38 +132,35 @@ Node.js 24 or newer; no build step (native TypeScript).
 
 ## What is in the box
 
-|                                                  |                                                                                                                                |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/op/*.spec.ts`, `tests/fixtures.ts`        | the rewrite: one explicit Playwright test per upstream test module, and the `op`/`client`/`variant` fixtures                   |
-| `src/suite/`                                     | the engine: event log, checks (`condition`, `soft`, `block`), HTTP client and server, scripted browser, config, target, report |
-| `src/op/`                                        | the upstream client-side conditions as functions (discovery, registration, authorization, token, id_token, userinfo, jwks)     |
-| `src/condition/`, `src/sequence/`, `src/openid/` | 1:1 ports of the Java conditions, sequences, test modules and plans (the old framework, until the rewrite covers every plan)   |
-| `src/framework/`, `tests/plan.spec.ts`           | the old class framework and its Playwright entry point, for the modules not rewritten yet                                      |
-| `src/util/`                                      | 1:1 ports of the Java util classes; `nimbus/` and `jdk/` emulate the Nimbus JOSE+JWT and JDK behaviour the Java relies on      |
-| `src/runner/`, `bin/cli.ts`                      | the CI project list (`projects.ts`, `portedPlans`), the old module runner, and the `openid-conformance` CLI (commander)        |
-| `scripts/`                                       | `sync-upstream.ts`, `upstream-lock-symbols.ts`, `gen-registry.ts`, `log-fingerprint.ts` (log fidelity diff)                    |
-| `targets/`                                       | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                           |
-| `configs/`                                       | the CI test configurations and expected-failure lists                                                                          |
-| `action.yml`                                     | the composite GitHub Action                                                                                                    |
+|                                              |                                                                                                                            |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `tests/op/*.spec.ts`, `tests/rp/*.spec.ts`   | one Playwright test per upstream test module, one spec file per plan                                                       |
+| `tests/fixtures.ts`, `tests/suite-target.ts` | the `op` / `client` / `rp` / `variant` fixtures, the after-test analysis, suite-vs-suite                                   |
+| `src/suite/`                                 | the engine: event log, checks, HTTP client and server, scripted browser, config, report; Nimbus/JDK emulation              |
+| `src/op/`                                    | upstream's client-side conditions as functions, per concern (discovery, registration, authorization, token, id_token, ...) |
+| `src/rp/`                                    | the emulated OP for RP tests and upstream's server-side conditions as functions                                            |
+| `src/runner/`, `bin/cli.ts`                  | the plans and the CI projects (`projects.ts`), and the `openid-conformance` CLI (commander)                                |
+| `scripts/`                                   | `sync-upstream.ts`, `upstream-lock-symbols.ts`, `log-fingerprint.ts` (log fidelity diff)                                   |
+| `targets/`                                   | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                       |
+| `configs/`                                   | the CI test configurations and expected-failure lists                                                                      |
+| `action.yml`                                 | the composite GitHub Action                                                                                                |
 
 CI runs every OP plan against `oidc-provider`, every RP plan against the `openid-client` RP, and the OP plan
 against the suite's own emulated OP (suite-vs-suite), on every push to `main` and every pull request.
 
 ## Maintaining
 
-Everything is ported from upstream at the commit pinned in `upstream.lock.json`, which records the blob hash of
-every ported Java file (`files` for the 1:1 ports, `symbols` for the functions and tests of the rewrite). `pnpm sync-upstream` reports which ported files changed upstream, shows
-the Java diffs, and finds the files a new plan needs. The porting rules live in `.claude/skills/` and are written
-for both humans and coding agents:
+Everything is ported from upstream at the commit pinned in `upstream.lock.json`, which records, for every upstream
+Java file a function or test ports, the file's blob hash and where it lives (`symbols`, generated from the
+`upstream:` comments in the code). `pnpm sync-upstream` reports which ported functions and tests changed upstream
+and shows the Java diffs. The rules live in `.claude/skills/` and are written for both humans and coding agents:
 
-- `java-to-ts-porting` - the rulebook (framework API equivalents, Gson/Nimbus/Spring mappings, fidelity checklist)
-- `port-conditions`, `port-test-module` - workflows for conditions/sequences and modules/plans/variants
+- `writing-tests` - the design: how tests, checks and helpers are written, the porting rules and deviations
 - `sync-upstream` - keeping up with upstream
 - `run-conformance` - running and debugging plans
-- `writing-tests` - how tests, checks and helpers of the rewrite are written
 
-Framework changes are checked for fidelity by the unit tests (`pnpm test:unit`), the suite-vs-suite project
-and a before/after diff of every module's log with `scripts/log-fingerprint.ts` (see `CONTRIBUTING.md`).
+Engine changes are checked for fidelity by the unit tests (`pnpm test:unit`), the suite-vs-suite project and a
+before/after diff of every module's log with `scripts/log-fingerprint.ts` (see `CONTRIBUTING.md`).
 
 ## License
 

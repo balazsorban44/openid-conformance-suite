@@ -1,23 +1,31 @@
 /**
  * JOSE for the suite: keys, JWK sets, signing and signature verification. Built on `jose`, with the Nimbus
- * emulation in src/util/nimbus (and the JWKUtil/JWTUtil/JWAUtil ports in src/util) wherever upstream's behaviour
- * and messages come from Nimbus (key parsing errors, key selection, JSON member order of logged keys).
+ * emulation and upstream's util/JW*Util functions (jose-algorithms.ts, jose-jwk.ts, jose-jws.ts, jose-jwe.ts,
+ * jose-jwt.ts) wherever upstream's behaviour and messages come from Nimbus (key parsing errors, key selection, JSON
+ * member order of logged keys).
  *
  * Functions that report through a check take the {@link Condition} they log under, so the entries keep the
  * upstream condition's name.
  */
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import type { Condition } from "./conditions.ts";
-import { JWAUtil } from "../util/JWAUtil.ts";
-import { JWKUtil, type JWK, type JWKSet } from "../util/JWKUtil.ts";
-import { JWTUtil } from "../util/JWTUtil.ts";
-import { EC_CURVE_ALGORITHM, keyTypeForAlgorithm } from "../util/nimbus/algorithms.ts";
-import { isJOSEException, JOSEException, KeyLengthException, ParseException } from "../util/nimbus/errors.ts";
-import { jwkSetToJSONObject } from "../util/nimbus/jwk.ts";
-import { JWSSigner, selectJWSJwks, unsupportedJWSAlgorithm, verifySignedJWT } from "../util/nimbus/jws.ts";
-import { parseClaimsSet, parseSignedJWT, type JWT } from "../util/nimbus/jwt.ts";
+import { isJwsAlgorithm, EC_CURVE_ALGORITHM, keyTypeForAlgorithm } from "./jose-algorithms.ts";
+import {
+	parseJWKSetLeniently,
+	toPublicJWK,
+	importKey,
+	parseJWK,
+	parseJWKSet,
+	type JWK,
+	type JWKSet,
+	jwkSetToJSONObject,
+} from "./jose-jwk.ts";
+import { jwtStringToJsonObjectForEnvironment, parseClaimsSet, parseSignedJWT, type JWT } from "./jose-jwt.ts";
+import { isJOSEException, JOSEException, KeyLengthException, ParseException } from "./errors.ts";
+import { selectJWSJwks, unsupportedJWSAlgorithm, verifySignedJWT, createJWSSigner } from "./jose-jws.ts";
 
-export type { JWK, JWKSet } from "../util/JWKUtil.ts";
+export { type JWK, type JWKSet } from "./jose-jwk.ts";
+export { ParseException, JOSEException } from "./errors.ts";
 /** A JWK set as JSON (Nimbus JWKSet in upstream) */
 export type Jwks = JWKSet;
 
@@ -55,7 +63,7 @@ export async function parseJwt(
 	client: Record<string, unknown> | null = null,
 	privateJwksWithEncKeys: Record<string, unknown> | null = null,
 ): Promise<ParsedJwt> {
-	return (await JWTUtil.jwtStringToJsonObjectForEnvironment(
+	return (await jwtStringToJsonObjectForEnvironment(
 		token,
 		client as never,
 		privateJwksWithEncKeys as never,
@@ -68,7 +76,7 @@ export async function parseJwt(
  */
 export function parseJwksLenientlyLoggingSkips(c: Condition, jwks: unknown, jwksName: string): JWKSet {
 	const skipped: { keyJson: unknown; reason: string }[] = [];
-	const set = JWKUtil.parseJWKSetLeniently(JSON.stringify(jwks), skipped as never);
+	const set = parseJWKSetLeniently(JSON.stringify(jwks), skipped as never);
 	for (const s of skipped) {
 		c.log(
 			"Ignoring a key in the " +
@@ -98,7 +106,7 @@ export async function verifyJwsSignature(
 		const header = jwt.header;
 		const headerKeyID = typeof header["kid"] === "string" ? header["kid"] : null;
 		const headerAlg = typeof header["alg"] === "string" ? header["alg"] : null;
-		if (!JWAUtil.isJwsAlgorithm(headerAlg)) {
+		if (!isJwsAlgorithm(headerAlg)) {
 			c.failure(
 				"The '" +
 					tokenName +
@@ -178,7 +186,7 @@ export async function verifyJwsSignature(
 				c.failure(`Unable to verify ${tokenName} signature based on ${jwksName} keys`, { jwks, [tokenName]: token });
 			}
 		}
-		const publicKey = JWKUtil.toPublicJWK(verifiedWith as JWK);
+		const publicKey = toPublicJWK(verifiedWith as JWK);
 		c.success(tokenName + " signature validated", {
 			[tokenName]: { verifiable_jws: token, public_jwk: publicKey != null ? JSON.stringify(publicKey) : null },
 		});
@@ -212,25 +220,25 @@ function selectableForHeader(alg: string, kty: string, x5tS256: string | null, k
 async function verifyWithKey(jwt: JWT, jwk: JWK): Promise<boolean> {
 	const alg = jwt.header["alg"] as string;
 	for (const key of selectJWSJwks(jwt.header, { keys: [jwk] } as JWKSet)) {
-		let verifier: Awaited<ReturnType<typeof JWKUtil.importKey>> | null = null;
+		let verifier: Awaited<ReturnType<typeof importKey>> | null = null;
 		let verifierAlg = alg;
 		try {
 			if (key["kty"] === "OKP") {
-				const publicKey = JWKUtil.parseJWK(JSON.stringify(JWKUtil.toPublicJWK(key)));
+				const publicKey = parseJWK(JSON.stringify(toPublicJWK(key)));
 				if (publicKey["crv"] === "Ed25519") {
-					verifier = await JWKUtil.importKey(publicKey, alg);
+					verifier = await importKey(publicKey, alg);
 				}
 			} else if (key["kty"] === "RSA" || key["kty"] === "EC") {
-				const publicKey = JWKUtil.toPublicJWK(key) as JWK;
+				const publicKey = toPublicJWK(key) as JWK;
 				if (publicKey["kty"] === "EC") {
 					verifierAlg = EC_CURVE_ALGORITHM[publicKey["crv"] as string] ?? alg;
 				}
-				verifier = await JWKUtil.importKey(publicKey, verifierAlg);
+				verifier = await importKey(publicKey, verifierAlg);
 			} else if (key["kty"] === "oct") {
 				if (Buffer.from(String(key["k"]), "base64url").length < 256 / 8) {
 					throw new KeyLengthException("The secret length must be at least 256 bits");
 				}
-				verifier = await JWKUtil.importKey(key, alg);
+				verifier = await importKey(key, alg);
 			}
 		} catch {
 			// the library could not build a verifier for this key (Java: catch (JOSEException | ParseException))
@@ -252,7 +260,7 @@ async function verifyWithKey(jwt: JWT, jwk: JWK): Promise<boolean> {
 export function getSigningKey(c: Condition, name: string, jwks: unknown): JWK {
 	let set: JWKSet;
 	try {
-		set = JWKUtil.parseJWKSet(JSON.stringify(jwks));
+		set = parseJWKSet(JSON.stringify(jwks));
 	} catch (e) {
 		if (e instanceof ParseException) {
 			c.failureFrom("Failed to parse " + name + " jwks", e);
@@ -288,7 +296,7 @@ export async function signJwt(
 			c.failure("No 'alg' field specified in key; please add 'alg' field in the configuration", { jwk: signingJwk });
 		}
 		const alg = String(signingJwk["alg"]);
-		const signer = JWSSigner.create(signingJwk, alg);
+		const signer = createJWSSigner(signingJwk, alg);
 		const header: Record<string, unknown> = { alg };
 		if (opts.typ) {
 			header["typ"] = opts.typ;
@@ -297,7 +305,7 @@ export async function signJwt(
 			header["kid"] = signingJwk["kid"];
 		}
 		const jws = await signer.sign(header as never, JSON.stringify(parseClaimsSet(claims as never)));
-		const publicJwk = JWKUtil.toPublicJWK(signingJwk);
+		const publicJwk = toPublicJWK(signingJwk);
 		return {
 			jws,
 			verifiable: { verifiable_jws: jws, public_jwk: publicJwk != null ? JSON.stringify(publicJwk) : null },
@@ -316,10 +324,3 @@ export async function signJwt(
 		throw e;
 	}
 }
-
-/** Nimbus' JWK set parse (same ParseException messages) */
-export function parseJwks(jwks: unknown): JWKSet {
-	return JWKUtil.parseJWKSet(JSON.stringify(jwks));
-}
-
-export { ParseException, JOSEException } from "../util/nimbus/errors.ts";

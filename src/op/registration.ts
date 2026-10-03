@@ -8,8 +8,8 @@ import type { TestConfig } from "../suite/config.ts";
 import { endpointResponse, HttpError, jsonBody, request, type EndpointResponse } from "../suite/http.ts";
 import { generateRsaJwk, privateJwks, publicJwks, type Jwks } from "../suite/jose.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
-import { JWKUtil } from "../util/JWKUtil.ts";
-import { ParseException } from "../util/nimbus/errors.ts";
+import { findStructurallyInvalidKeys, issuesToJson, parseJWK, parseJWKSet } from "../suite/jose-jwk.ts";
+import { ParseException } from "../suite/errors.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import type { Op } from "./op.ts";
 import { ensureContentTypeJson, ensureHttpStatusCodeIs201 } from "./endpoint.ts";
@@ -436,15 +436,15 @@ export function validateClientJWKsPrivatePart(jwks: unknown, ...requirements: st
 	if (!Array.isArray(set["keys"])) {
 		c.failure("Keys array not found in JWKS", { jwks });
 	}
-	const issues = JWKUtil.findStructurallyInvalidKeys(set as never);
+	const issues = findStructurallyInvalidKeys(set as never);
 	if (issues.length > 0) {
 		c.failure("Invalid JWK in JWKS: the key at index " + issues[0].index + " " + issues[0].detail, {
-			issues: JWKUtil.issuesToJson(issues),
+			issues: issuesToJson(issues),
 		});
 	}
 	for (const key of set["keys"] as Record<string, unknown>[]) {
 		try {
-			JWKUtil.parseJWK(JSON.stringify(key));
+			parseJWK(JSON.stringify(key));
 		} catch (e) {
 			if (e instanceof ParseException) {
 				c.failureFrom("Invalid JWK", e, { key });
@@ -468,7 +468,7 @@ export function extractJWKsFromStaticClientConfiguration(jwks: unknown): ClientK
 	}
 	let pub: Jwks;
 	try {
-		pub = publicJwks(JWKUtil.parseJWKSet(JSON.stringify(jwks)));
+		pub = publicJwks(parseJWKSet(JSON.stringify(jwks)));
 	} catch (e) {
 		if (e instanceof ParseException) {
 			c.failureFrom("Invalid JWKs in client configuration (private key is required), JWKSet.parse failed", e, {

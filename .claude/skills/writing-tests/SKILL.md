@@ -1,13 +1,15 @@
 ---
 name: writing-tests
-description: How this suite is written as explicit Playwright tests with helper functions (no class framework) - the src/suite engine (log, checks, http, server, browser, config, target, jose, report), the src/op helpers, the fixtures, how an upstream test module becomes a test and an upstream condition a check function, how to run one module, expected failures, the upstream.lock.json symbols, and the testing principles (Artem Zakharchenko) to follow. Read before writing or porting any test or helper.
+description: The design of this suite and how to extend it - explicit Playwright tests with helper functions (no class framework): the src/suite engine (log, checks, http, server, browser, config, target, report, and the Java/Nimbus emulation: jose-*, json, uri, errors), the src/op and src/rp helpers, the fixtures, how an upstream test module becomes a test and an upstream condition a check function, the porting rules (Gson/Nimbus/JDK/Spring mappings, UPSTREAM markers, the deliberate deviations), how to run one module, expected failures, plans and projects, the upstream.lock.json symbols, and the testing principles (Artem Zakharchenko) to follow. Read before writing, porting or reviewing any test or helper.
 ---
 
 # Writing tests
 
 The suite is a set of **Playwright spec files that read like the test they are**: one `test()` per upstream test
 module, the steps of the flow visible in the test body. Upstream's Java classes (test modules, conditions,
-sequences, the Environment) are **not** mirrored as classes; they map to plain functions grouped by concern.
+sequences, the Environment, the util classes) are **not** mirrored as classes; they map to plain functions grouped
+by concern. What stays identical to upstream is what a user sees: the log messages, severities, requirement tags,
+block names, and the HTTP requests and responses.
 
 ```
 src/suite/            the engine (no OIDC knowledge)
@@ -19,6 +21,16 @@ src/suite/            the engine (no OIDC knowledge)
   config.ts           config files, ${TARGET_URL}, `override`, globs
   target.ts           starts `target.command` on a free PORT
   jose.ts             keys, JWK sets (Nimbus member order), verifyJwsSignature(), signJwt(), parseJwt()
+  jose-algorithms.ts  Nimbus algorithm families and lookups; upstream util/JWAUtil, util/JWSUtil
+  jose-jwk.ts         Nimbus JWK / JWK set parsing and JSON form; upstream util/JWKUtil (lenient parsing, key scans)
+  jose-jws.ts         Nimbus signers (createJWSSigner, rsaSigner, ...) and verifier checks (verifySignedJWT)
+  jose-jwe.ts         Nimbus decrypters (createDecrypter); upstream util/JWEUtil
+  jose-jwt.ts         Nimbus JWT parsing (parseSignedJWT, parseClaimsSet, ...); upstream util/JWTUtil (parseJWT, ...)
+  json.ts             Gson / OIDFJSON (getString), Nimbus JSONObjectUtils, java.util.HashMap member order
+  errors.ts           NamedError and the Java exceptions the checks catch (ParseException, JOSEException, ...)
+  uri.ts              java.net.URI (parseJavaURI), Spring UriComponentsBuilder (toUriString), RedirectURIValidationUtil
+  bcp47.ts            upstream util/Bcp47LocaleValidation + Bcp47SubtagRegistry (data/language-subtag-registry.txt)
+  json-schema.ts      upstream util/validation/JsonSchemaValidation* (schemas in data/json-schemas/)
   expected.ts         expected-failures / expected-skips analysis (upstream run-test-plan.py)
   report.ts           ModuleReport, summary.md, the Playwright reporter (results.json, $GITHUB_STEP_SUMMARY)
   wait.ts             upstream's WaitFor* conditions (the only sleeps: the spec's timing is what is tested)
@@ -53,6 +65,9 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
   id-token.ts         signing algorithm, id_token claims, at_hash/c_hash, signing, the negative tests' defects
   userinfo.ts         the user, the userinfo endpoint (bearer token checks, claims filtered by scope, signing)
   request-object.ts   request objects (request_type request_object / request_uri): fetching, claim and signature checks
+  logout.ts           end_session_endpoint, logout_token to the backchannel_logout_uri, the front-channel logout page,
+                      the post_logout_redirect_uri redirect (AbstractOIDCCClientLogoutTest)
+  session.ts          session_state, sid, the check_session_iframe and get_session_state (Session Management)
   webfinger.ts        WebFinger issuer discovery (/.well-known/webfinger on the test's server)
 tests/fixtures.ts     the `test` with the `op`, `registrationOp`, `client`, `client2`, `configureClient`, `rp`, `variant`,
                       `plan` fixtures, and `skipTest(reason)`
@@ -61,14 +76,19 @@ tests/op/*.spec.ts    one file per OP plan (basic, config, dynamic, rp-initiated
                       frontchannel-logout, session-management, 3rdparty-init-login); tests/op/shared.ts: the
                       bodies of modules that are in several plans (oidcc-server, oidcc-refresh-token, ...) and the
                       code flow pieces of AbstractOIDCCServerTest (completeCodeFlow, userinfoEndpointTests)
-tests/rp/*.spec.ts    one file per RP plan (basic.spec.ts, dynamic.spec.ts); tests/rp/shared.ts: the bodies of
-                      modules that are in several plans (each spec registers them with its title and upstream comment)
-tests/plan.spec.ts    the old framework, for the modules not rewritten yet (see "Transition")
+tests/rp/*.spec.ts    one file per RP plan (basic, dynamic, rp-initiated-logout, backchannel-logout,
+                      frontchannel-logout, session-management, 3rdparty-init-login); tests/rp/shared.ts: the bodies
+                      of modules that are in several plans (each spec registers them with its title and upstream
+                      comment) and the emulated OP options of each RP module (emulatedOpModules, for suite-vs-suite)
+src/runner/projects.ts `plans` (plan -> title, spec file, modules, user-selectable variants) and `projects` (the CI
+                      matrix: plan, variant, config, skipModules); src/runner/list.ts: `openid-conformance list`
+bin/cli.ts            the CLI (list, run, ci, projects); playwright.config.ts picks the selected plan's spec
+scripts/              upstream-lock-symbols.ts, sync-upstream.ts, log-fingerprint.ts
 ```
 
 File names are kebab-case. A helper file groups everything about one concern; do not create a file per check.
-New code never imports `src/framework`, `src/condition`, `src/sequence` or `src/openid` (they are being replaced);
-`src/util` (Nimbus/JDK emulation, JWKUtil, JWTUtil, UriComponentsBuilder) may be reused.
+Functions, not classes with static methods; a class only where something has state (a `JavaLocale`, a
+`JWEDecrypter`, the `JsonSchemaValidation` of one schema).
 
 ## Principles (Artem Zakharchenko's testing fundamentals, applied here)
 
@@ -217,14 +237,15 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `await op.expect(<that endpoint>)`.
 - Requests are handled one at a time (upstream's test lock), outside the test's Playwright steps; the test's
   `expect`/`waitFor` calls are the steps of the report.
-- `rp.driveClient()` (port of the old runner's driveClient, targets/openid-client-rp/README.md): GET
+- `rp.driveClient()` (the client driver contract, targets/openid-client-rp/README.md): GET
   `client_driver.startUrl` with issuer, module, variant, client_metadata_defaults, alias and a static client's
   credentials; logged under TEST-RUNNER. The call blocks until the RP has run its flow, so its return tells the OP
   that no further requests will come.
 - Not supported yet by the emulated OP (they throw a TODO(port) error): client_secret_jwt / private_key_jwt /
   mTLS client authentication, encrypted userinfo responses, encrypted id_tokens and logout tokens, refresh tokens,
   the OP-initiated front-channel logout page. Add them to the concern file (a new endpoint: `serve(...)` in op.ts,
-  its handler in the concern file, e.g. `src/rp/logout.ts` serves end_session_endpoint and the session pages).
+  its handler in the concern file, e.g. `src/rp/logout.ts` serves end_session_endpoint and the session pages); the
+  Nimbus encrypters (JWEUtil.createEncrypter) would go into src/suite/jose-jwe.ts next to the decrypters.
 
 ## Fixtures (tests/fixtures.ts)
 
@@ -279,7 +300,7 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   the config expects is marked "expected to fail" and passes. Any other exception is logged as a FAILURE entry and
   the module status is INTERRUPTED.
 - `skipModules` of the CI project (src/runner/projects.ts): the `conformance` fixture skips a listed module with the
-  reason given there, so it applies to every spec (tests/plan.spec.ts does the same for the old framework).
+  reason given there, so it applies to every spec.
 - **suite-vs-suite** (`suiteTarget`, tests/suite-target.ts): a config with `suite_target` (configs/suite-vs-suite)
   runs the OP tests against this suite's own emulated OP. Per test, before `op` discovers the OP, the fixture starts
   `startEmulatedOp` (src/rp/op.ts) on a second suite server (alias `suite_target.alias`, same TLS setting) with an
@@ -296,8 +317,8 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
 ## Checks (upstream conditions)
 
 Each upstream condition is one function, named after it in camelCase, in the helper file for its concern, with a
-doc comment `upstream: condition/<pkg>/<Name>.java`, upstream's messages (copy them from the 1:1 TS port in
-`src/condition/...`, which matches the Java), and the same log fields:
+doc comment `upstream: condition/<pkg>/<Name>.java`, upstream's messages (copied from the Java, typos included),
+and the same log fields:
 
 ```ts
 /** upstream: condition/client/ValidateIdTokenNonce.java */
@@ -341,19 +362,124 @@ export function validateIdTokenNonce(
   an error by itself (Spring's 4xx/5xx exceptions are written out where upstream relied on them).
 - Upstream quirks are kept and marked `UPSTREAM:` (e.g. EnsureIdTokenUpdatedAtValid reads the wrong object, the
   static claim list of EnsureIdTokenDoesNotContainNonRequestedClaims accumulates). Deliberate deviations are
-  marked too and listed in the commit message.
+  marked too and listed below (see "Deliberate deviations").
 - Module log entries (not conditions): `logModule({ msg, ... })` logs under the test name ("Redirecting to
   authorization endpoint", "Authorization endpoint response captured").
 
-### Adding a check
+### Adding a check (how an upstream condition becomes a function)
 
-1. Find the Java class and the 1:1 port in `src/condition/<pkg>/<Name>.ts` (same messages). Read its base classes.
-2. Add the function to the helper file for its concern (or a shared private helper for an abstract base class,
-   e.g. `ensureHttpStatusCode` for AbstractEnsureHttpStatusCode, with its own `upstream:` comment).
-3. Call it where upstream calls it, with upstream's requirements and severity.
-4. Unit test the logic that is not obvious (Vitest, `src/**/<file>.test.ts`; `useTestLog()`; `useMswServer()`
+1. Get the upstream checkout at the pinned commit (`$UPSTREAM`, or `pnpm sync-upstream --fetch` into
+   `.upstream/`) and read the Java class `src/main/java/net/openid/conformance/condition/<pkg>/<Name>.java` and its
+   base classes (`AbstractValidateHash`, `AbstractEnsureHttpStatusCode`, ...).
+2. Check whether the helper exists already (`grep -rn "upstream: condition/<pkg>/<Name>.java" src`). If not, add the
+   function to the helper file for its concern (append at the end); an abstract base class becomes a shared helper
+   with its own `upstream:` comment (e.g. `ensureHttpStatusCode` for AbstractEnsureHttpStatusCode).
+3. Translate the body with the mappings below: `@PreEnvironment` inputs become parameters, `env.put...` outputs
+   the return value, `throw error(msg, args(...))` `c.failure(msg, {...})`, `logSuccess` `c.success`. Copy every
+   message, keep the order of checks and the null/empty semantics (missing vs JSON null).
+4. Call it where upstream calls it (the module or sequence), with upstream's requirements and severity.
+5. Unit test the logic that is not obvious (Vitest, `src/**/<file>.test.ts`; `useTestLog()`; `useMswServer()`
    for HTTP), asserting the entries (`src`, `msg`, `result`, `requirements`).
-5. `pnpm lock-symbols` records the Java file -> function mapping in upstream.lock.json (CI checks it).
+6. `pnpm lock-symbols` records the Java file -> function mapping in upstream.lock.json (CI checks it).
+
+An upstream test module becomes a `test()` the same way: read the Java module and its base classes (what
+`configure` / `start` / `performAuthorizationFlow` / `onPostAuthorizationFlowComplete` call, in which blocks), write
+the flow in the test body with the helpers, keep the block names; `@VariantNotApplicable` is a nested describe with
+`test.skip`, `fireTestSkipped` is `skipTest`, `@PublishTestModule(testName)` is the title before the `:`.
+
+## Porting rules
+
+Everything a user of the suite sees must be identical to upstream: messages (typos included), severities,
+requirement tags, block names, the order of checks, the HTTP requests the suite sends and the responses it
+serves. The code that produces them is free to differ.
+
+### Java -> TypeScript
+
+| Java                                                                     | TypeScript                                                                   |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `JsonObject` / `JsonArray` / `JsonElement` / `JsonNull`                  | plain JSON (`JsonObject`, `JsonArray`, `JsonValue`, `null` from json.ts)     |
+| `o.get("k") == null` / `o.has("k")`                                      | `o["k"] == null` (missing or JSON null) / `Object.hasOwn(o, "k")`            |
+| `OIDFJSON.getString(el)` (throws on another type)                        | `getString(el)` (json.ts), or the type check written out                     |
+| `JsonParser.parseString(s)` / `.getAsJsonObject()`                       | `parseJson(s)` / `parseJsonObject(s)` (json.ts)                              |
+| `el.equals(other)`                                                       | `jsonEquals(a, b)` (json.ts)                                                 |
+| `Strings.isNullOrEmpty(s)` / `Objects.equals(a, b)` / `String.format`    | `!s` / `a === b` / template literal                                          |
+| `Instant.now().getEpochSecond()`                                         | `Math.floor(Date.now() / 1000)`                                              |
+| `BaseEncoding.base64Url()`, `MessageDigest.getInstance("SHA-256")`       | `Buffer...toString("base64url")`, `createHash("sha256")` (node:crypto)       |
+| `new URI(s)` (accept/reject, host, port matter), `URISyntaxException`    | `parseJavaURI(s)`, `URISyntaxException` (uri.ts)                             |
+| `UriComponentsBuilder.fromUriString(u).queryParam(k, v)...toUriString()` | `toUriString(u, [[k, v], ...])` (uri.ts)                                     |
+| `s.getBytes(US_ASCII)`                                                   | `Buffer.from(toUsAscii(s), "latin1")` (src/rp/id-token.ts)                   |
+| Spring `RestTemplate` call (`createRestTemplate(env)`)                   | `request(c.name, { url, method, headers, body })` (http.ts), logged the same |
+| `RestClientResponseException` on 4xx/5xx (no custom error handler)       | `if (res.status >= 400) { ...the same failure... }`                          |
+| `convertResponseForEnvironment(name, response)`                          | `endpointResponse(name, res)` (http.ts)                                      |
+| `NullPointerException` / `ClassCastException` upstream would throw       | the same failure, with an `UPSTREAM:` comment (e.g. a `TypeError` message)   |
+
+### Nimbus JOSE+JWT -> jose-*.ts
+
+Where the Java calls Nimbus and its behaviour shows up in the log (messages, accepted inputs, JSON member order),
+the suite emulates Nimbus (the version upstream's pom.xml pins, noted in jose-algorithms.ts) on top of `jose`.
+Nimbus or JDK behaviour lives only in src/suite (jose-*.ts, json.ts, uri.ts, errors.ts), never inside a check:
+look there first; if something is missing, add it there (faithful to the library source) with a Vitest test
+that pins the result and the exception message.
+
+| Nimbus                                                                                 | suite                                                                                      |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `JWTParser.parse(s)` / `JWTUtil.parseJWT(s)`                                           | `jwtParserParse(s)` / `parseJWT(s)` (adds upstream's character check) -> `JWT`             |
+| `SignedJWT.parse(s)`, `JWEObject.parse(s)`                                             | `parseSignedJWT(s)`, `parseJWEObject(s)` (jose-jwt.ts; messages differ from `parseJWT`)    |
+| `jwt instanceof EncryptedJWT`, `jwt.getHeader().toJSONObject()`, `jwt.serialize()`     | `jwt.type === "encrypted"`, `jwt.header`, `jwt.serialized`                                 |
+| `JWTUtil.jwtClaimsSetAsJsonObject(jwt)` / `jwtStringToJsonObjectForEnvironment(s)`     | the same names in jose-jwt.ts; `parseJwt(token, client, keys)` (jose.ts) decrypts first    |
+| `JWTClaimsSet.parse(json)` + `toJSONObject()`                                          | `parseClaimsSet(json, includeNullValues)` (jose-jwt.ts)                                    |
+| `JWKSet.parse(json)` / `JWK.parse(json)`, `toPublicJWK()`, `isPrivate()`               | `parseJWKSet`, `parseJWK`, `toPublicJWK`, `isPrivate` (jose-jwk.ts), JSON-shaped           |
+| a JWK as a Java key (`toRSAPublicKey()`, `toSecretKey()`, ...)                         | `await importKey(jwk, alg)` (jose-jwk.ts)                                                  |
+| `jwkSet.toJSONObject(publicOnly)`                                                      | `jwkSetToJSONObject(jwks, publicOnly)` (jose-jwk.ts), `publicJwks()` / `privateJwks()`     |
+| `JWKMatcher.forJWSHeader`, `AlternateJWSVerificationKeySelector.selectJWSJwks`         | `jwkMatcherForJWSHeader` (jose-jwk.ts), `selectJWSJwks(header, jwkSet)` (jose-jws.ts)      |
+| `KeyType.forAlgorithm`, `Curve.forJWSAlgorithm`, `ECDSA.resolveAlgorithm`              | `keyTypeForAlgorithm`, `curvesForJWSAlgorithm`, `EC_CURVE_ALGORITHM` (jose-algorithms.ts)  |
+| `JWSAlgorithm.Family.*`, `JWEAlgorithm.Family.*`, `EncryptionMethod.Family.*`          | `JWS_FAMILY_*`, `JWE_FAMILY_*`, `ENC_FAMILY_*` (jose-algorithms.ts)                        |
+| `RSASSASigner`, `ECDSASigner`, `MACSigner`, `Ed25519Signer`, `DefaultJWSSignerFactory` | `rsaSigner`, `ecSigner`, `macSigner`, `ed25519Signer`, `createJWSSigner` -> `await sign()` |
+| `jwt.verify(verifier)`                                                                 | `await verifySignedJWT(jwt, { jwk, key })` (jose-jws.ts)                                   |
+| `JWEDecrypter` implementations, `JWEUtil.createDecrypter`                              | `createDecrypter(alg, key)` -> `await decrypter.decrypt(compact)` (jose-jwe.ts)            |
+| `JSONObjectUtils.parse/getString/...`                                                  | `nimbusParseJsonObject`, `nimbusGetString`, ... (json.ts)                                  |
+| a `HashMap` whose iteration order decides JSON member order                            | `JavaHashMap` / `javaHashMapOf` (json.ts, JDK 21 order)                                    |
+| `java.text.ParseException`, `JOSEException`, `KeyLengthException`                      | the same classes, `isJOSEException(e)` (errors.ts)                                         |
+
+jose is async: checks that sign, verify or decrypt are `async`. jose validates more strictly than Nimbus in places
+(e.g. unsupported curves); where the Java leniently skipped keys, the emulation does the same explicitly.
+
+### Marking differences from upstream
+
+- `// UPSTREAM: <what Java does>` at every spot where the code knowingly behaves like questionable upstream code (a
+  bug, a dead check, a misleading message) or cannot behave exactly like it (a `NullPointerException` that becomes a
+  `TypeError`, a JDK/Spring behaviour with no JS equivalent). `grep -rn "UPSTREAM:" src tests` lists them all.
+- A deliberate behaviour change is a deviation: comment it at the code site and add it to the list below.
+
+### Deliberate deviations
+
+Everything else behaves like upstream; these are the known, intentional differences (each is commented at the
+code site):
+
+- `toUriString` (src/suite/uri.ts) encodes `+` in query parameters as `%2B`. Spring leaves it alone, but every
+  form-decoding server reads a literal `+` as a space, which broke suite-vs-suite with the client ids the RP tests
+  generate.
+- The scripted browser (src/suite/browser.ts) records a url as visited when the navigation starts (Java: after
+  `driver.get()` returns). A user-driven browser records it before the RP redirects, which is what
+  `oidcc-client-test-3rd-party-init-login` checks for.
+- The emulated OP's check_session_iframe (src/rp/session.ts) splits the postMessage `"client_id session_state"` on
+  the last space; upstream's template splits on the first one and breaks with client ids containing spaces.
+- In suite-vs-suite (tests/suite-target.ts) the RP test module's emulated OP answers any number of flows until the
+  OP test ends; upstream's module finishes after its own flow.
+- The suite's server (src/suite/server.ts) adds `x-ssl-protocol` / `x-ssl-cipher` to incoming requests over TLS,
+  which the nginx/apache proxy adds upstream.
+- `oidcc-server-rotate-keys` (tests/op/dynamic.spec.ts) does not wait for the user to press 'Start' and logs a
+  `TEST-RUNNER` INFO entry saying so (upstream's CI script `run-test-plan.py` starts it the same way).
+
+### Review checklist
+
+- [ ] Every message string is identical (copy-paste; keep typos); the log fields have upstream's names.
+- [ ] Every requirement tag is preserved at the same call; severities (`soft`, `soft(fn, "warning")`) unchanged.
+- [ ] Block names and boundaries are upstream's (expected-failures entries match on them).
+- [ ] Order of checks and of HTTP requests unchanged; null/empty semantics match (missing vs JSON null).
+- [ ] No behaviour added, removed or "fixed"; questionable upstream behaviour has an `UPSTREAM:` comment.
+- [ ] No Nimbus/JDK emulation inside a check: it comes from src/suite.
+- [ ] `upstream:` comment on every ported function and test; `pnpm lock-symbols` run.
 
 ## The suite side of a flow
 
@@ -381,28 +507,33 @@ export function validateIdTokenNonce(
 ```bash
 CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts               # the spec, against the bundled OP
 CONFORMANCE_PROJECT=op-basic-dynamic CONFORMANCE_TLS=1 pnpm test tests/op/basic.spec.ts -g "oidcc-codereuse:"
-node bin/cli.ts ci --project op-basic-dynamic                                         # the whole project (new spec + plan.spec.ts)
+node bin/cli.ts ci --project op-basic-dynamic                                         # the whole project
 CONFORMANCE_MODULE='oidcc-server' node bin/cli.ts ci --project op-basic-dynamic
 pnpm test:unit                                                                        # Vitest
 ```
 
-Fidelity: compare the condition entries with a baseline run of the old framework (`scripts/log-fingerprint.ts
---out` on both test-results directories, then `--diff`). Expected differences: the old framework's own entries
-(Setup Done, Test has run to completion, Final environment) are gone, entries move where the flow is now
-sequential (browser entries, setup checks run by the test where they are used).
+Fidelity: a refactor of the engine or the helpers must not change any log entry. Fingerprint the logs before and
+after (`scripts/log-fingerprint.ts --out` on both test-results directories, then `--diff`); only moved entries
+(concurrent browser and server entries interleave differently) may differ. See .claude/skills/run-conformance.
 
-## Transition
+## Plans, modules and projects
 
-`portedPlans` in src/runner/projects.ts lists, per plan, the spec file and the modules it covers.
-playwright.config.ts adds the spec to the selected project and tests/plan.spec.ts leaves those modules out, so a
-CI project keeps running its whole plan. Porting a module: write the test, add the module to `portedPlans`, run
-the project, diff the fingerprints against the old framework's run, `pnpm lock-symbols`.
+`plans` in src/runner/projects.ts lists every plan: its title (upstream displayName), its spec file, its modules
+and the variant parameters the user selects; playwright.config.ts runs the selected plan's spec and the CLI's
+`list` prints the table. `projects` is the CI matrix (one GitHub Actions job each).
+
+- A new module of an existing plan: write the test in the plan's spec (or in tests/op/shared.ts / tests/rp/shared.ts
+  when several plans have it), add its name to the plan's `modules`, run the project, `pnpm lock-symbols`.
+- A new plan: a spec file with its `test.describe` and `test.use({ plan })`, an entry in `plans`, a test
+  configuration under `configs/` for the bundled target (and expected failures / skips if the target deviates), and
+  a project in `projects`.
 
 ## Sync with upstream
 
-`upstream.lock.json` `symbols` maps each Java file to `{ blob, loc, ts, symbol }` (several Java files per TS file);
-`files` still tracks the 1:1 ports. `pnpm sync-upstream --status` lists changed Java files of both;
-`pnpm sync-upstream --diff src/op/id-token.ts#validateIdTokenNonce` shows the upstream change for a function.
+`upstream.lock.json` `symbols` maps each upstream Java file a function, class or test ports to
+`{ blob, loc, ts, symbol }` (several Java files per TS file). `pnpm sync-upstream --status` lists the symbols whose
+Java changed upstream; `pnpm sync-upstream --diff src/op/id-token.ts#validateIdTokenNonce` shows the change for a
+function (see .claude/skills/sync-upstream).
 
 ## Tooling
 

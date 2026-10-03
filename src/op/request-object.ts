@@ -11,8 +11,9 @@ import { createHash } from "node:crypto";
 import { condition, type Condition } from "../suite/conditions.ts";
 import { signJwt } from "../suite/jose.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
-import { toUriString } from "../util/UriComponentsBuilder.ts";
-import { JWTUtil, ParseException } from "../util/JWTUtil.ts";
+import { toUriString } from "../suite/uri.ts";
+import { jwtClaimsSetAsJsonObject } from "../suite/jose-jwt.ts";
+import { ParseException } from "../suite/errors.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import type { Op } from "./op.ts";
 import type { Client, ClientKeys } from "./registration.ts";
@@ -43,7 +44,7 @@ export function serializeRequestObjectWithNullAlgorithm(requestObjectClaims: Rec
 	const c: Condition = condition("SerializeRequestObjectWithNullAlgorithm");
 	try {
 		// JWTClaimsSet.parse(objectClaims.toString()) followed by claimSet.toJSONObject()
-		const claimSet: Record<string, unknown> = JWTUtil.jwtClaimsSetAsJsonObject({
+		const claimSet: Record<string, unknown> = jwtClaimsSetAsJsonObject({
 			type: "plain",
 			serialized: "",
 			parts: [],

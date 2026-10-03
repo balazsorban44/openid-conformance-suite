@@ -5,10 +5,11 @@
 import { block, condition, ConditionFailed, skipped, type Condition } from "../suite/conditions.ts";
 import type { Jwks } from "../suite/jose.ts";
 import type { IncomingRequest } from "../suite/server.ts";
-import { JWKUtil, JWS_FAMILY_HMAC_SHA, type JWK } from "../util/JWKUtil.ts";
-import { isJOSEException, ParseException } from "../util/nimbus/errors.ts";
-import { JWSSigner } from "../util/nimbus/jws.ts";
-import { parseClaimsSet } from "../util/nimbus/jwt.ts";
+import { parseJWK, selectAsymmetricJWSKey, parseJWKSet, toPublicJWK, type JWK } from "../suite/jose-jwk.ts";
+import { JWS_FAMILY_HMAC_SHA } from "../suite/jose-algorithms.ts";
+import { isJOSEException, ParseException } from "../suite/errors.ts";
+import { rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
+import { parseClaimsSet } from "../suite/jose-jwt.ts";
 import type { EmulatedOp } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 
@@ -292,7 +293,7 @@ export async function signUserInfoResponse(
 		if (typeof client["client_secret"] !== "string") {
 			throw new Error("getString called on something that is not a string: " + JSON.stringify(client["client_secret"]));
 		}
-		jwk = JWKUtil.parseJWK({
+		jwk = parseJWK({
 			kty: "oct",
 			use: "sig",
 			alg,
@@ -300,7 +301,7 @@ export async function signUserInfoResponse(
 		});
 	} else {
 		try {
-			jwk = JWKUtil.selectAsymmetricJWSKey(alg, JWKUtil.parseJWKSet(JSON.stringify(serverJwks)).keys);
+			jwk = selectAsymmetricJWSKey(alg, parseJWKSet(JSON.stringify(serverJwks)).keys);
 		} catch (e) {
 			if (e instanceof ParseException) {
 				c.failureFrom("Could not parse jwks. Failed to find a signing key.", e, { jwks: serverJwks, alg });
@@ -316,13 +317,13 @@ export async function signUserInfoResponse(
 		const kty = jwk["kty"];
 		const signer =
 			kty === "RSA"
-				? JWSSigner.rsa(jwk)
+				? rsaSigner(jwk)
 				: kty === "EC"
-					? JWSSigner.ec(jwk)
+					? ecSigner(jwk)
 					: kty === "oct"
-						? JWSSigner.mac(jwk)
+						? macSigner(jwk)
 						: kty === "OKP"
-							? JWSSigner.ed25519(jwk)
+							? ed25519Signer(jwk)
 							: null;
 		if (signer == null) {
 			c.failure("Couldn't create signer from key; kty must be one of 'oct', 'rsa', 'ec'", { jwk: JSON.stringify(jwk) });
@@ -332,7 +333,7 @@ export async function signUserInfoResponse(
 			header["kid"] = jwk["kid"];
 		}
 		const jws = await signer.sign(header as never, JSON.stringify(parseClaimsSet(response as never)));
-		const publicJwk = JWKUtil.toPublicJWK(jwk);
+		const publicJwk = toPublicJWK(jwk);
 		c.success("Signed the userinfo response", {
 			userinfo: { verifiable_jws: jws, public_jwk: publicJwk != null ? JSON.stringify(publicJwk) : null },
 		});

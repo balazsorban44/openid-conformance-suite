@@ -13,7 +13,7 @@ import {
 	JWE_FAMILY_SYMMETRIC,
 	JWS_FAMILY_HMAC_SHA,
 	JWS_FAMILY_SIGNATURE,
-} from "../util/JWKUtil.ts";
+} from "../suite/jose-algorithms.ts";
 import { SUPPORTED_CLAIMS } from "./userinfo.ts";
 
 export type { ServerMetadata } from "../op/discovery.ts";

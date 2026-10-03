@@ -1,19 +1,47 @@
 /**
- * The CI matrix: every entry becomes a Playwright project and a GitHub Actions job (.github/workflows/ci.yml reads
- * the names from `openid-conformance projects --json`). `plan` + `variant` select the module instances (see
- * `expandPlan` in src/framework/VariantService.ts), `config` is the test configuration file (which also names the
- * implementation under test to start).
+ * The test plans and the CI matrix.
  *
- * Mirrors upstream `.gitlab-ci/run-tests.sh` (makeOidccTest / makeClientTest / local provider runs).
+ * `plans`: every plan this suite implements - its spec file (one `test()` per module, tests/op/*.spec.ts for the
+ * OP plans, tests/rp/*.spec.ts for the RP plans), its modules, and the variant parameters the plan leaves to the
+ * user (upstream's values; the spec's `test.use({ plan })` fixes the others). playwright.config.ts runs the spec of
+ * the selected plan, `openid-conformance list` prints this table.
+ *
+ * `projects`: every entry becomes a GitHub Actions job (.github/workflows/ci.yml reads the names from
+ * `openid-conformance projects --json`): a plan, the variant selection and the test configuration file (which also
+ * names the implementation under test to start). Mirrors upstream `.gitlab-ci/run-tests.sh` (makeOidccTest /
+ * makeClientTest / local provider runs).
  */
-/**
- * Plans (partly) rewritten as explicit Playwright specs (tests/op/*.spec.ts, tests/rp/*.spec.ts): the spec file and
- * the modules it covers. tests/plan.spec.ts runs the rest of a plan's modules on the old framework, so a project
- * keeps running its whole plan while the rewrite progresses; when a plan is complete, its modules list is the whole
- * plan and plan.spec.ts no longer runs anything for it.
- */
-export const portedPlans: Record<string, { spec: string; modules: string[] }> = {
+
+const SERVER_METADATA = ["static", "discovery"];
+const CLIENT_REGISTRATION = ["static_client", "dynamic_client"];
+const RESPONSE_TYPE = ["code", "id_token", "id_token token", "code id_token", "code token", "code id_token token"];
+const RESPONSE_MODE = ["default", "form_post"];
+const REQUEST_TYPE = ["plain_http_request", "request_object", "request_uri"];
+/** upstream ClientAuthType (the RP plans) */
+const CLIENT_AUTH_TYPE = [
+	"none",
+	"client_secret_basic",
+	"client_secret_post",
+	"client_secret_jwt",
+	"private_key_jwt",
+	"tls_client_auth",
+	"self_signed_tls_client_auth",
+];
+
+export interface Plan {
+	/** upstream's displayName */
+	title: string;
+	/** the Playwright spec file with the plan's `test.describe` */
+	spec: string;
+	/** the test modules (upstream testName) */
+	modules: string[];
+	/** the variant parameters the user selects (CONFORMANCE_VARIANT, `run --variant k=v`) and upstream's values */
+	variants: Record<string, string[]>;
+}
+
+export const plans: Record<string, Plan> = {
 	"oidcc-basic-certification-test-plan": {
+		title: "OpenID Connect Core: Basic Certification Profile Authorization server test",
 		spec: "tests/op/basic.spec.ts",
 		modules: [
 			"oidcc-server",
@@ -55,116 +83,16 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 			"oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",
 			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
 		],
-	},
-	"oidcc-rp-initiated-logout-certification-test-plan": {
-		spec: "tests/op/rp-initiated-logout.spec.ts",
-		modules: [
-			"oidcc-rp-initiated-logout-discovery-endpoint-verification",
-			"oidcc-rp-initiated-logout",
-			"oidcc-rp-initiated-logout-bad-post-logout-redirect-uri",
-			"oidcc-rp-initiated-logout-modified-id-token-hint",
-			"oidcc-rp-initiated-logout-no-id-token-hint",
-			"oidcc-rp-initiated-logout-no-params",
-			"oidcc-rp-initiated-logout-no-post-logout-redirect-uri",
-			"oidcc-rp-initiated-logout-no-state",
-			"oidcc-rp-initiated-logout-only-state",
-			"oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri",
-			"oidcc-rp-initiated-logout-bad-id-token-hint",
-		],
-	},
-	"oidcc-backchannel-rp-initiated-logout-certification-test-plan": {
-		spec: "tests/op/backchannel-logout.spec.ts",
-		modules: ["oidcc-backchannel-logout-discovery-endpoint-verification", "oidcc-backchannel-rp-initiated-logout"],
-	},
-	"oidcc-frontchannel-rp-initiated-logout-certification-test-plan": {
-		spec: "tests/op/frontchannel-logout.spec.ts",
-		modules: ["oidcc-frontchannel-logout-discovery-endpoint-verification", "oidcc-frontchannel-rp-initiated-logout"],
-	},
-	"oidcc-session-management-certification-test-plan": {
-		spec: "tests/op/session-management.spec.ts",
-		modules: [
-			"oidcc-session-management-discovery-endpoint-verification",
-			"oidcc-session-management-rp-initiated-logout",
-		],
-	},
-	"oidcc-3rdparty-init-login-certification-test-plan": {
-		spec: "tests/op/3rdparty-init-login.spec.ts",
-		modules: ["oidcc-3rd_party-init-login", "oidcc-3rd_party-init-login-nohttps"],
-	},
-	"oidcc-client-basic-certification-test-plan": {
-		spec: "tests/rp/basic.spec.ts",
-		modules: [
-			"oidcc-client-test",
-			"oidcc-client-test-invalid-iss",
-			"oidcc-client-test-missing-sub",
-			"oidcc-client-test-invalid-aud",
-			"oidcc-client-test-missing-iat",
-			"oidcc-client-test-kid-absent-single-jwks",
-			"oidcc-client-test-kid-absent-multiple-jwks",
-			"oidcc-client-test-idtoken-sig-rs256",
-			"oidcc-client-test-idtoken-sig-none",
-			"oidcc-client-test-invalid-sig-rs256",
-			"oidcc-client-test-userinfo-invalid-sub",
-			"oidcc-client-test-nonce-invalid",
-			"oidcc-client-test-scope-userinfo-claims",
-			"oidcc-client-test-client-secret-basic",
-		],
-	},
-	"oidcc-client-dynamic-certification-test-plan": {
-		spec: "tests/rp/dynamic.spec.ts",
-		modules: [
-			"oidcc-client-test-discovery-webfinger-acct",
-			"oidcc-client-test-discovery-webfinger-url",
-			"oidcc-client-test-discovery-openid-config",
-			"oidcc-client-test-discovery-jwks-uri-keys",
-			"oidcc-client-test-discovery-issuer-mismatch",
-			"oidcc-client-test-dynamic-registration",
-			"oidcc-client-test-request-uri-signed-rs256",
-			"oidcc-client-test-request-uri-signed-none",
-			"oidcc-client-test-idtoken-sig-none",
-			"oidcc-client-test-signing-key-rotation-just-before-signing",
-			"oidcc-client-test-signing-key-rotation",
-			"oidcc-client-test-userinfo-signed",
-		],
-	},
-	"oidcc-client-rp-initiated-logout-rp-basic": {
-		spec: "tests/rp/rp-initiated-logout.spec.ts",
-		modules: [
-			"oidcc-client-test-rp-init-logout",
-			"oidcc-client-test-rp-init-logout-other-state",
-			"oidcc-client-test-rp-init-logout-no-state",
-		],
-	},
-	"oidcc-client-back-channel-logout-rp-basic": {
-		spec: "tests/rp/backchannel-logout.spec.ts",
-		modules: [
-			"oidcc-client-test-rp-backchannel-rpinitlogout",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-alg-none",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-no-event",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-with-nonce",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-alg",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-aud",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-event",
-			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-iss",
-		],
-	},
-	"oidcc-client-front-channel-logout-rp-basic": {
-		spec: "tests/rp/frontchannel-logout.spec.ts",
-		modules: ["oidcc-client-test-rp-frontchannel-rpinitlogout"],
-	},
-	"oidcc-client-rp-session-management-rp-basic": {
-		spec: "tests/rp/session-management.spec.ts",
-		modules: ["oidcc-client-test-session-management"],
-	},
-	"oidcc-client-test-3rd-party-init-login-test-plan": {
-		spec: "tests/rp/3rdparty-init-login.spec.ts",
-		modules: ["oidcc-client-test-3rd-party-init-login"],
+		variants: { server_metadata: SERVER_METADATA, client_registration: CLIENT_REGISTRATION },
 	},
 	"oidcc-config-certification-test-plan": {
+		title: "OpenID Connect Core: Config Certification Profile Authorization server test",
 		spec: "tests/op/config.spec.ts",
 		modules: ["oidcc-discovery-endpoint-verification"],
+		variants: {},
 	},
 	"oidcc-dynamic-certification-test-plan": {
+		title: "OpenID Connect Core: Dynamic Certification Profile Authorization server test",
 		spec: "tests/op/dynamic.spec.ts",
 		modules: [
 			"oidcc-discovery-endpoint-verification",
@@ -191,6 +119,161 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 			"oidcc-server-rotate-keys",
 			"oidcc-userinfo-rs256",
 		],
+		variants: { response_type: RESPONSE_TYPE },
+	},
+	"oidcc-rp-initiated-logout-certification-test-plan": {
+		title: "OpenID Connect Core: Rp Initiated Logout Certification Profile Authorization server test",
+		spec: "tests/op/rp-initiated-logout.spec.ts",
+		modules: [
+			"oidcc-rp-initiated-logout-discovery-endpoint-verification",
+			"oidcc-rp-initiated-logout",
+			"oidcc-rp-initiated-logout-bad-post-logout-redirect-uri",
+			"oidcc-rp-initiated-logout-modified-id-token-hint",
+			"oidcc-rp-initiated-logout-no-id-token-hint",
+			"oidcc-rp-initiated-logout-no-params",
+			"oidcc-rp-initiated-logout-no-post-logout-redirect-uri",
+			"oidcc-rp-initiated-logout-no-state",
+			"oidcc-rp-initiated-logout-only-state",
+			"oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri",
+			"oidcc-rp-initiated-logout-bad-id-token-hint",
+		],
+		variants: { client_registration: CLIENT_REGISTRATION, response_type: RESPONSE_TYPE },
+	},
+	"oidcc-backchannel-rp-initiated-logout-certification-test-plan": {
+		title: "OpenID Connect Core: Backchannel Rp Initiated Logout Certification Profile Authorization server test",
+		spec: "tests/op/backchannel-logout.spec.ts",
+		modules: ["oidcc-backchannel-logout-discovery-endpoint-verification", "oidcc-backchannel-rp-initiated-logout"],
+		variants: { client_registration: CLIENT_REGISTRATION, response_type: RESPONSE_TYPE },
+	},
+	"oidcc-frontchannel-rp-initiated-logout-certification-test-plan": {
+		title: "OpenID Connect Core: Frontchannel Rp Initiated Logout Certification Profile Authorization server test",
+		spec: "tests/op/frontchannel-logout.spec.ts",
+		modules: ["oidcc-frontchannel-logout-discovery-endpoint-verification", "oidcc-frontchannel-rp-initiated-logout"],
+		variants: { client_registration: CLIENT_REGISTRATION, response_type: RESPONSE_TYPE },
+	},
+	"oidcc-session-management-certification-test-plan": {
+		title: "OpenID Connect Core: Session Management Certification Profile Authorization server test",
+		spec: "tests/op/session-management.spec.ts",
+		modules: [
+			"oidcc-session-management-discovery-endpoint-verification",
+			"oidcc-session-management-rp-initiated-logout",
+		],
+		variants: { client_registration: CLIENT_REGISTRATION, response_type: RESPONSE_TYPE },
+	},
+	"oidcc-3rdparty-init-login-certification-test-plan": {
+		title: "OpenID Connect Core: 3rd party initiated login Certification Profile Authorization server test",
+		spec: "tests/op/3rdparty-init-login.spec.ts",
+		modules: ["oidcc-3rd_party-init-login", "oidcc-3rd_party-init-login-nohttps"],
+		variants: { response_type: RESPONSE_TYPE },
+	},
+	"oidcc-client-basic-certification-test-plan": {
+		title: "OpenID Connect Core: Basic Certification Profile Relying Party Tests",
+		spec: "tests/rp/basic.spec.ts",
+		modules: [
+			"oidcc-client-test",
+			"oidcc-client-test-invalid-iss",
+			"oidcc-client-test-missing-sub",
+			"oidcc-client-test-invalid-aud",
+			"oidcc-client-test-missing-iat",
+			"oidcc-client-test-kid-absent-single-jwks",
+			"oidcc-client-test-kid-absent-multiple-jwks",
+			"oidcc-client-test-idtoken-sig-rs256",
+			"oidcc-client-test-idtoken-sig-none",
+			"oidcc-client-test-invalid-sig-rs256",
+			"oidcc-client-test-userinfo-invalid-sub",
+			"oidcc-client-test-nonce-invalid",
+			"oidcc-client-test-scope-userinfo-claims",
+			"oidcc-client-test-client-secret-basic",
+		],
+		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
+	},
+	"oidcc-client-dynamic-certification-test-plan": {
+		title: "OpenID Connect Core: Dynamic Certification Profile Relying Party Tests",
+		spec: "tests/rp/dynamic.spec.ts",
+		modules: [
+			"oidcc-client-test-discovery-webfinger-acct",
+			"oidcc-client-test-discovery-webfinger-url",
+			"oidcc-client-test-discovery-openid-config",
+			"oidcc-client-test-discovery-jwks-uri-keys",
+			"oidcc-client-test-discovery-issuer-mismatch",
+			"oidcc-client-test-dynamic-registration",
+			"oidcc-client-test-request-uri-signed-rs256",
+			"oidcc-client-test-request-uri-signed-none",
+			"oidcc-client-test-idtoken-sig-none",
+			"oidcc-client-test-signing-key-rotation-just-before-signing",
+			"oidcc-client-test-signing-key-rotation",
+			"oidcc-client-test-userinfo-signed",
+		],
+		variants: { client_auth_type: CLIENT_AUTH_TYPE, response_mode: RESPONSE_MODE },
+	},
+	"oidcc-client-rp-initiated-logout-rp-basic": {
+		title: "OpenID Connect Core: RP Initiated Logout RP Certification Profile Relying Party Tests (Basic)",
+		spec: "tests/rp/rp-initiated-logout.spec.ts",
+		modules: [
+			"oidcc-client-test-rp-init-logout",
+			"oidcc-client-test-rp-init-logout-other-state",
+			"oidcc-client-test-rp-init-logout-no-state",
+		],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
+	},
+	"oidcc-client-back-channel-logout-rp-basic": {
+		title: "OpenID Connect Core: Back Channel Logout RP Certification Profile Relying Party Tests (Basic)",
+		spec: "tests/rp/backchannel-logout.spec.ts",
+		modules: [
+			"oidcc-client-test-rp-backchannel-rpinitlogout",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-alg-none",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-no-event",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-with-nonce",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-alg",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-aud",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-event",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-iss",
+		],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
+	},
+	"oidcc-client-front-channel-logout-rp-basic": {
+		title: "OpenID Connect Core: Front Channel Logout RP Certification Profile Relying Party Tests (Basic)",
+		spec: "tests/rp/frontchannel-logout.spec.ts",
+		modules: ["oidcc-client-test-rp-frontchannel-rpinitlogout"],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
+	},
+	"oidcc-client-rp-session-management-rp-basic": {
+		title: "OpenID Connect Core: Session Management RP Certification Profile Relying Party Tests (Basic)",
+		spec: "tests/rp/session-management.spec.ts",
+		modules: ["oidcc-client-test-session-management"],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
+	},
+	"oidcc-client-test-3rd-party-init-login-test-plan": {
+		title: "OpenID Connect Core Client Login Tests: Relying party 3rd party initiated login tests",
+		spec: "tests/rp/3rdparty-init-login.spec.ts",
+		modules: ["oidcc-client-test-3rd-party-init-login"],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_type: RESPONSE_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
 	},
 };
 
@@ -201,7 +284,7 @@ export interface ConformanceProject {
 	config: string;
 	/**
 	 * modules not run in this project: testName -> why (the Playwright skip reason; the `conformance` fixture of
-	 * tests/fixtures.ts and tests/plan.spec.ts skip them)
+	 * tests/fixtures.ts skips them)
 	 */
 	skipModules?: Record<string, string>;
 }

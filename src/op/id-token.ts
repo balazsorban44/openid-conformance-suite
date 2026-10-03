@@ -7,8 +7,8 @@
 import { createHash } from "node:crypto";
 import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
 import { verifyJwsSignature, type ParsedJwt } from "../suite/jose.ts";
-import { JWAUtil, InvalidAlgorithmException } from "../util/JWAUtil.ts";
-import { JWEUtil } from "../util/JWEUtil.ts";
+import { getDigestAlgorithmForSigAlg, InvalidAlgorithmException } from "../suite/jose-algorithms.ts";
+import { isSymmetricJWEAlgorithm } from "../suite/jose-jwe.ts";
 import type { AuthorizationRequest } from "./authorization.ts";
 import type { Op } from "./op.ts";
 import type { Client } from "./registration.ts";
@@ -392,7 +392,7 @@ export function validateEncryptedIdTokenHasKid(idToken: ParsedJwt, ...requiremen
 	const c: Condition = condition("ValidateEncryptedIdTokenHasKid", ...requirements);
 	const alg = idToken.jwe_header?.["alg"];
 	const kid = idToken.jwe_header?.["kid"];
-	if (JWEUtil.isSymmetricJWEAlgorithm(alg as string)) {
+	if (isSymmetricJWEAlgorithm(alg as string)) {
 		c.success("skipping KID check for symmetric alg " + String(alg));
 		return;
 	}
@@ -478,7 +478,7 @@ function validateHash(
 	}
 	let digestAlgorithm: string;
 	try {
-		digestAlgorithm = JWAUtil.getDigestAlgorithmForSigAlg(extracted.alg);
+		digestAlgorithm = getDigestAlgorithmForSigAlg(extracted.alg);
 	} catch (e) {
 		if (e instanceof InvalidAlgorithmException) {
 			c.failure("Invalid algorithm", { alg: extracted.alg });

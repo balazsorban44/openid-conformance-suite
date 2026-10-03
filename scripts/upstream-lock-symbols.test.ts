@@ -11,7 +11,7 @@ test("javaReferences: paths after 'upstream:'; a bare file name is in the previo
 	expect(javaReferences("see condition/client/Elsewhere.java")).toEqual([]);
 });
 
-test("referencesIn: the function or test right after the comment; primary when the function ports the file", () => {
+test("referencesIn: the function, class or test right after the comment; primary when the function ports the file", () => {
 	const source = `
 /** upstream: condition/client/A.java */
 export function a(): void {}
@@ -27,6 +27,9 @@ export async function group(): Promise<void> {}
 /** upstream: Module.method: condition/client/C.java, condition/client/D.java */
 function listing(): void {}
 
+/** upstream: util/validation/JsonSchemaValidation.java */
+export class JsonSchemaValidation {}
+
 // upstream: openid/OIDCCServerTest.java
 test("oidcc-server: does things", async () => {});
 `;
@@ -37,6 +40,7 @@ test("oidcc-server: does things", async () => {});
 		["condition/client/B.java", "group", false],
 		["condition/client/C.java", "listing", false],
 		["condition/client/D.java", "listing", false],
+		["util/validation/JsonSchemaValidation.java", "JsonSchemaValidation", true],
 		["openid/OIDCCServerTest.java", "oidcc-server", true],
 	]);
 });

@@ -22,9 +22,9 @@ import { escapeHtml } from "../suite/log.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { parseJwt, signJwt, verifyJwsSignature, type ParsedJwt } from "../suite/jose.ts";
 import { htmlResponse, type IncomingRequest } from "../suite/server.ts";
-import { JWTUtil } from "../util/JWTUtil.ts";
-import { JOSEException, ParseException } from "../util/nimbus/errors.ts";
-import { toUriString } from "../util/UriComponentsBuilder.ts";
+import { parseJWT } from "../suite/jose-jwt.ts";
+import { JOSEException, ParseException } from "../suite/errors.ts";
+import { toUriString } from "../suite/uri.ts";
 import * as authz from "./authorization.ts";
 import type { AuthorizationRequest, AuthorizationResponse } from "./authorization.ts";
 import type { ServerMetadata } from "./discovery.ts";
@@ -442,7 +442,7 @@ export function changeIdTokenToAlgNone(idTokenValue: string): string {
 		c.failure("Couldn't find id_token");
 	}
 	try {
-		const parsed = JWTUtil.parseJWT(idTokenValue);
+		const parsed = parseJWT(idTokenValue);
 		if (parsed.type !== "signed") {
 			throw new ParseException("Not a JWS header");
 		}

@@ -16,7 +16,7 @@ import { createHash, randomInt } from "node:crypto";
 import { condition, logModule, soft, type Condition } from "../suite/conditions.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { htmlResponse, WaitTimeoutError, type IncomingRequest } from "../suite/server.ts";
-import { toUriString } from "../util/UriComponentsBuilder.ts";
+import { toUriString } from "../suite/uri.ts";
 import { checkErrorDescriptionContainsCRLFTAB, validateErrorDescription, validateErrorUri } from "./endpoint.ts";
 import type { ParsedJwt } from "../suite/jose.ts";
 import type { Op } from "./op.ts";

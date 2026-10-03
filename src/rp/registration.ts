@@ -11,11 +11,16 @@ import type { TestConfig } from "../suite/config.ts";
 import { HttpError, request as httpRequest } from "../suite/http.ts";
 import type { Jwks } from "../suite/jose.ts";
 import type { IncomingRequest } from "../suite/server.ts";
-import { JWEUtil } from "../util/JWEUtil.ts";
-import { JWS_FAMILY_EC, JWS_FAMILY_ED, JWS_FAMILY_HMAC_SHA, JWS_FAMILY_RSA } from "../util/JWKUtil.ts";
-import { JWSUtil } from "../util/JWSUtil.ts";
-import { parseJavaURI, URISyntaxException } from "../util/jdk/uri.ts";
-import { RedirectURIValidationUtil } from "../util/validation/RedirectURIValidationUtil.ts";
+import { isAsymmetricJWEAlgorithm } from "../suite/jose-jwe.ts";
+import {
+	JWS_FAMILY_EC,
+	JWS_FAMILY_ED,
+	JWS_FAMILY_HMAC_SHA,
+	JWS_FAMILY_RSA,
+	isValidJWSAlgorithm,
+	isAsymmetricJWSAlgorithm,
+} from "../suite/jose-algorithms.ts";
+import { parseJavaURI, URISyntaxException, isLocalhost } from "../suite/uri.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import type { EmulatedOp } from "./op.ts";
 
@@ -252,7 +257,7 @@ export function oidccValidateClientRedirectUris(client: Record<string, unknown>,
 					continue;
 				}
 				// UPSTREAM: Java throws a NullPointerException when the URI has no (server-based) host
-				if (RedirectURIValidationUtil.isLocalhost(uri.host as string)) {
+				if (isLocalhost(uri.host as string)) {
 					appendError("Web Clients using the OAuth Implicit Grant Type MUST not use localhost as the hostname", {
 						uri: redirectUri,
 						host: uri.host,
@@ -261,7 +266,7 @@ export function oidccValidateClientRedirectUris(client: Record<string, unknown>,
 				}
 			}
 			if (applicationType(client) === "native" && uri.scheme?.toLowerCase() === "http") {
-				if (!RedirectURIValidationUtil.isLocalhost(uri.host as string)) {
+				if (!isLocalhost(uri.host as string)) {
 					// the python suite allows http when application type is native and the hostname is localhost
 					appendError("http scheme is allowed only for native applications using localhost", { uri: redirectUri });
 					continue;
@@ -429,7 +434,7 @@ export function validateIdTokenSignedResponseAlg(client: Record<string, unknown>
 		c.success("none algorithm is allowed as only 'code' response type will be used");
 		return;
 	}
-	if (JWSUtil.isValidJWSAlgorithm(alg)) {
+	if (isValidJWSAlgorithm(alg)) {
 		c.success("id_token_signed_response_alg is one of the known algorithms", { alg });
 		return;
 	}
@@ -501,7 +506,7 @@ export function ensureRequestObjectEncryptionAlgIsSetIfEncIsSet(
 export function validateUserinfoSignedResponseAlg(client: Record<string, unknown>, ...requirements: string[]): void {
 	const c: Condition = condition("ValidateUserinfoSignedResponseAlg", ...requirements);
 	const alg = optString(client, "userinfo_signed_response_alg");
-	if (JWSUtil.isValidJWSAlgorithm(alg)) {
+	if (isValidJWSAlgorithm(alg)) {
 		c.success("userinfo_signed_response_alg is one of the known algorithms", { alg });
 		return;
 	}
@@ -520,7 +525,7 @@ export function validateRequestObjectSigningAlg(client: Record<string, unknown>,
 		c.success("request_object_signing_alg is 'none'");
 		return;
 	}
-	if (JWSUtil.isValidJWSAlgorithm(alg)) {
+	if (isValidJWSAlgorithm(alg)) {
 		c.success("request_object_signing_alg is one of the known algorithms", { alg });
 		return;
 	}
@@ -908,16 +913,16 @@ export function isClientJwksNeeded(
 		const alg = optString(client, "request_object_signing_alg");
 		// without request_object_signing_alg any algorithm may be used: whether keys are needed is only known
 		// when a request object arrives
-		if (alg != null && alg !== "none" && JWSUtil.isAsymmetricJWSAlgorithm(alg)) {
+		if (alg != null && alg !== "none" && isAsymmetricJWSAlgorithm(alg)) {
 			return true;
 		}
 	}
 	const idTokenEncAlg = optString(client, "id_token_encrypted_response_alg");
-	if (idTokenEncAlg != null && JWEUtil.isAsymmetricJWEAlgorithm(idTokenEncAlg)) {
+	if (idTokenEncAlg != null && isAsymmetricJWEAlgorithm(idTokenEncAlg)) {
 		return true;
 	}
 	const userinfoEncAlg = optString(client, "userinfo_encrypted_response_alg");
-	return userinfoEncAlg != null && JWEUtil.isAsymmetricJWEAlgorithm(userinfoEncAlg);
+	return userinfoEncAlg != null && isAsymmetricJWEAlgorithm(userinfoEncAlg);
 }
 
 /** upstream: condition/as/EnsureClientHasJwksOrJwksUri.java */

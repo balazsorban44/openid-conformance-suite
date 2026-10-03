@@ -114,8 +114,8 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * Playwright reporter that collects the per-module reports attached by tests/plan.spec.ts (attachment
- * `module-report.json`) and writes:
+ * Playwright reporter that collects the per-module reports the fixtures attach after each test (tests/fixtures.ts,
+ * attachment `module-report.json`) and writes:
  *   conformance-report/results.json  - machine readable
  *   conformance-report/summary.md    - human/agent readable; also appended to $GITHUB_STEP_SUMMARY
  */

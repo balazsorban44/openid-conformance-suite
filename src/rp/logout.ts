@@ -17,11 +17,12 @@ import { endpointResponse, HttpError, request, type EndpointResponse } from "../
 import type { Jwks } from "../suite/jose.ts";
 import { escapeHtml } from "../suite/log.ts";
 import { htmlResponse, type IncomingRequest } from "../suite/server.ts";
-import { JWKUtil, JWS_FAMILY_HMAC_SHA, type JWK } from "../util/JWKUtil.ts";
-import { toUriString } from "../util/UriComponentsBuilder.ts";
-import { isJOSEException, ParseException } from "../util/nimbus/errors.ts";
-import { JWSSigner } from "../util/nimbus/jws.ts";
-import { parseClaimsSet } from "../util/nimbus/jwt.ts";
+import { parseJWK, selectAsymmetricJWSKey, parseJWKSet, toPublicJWK, type JWK } from "../suite/jose-jwk.ts";
+import { JWS_FAMILY_HMAC_SHA } from "../suite/jose-algorithms.ts";
+import { toUriString } from "../suite/uri.ts";
+import { isJOSEException, ParseException } from "../suite/errors.ts";
+import { rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
+import { parseClaimsSet } from "../suite/jose-jwt.ts";
 import { oidccGenerateServerConfigurationWithSessionManagement } from "./discovery.ts";
 import { failTest, type EmulatedOp, type EmulatedOpOptions } from "./op.ts";
 import type { RpClient } from "./registration.ts";
@@ -347,7 +348,7 @@ function selectOrCreateKey(c: Condition, serverJwks: Jwks, alg: string, client: 
 		if (typeof client["client_secret"] !== "string") {
 			throw new Error("getString called on something that is not a string: " + JSON.stringify(client["client_secret"]));
 		}
-		return JWKUtil.parseJWK({
+		return parseJWK({
 			kty: "oct",
 			use: "sig",
 			alg,
@@ -356,7 +357,7 @@ function selectOrCreateKey(c: Condition, serverJwks: Jwks, alg: string, client: 
 	}
 	let jwk: JWK | null;
 	try {
-		jwk = JWKUtil.selectAsymmetricJWSKey(alg, JWKUtil.parseJWKSet(JSON.stringify(serverJwks)).keys);
+		jwk = selectAsymmetricJWSKey(alg, parseJWKSet(JSON.stringify(serverJwks)).keys);
 	} catch (e) {
 		if (e instanceof ParseException) {
 			c.failureFrom("Could not parse jwks. Failed to find a signing key.", e, { jwks: serverJwks, alg });
@@ -384,13 +385,13 @@ async function signUsingKey(
 		const kty = jwk["kty"];
 		const signer =
 			kty === "RSA"
-				? JWSSigner.rsa(jwk)
+				? rsaSigner(jwk)
 				: kty === "EC"
-					? JWSSigner.ec(jwk)
+					? ecSigner(jwk)
 					: kty === "oct"
-						? JWSSigner.mac(jwk)
+						? macSigner(jwk)
 						: kty === "OKP"
-							? JWSSigner.ed25519(jwk)
+							? ed25519Signer(jwk)
 							: null;
 		if (signer == null) {
 			c.failure("Couldn't create signer from key; kty must be one of 'oct', 'rsa', 'ec'", { jwk: JSON.stringify(jwk) });
@@ -400,7 +401,7 @@ async function signUsingKey(
 			header["kid"] = jwk["kid"];
 		}
 		const jws = await signer.sign(header as never, JSON.stringify(parseClaimsSet(claims as never)));
-		const publicJwk = JWKUtil.toPublicJWK(jwk);
+		const publicJwk = toPublicJWK(jwk);
 		return {
 			jws,
 			header,

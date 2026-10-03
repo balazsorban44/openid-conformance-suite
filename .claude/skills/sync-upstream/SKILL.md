@@ -1,79 +1,77 @@
 ---
 name: sync-upstream
-description: How to find and apply changes from the upstream Java OpenID conformance suite (gitlab.com/openid/Conformance-suite) to this TypeScript port using upstream.lock.json and scripts/sync-upstream.ts. Use when asked to sync, update, bump, or diff against upstream, or when a ported file looks out of date.
+description: How to find and apply changes from the upstream Java OpenID conformance suite (gitlab.com/openid/Conformance-suite) to this suite using upstream.lock.json and scripts/sync-upstream.ts. Use when asked to sync, update, bump, or diff against upstream, or when a check or test looks out of date.
 ---
 
 # Syncing with upstream
 
-The port tracks upstream at the commit recorded in `upstream.lock.json`:
+The suite tracks upstream at the commit recorded in `upstream.lock.json`. Every upstream Java file that a
+function, class or test ports is a `symbols` entry:
 
 ```json
 {
 	"upstream": { "repo": "https://gitlab.com/openid/Conformance-suite.git", "commit": "<sha>", "date": "..." },
-	"files": {
-		"src/condition/client/ValidateAtHash.ts": {
-			"java": "src/main/java/net/openid/conformance/condition/client/ValidateAtHash.java",
-			"blob": "<git blob sha>",
-			"loc": 14
+	"symbols": {
+		"src/main/java/net/openid/conformance/condition/client/ValidateIdTokenNonce.java": {
+			"blob": "<git blob sha at the pinned commit>",
+			"loc": 41,
+			"ts": "src/op/id-token.ts",
+			"symbol": "validateIdTokenNonce"
 		}
 	}
 }
 ```
 
-`blob` is `git hash-object` of the Java file at the pinned commit, so a change upstream is detected without
-needing the old checkout. A key `<ts path>::<Name>` maps a further Java class into an existing TS file (e.g.
-`src/framework/Condition.ts::PreEnvironment`); `note` marks entries that are tracked but not ported (`"not
-ported: ..."`, `"dropped"`).
+The entries come from the `upstream:` comments in the code (`/** upstream: condition/client/ValidateIdTokenNonce.java */`
+before a function or class, `// upstream: openid/OIDCCServerTest.java` before a `test(`; a group helper lists the
+conditions it calls after `with`). `pnpm lock-symbols` (`scripts/upstream-lock-symbols.ts --write`) regenerates
+them; CI runs `--check`. `blob` is `git hash-object` of the Java file at the pinned commit, so a change upstream is
+detected without the old checkout.
 
 ## Commands
 
 ```bash
-pnpm sync-upstream --fetch              # partial clone/update of upstream master into .upstream/ ($UPSTREAM)
-npm run sync-upstream -- --status             # list ported files whose Java source changed since the pin (default)
-npm run sync-upstream -- --diff <ts-path>     # show the Java diff (pinned -> current) for one ported file
-npm run sync-upstream -- --closure <JavaFQN>...    # list Java files a plan transitively needs that are not in the lock
-npm run sync-upstream -- --add <JavaFQN>...        # add those files to the lock
-npm run sync-upstream -- --pin                # after porting: update commit + blob hashes to the current upstream HEAD
+pnpm sync-upstream --fetch                                  # partial clone/update of upstream master into .upstream/ ($UPSTREAM)
+pnpm sync-upstream --status                                 # symbols whose Java source changed or was deleted since the pin (default)
+pnpm sync-upstream --diff src/op/id-token.ts#validateIdTokenNonce   # the Java diff (pinned -> HEAD) of what a function ports
+pnpm sync-upstream --diff src/op/id-token.ts                # the same for every symbol of a file
+pnpm sync-upstream --pin                                    # after syncing: move commit + blob hashes to the upstream HEAD
 ```
 
 ## Workflow
 
-1. `--fetch` then `--status`. Output groups files into `changed`, `deleted upstream`, `unchanged`.
-2. For each changed file: `--diff` it, read the Java hunk, apply the same change to the TS file following
-   `.claude/skills/java-to-ts-porting/SKILL.md`. Changes are usually a new log message, a new requirement tag,
-   an extra check, or a renamed environment key - port them verbatim.
-3. New Java classes referenced by changed files (a new condition a module now calls): list them with
-   `--closure`, add them to the lock with `--add` and port them (`.claude/skills/port-conditions`).
-4. Deleted upstream: delete the TS file, remove it from the lock and re-run `node scripts/gen-registry.ts`.
-5. Run `npm run check` and the CI plans (`.claude/skills/run-conformance`). Fix, then `--pin`.
+1. `--fetch` then `--status`: changed and deleted symbols, as `<ts>#<symbol> <- <java>`.
+2. For each changed symbol: `--diff` it, read the Java hunk, apply the same change to the function or test,
+   following the porting rules in `.claude/skills/writing-tests`. Changes are usually a new log message, a new
+   requirement tag, an extra check, or a changed flow in a module - port them verbatim.
+3. A new condition a module now calls: add it as a function (writing-tests, "Adding a check") with its `upstream:`
+   comment and call it where upstream does; a new module of a plan: a new `test()` and an entry in the plan's
+   `modules` (`plans` in src/runner/projects.ts).
+4. Deleted upstream: delete the function or test (and the module from `plans`).
+5. `pnpm lock-symbols`, `pnpm check`, `pnpm test:unit` and the CI projects (`.claude/skills/run-conformance`).
+   Fix, then `--pin`.
 6. Commit the lock together with the code: "Sync with upstream <short-sha>".
 
-## Util classes and library emulation
+## The Java/Nimbus emulation
 
-`src/util/*Util.ts` and the other files in the lock are re-ported like conditions: `--diff src/util/JWKUtil.ts`,
-apply the Java hunk to the TS method of the same name. The ported util files contain only upstream methods; when
-the changed Java calls Nimbus JOSE+JWT or JDK API that is not emulated yet, add it to `src/util/nimbus/` or
-`src/util/jdk/` (with a unit test, see `java-to-ts-porting`) and import it, rather than writing it into the util
-file or a condition.
+The functions that port upstream's util classes (util/JWKUtil, JWTUtil, JWEUtil, JWAUtil, JWSUtil,
+Bcp47LocaleValidation, Bcp47SubtagRegistry, validation/_) live in src/suite (jose-_.ts, uri.ts, bcp47.ts,
+json-schema.ts) with `upstream: util/<Name>.java` comments, so `--status` reports them like checks. The emulation
+of libraries (Nimbus JOSE+JWT, the JDK, Spring's UriComponentsBuilder, networknt's JSON schema validator) has no
+upstream Java file and is not in the lock: re-check it when upstream bumps `nimbus-jose-jwt` in its `pom.xml` (the
+emulated version is noted in src/suite/jose-algorithms.ts) or its JDK, and run `pnpm test:unit` after touching it.
 
-`src/util/nimbus/`, `src/util/jdk/` and `src/util/UriComponentsBuilder.ts` are **not** in the lock (there is no
-upstream Java file for them), so `--status` never reports them. Re-check them when upstream bumps
-`nimbus-jose-jwt` in its `pom.xml` (the emulated version is noted in `src/util/nimbus/algorithms.ts`) or its JDK,
-and run `pnpm test:unit` after touching them.
+## Adding a new plan
 
-## Adding a new plan to the port
-
-`--closure net.openid.conformance.openid.OIDCCImplicitTestPlan` lists every Java file in the plan's transitive
-dependency closure that is not yet in the lock. Add them to `files` (the script does it with `--add`), port them,
-regenerate `src/registry.ts` (`node scripts/gen-registry.ts`), add a CI target config under `configs/` and a
-project to `src/runner/projects.ts` (the CI matrix is generated from it).
+Read the Java plan (`openid/<Plan>.java`, `@PublishTestPlan` and `testModulesWithVariants()`) and its modules,
+then follow "Plans, modules and projects" in `.claude/skills/writing-tests`: a spec file, an entry in `plans`, a
+test configuration under `configs/`, a project in `projects` (the CI matrix is read from it).
 
 ## What is deliberately not ported
 
-Java packages outside the lock (Spring runtime, MongoDB persistence, UI, `info/`, `security/`, `export/`,
-`sharing/`, `statistics/`, API controllers) have TypeScript equivalents in `src/framework/` and `src/runner/`
-that are **not** 1:1. Changes upstream in those areas are evaluated by hand: if they change how conditions are
-called, how the environment or log entries look, or how incoming requests are parsed, mirror them in
-`src/framework/`. The `src/framework/*` entries in the lock (`testmodule/`, `frontchannel/`, `plan/`,
-`AbstractCondition`, ...) only flag such changes; apply them by hand and run the framework fidelity checks in
-`CONTRIBUTING.md`.
+Upstream's Spring runtime, MongoDB persistence, UI, API controllers (`info/`, `security/`, `export/`, `sharing/`,
+`statistics/`, `runner/`) and the class framework (`testmodule/`, `sequence/`, `condition/AbstractCondition`,
+`variant/`, `plan/`) have no counterpart: the Playwright fixtures and src/suite replace them. Changes upstream in
+those areas are evaluated by hand: if they change how a condition logs, how log entries or blocks look, how
+incoming requests are parsed (`requestParts`), or how run-test-plan.py judges a result, mirror them in src/suite
+or tests/fixtures.ts.

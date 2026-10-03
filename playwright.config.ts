@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { portedPlans, projects } from "./src/runner/projects.ts";
+import { plans, projects } from "./src/runner/projects.ts";
 import { globBody } from "./src/suite/config.ts";
 
 /**
@@ -10,17 +10,15 @@ import { globBody } from "./src/suite/config.ts";
  *   CONFORMANCE_PLAN + CONFORMANCE_CONFIG (+ CONFORMANCE_VARIANT)
  *   CONFORMANCE_MODULE    only modules whose name matches this glob
  *
- * A plan's rewritten modules run from its spec file (portedPlans), the rest from tests/plan.spec.ts (the old
- * framework). Without a selection only tests/plan.spec.ts is matched, which then skips with a hint.
+ * The selected plan runs from its spec file (`plans` in src/runner/projects.ts). Without a plan every spec file is
+ * matched (so `playwright test --list` and editors see every test); running them needs a configuration.
  */
 const project = projects.find((p) => p.name === process.env["CONFORMANCE_PROJECT"]);
-const plan = process.env["CONFORMANCE_PLAN"] ?? project?.plan;
-const configured = Boolean(process.env["CONFORMANCE_CONFIG"] ?? project?.config);
-const specs = configured
-	? Object.entries(portedPlans)
-			.filter(([name]) => !plan || name === plan)
-			.map(([, p]) => p.spec)
-	: [];
+const planName = process.env["CONFORMANCE_PLAN"] ?? project?.plan;
+if (planName && !plans[planName]) {
+	throw new Error(`Unknown test plan '${planName}' (see \`openid-conformance list\`)`);
+}
+const specs = [...new Set(planName ? [plans[planName].spec] : Object.values(plans).map((p) => p.spec))];
 const moduleGlob = process.env["CONFORMANCE_MODULE"];
 
 export default defineConfig({
@@ -31,8 +29,8 @@ export default defineConfig({
 	retries: 0,
 	timeout: Number(process.env["CONFORMANCE_TEST_TIMEOUT"] ?? 240_000),
 	expect: { timeout: 10_000 },
-	// module titles are "<module>: ..." (tests/op, tests/rp) or "<module>[variant]" (tests/plan.spec.ts)
-	grep: moduleGlob ? new RegExp(`(^|\\s)(${globBody(moduleGlob)})(:|\\[)`) : undefined,
+	// test titles are "<module>: <what the OP/RP must do>"
+	grep: moduleGlob ? new RegExp(`(^|\\s)(${globBody(moduleGlob)}):`) : undefined,
 	reporter: [
 		["list"],
 		["html", { open: "never", outputFolder: process.env["PLAYWRIGHT_HTML_OUTPUT_DIR"] ?? "playwright-report" }],
@@ -52,9 +50,7 @@ export default defineConfig({
 	projects: [
 		{
 			name: process.env["CONFORMANCE_PROJECT"] ?? "conformance",
-			testMatch: ["plan.spec.ts", ...specs].map(
-				(s) => new RegExp(s.replace(/^tests\//, "").replace(/[.]/g, "\\.") + "$"),
-			),
+			testMatch: specs.map((s) => new RegExp(s.replace(/^tests\//, "").replace(/[.]/g, "\\.") + "$")),
 		},
 	],
 });

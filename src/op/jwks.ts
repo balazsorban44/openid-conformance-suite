@@ -6,8 +6,15 @@ import { isDeepStrictEqual } from "node:util";
 import { block, condition, soft, type Condition } from "../suite/conditions.ts";
 import { HttpError, request } from "../suite/http.ts";
 import { parseJwksLenientlyLoggingSkips, ParseException, type Jwks } from "../suite/jose.ts";
-import { JWKUtil } from "../util/JWKUtil.ts";
-import { getRequiredParams } from "../util/nimbus/jwk.ts";
+import {
+	findStructurallyInvalidKeys,
+	issuesToJson,
+	findPrivateOrSymmetricKeyMembers,
+	findUnparseableUsableKeys,
+	findUnusableKeys,
+	parseJWK,
+	getRequiredParams,
+} from "../suite/jose-jwk.ts";
 import type { ServerMetadata } from "./discovery.ts";
 
 /** upstream: condition/client/FetchServerKeys.java */
@@ -131,11 +138,11 @@ export function checkDistinctKeyIdValueInClientJWKs(jwks: Jwks, ...requirements:
 }
 
 /** One issue a JWK set check found: the first one is named in the message */
-type Issues = ReturnType<typeof JWKUtil.findStructurallyInvalidKeys>;
+type Issues = ReturnType<typeof findStructurallyInvalidKeys>;
 
 function failOnIssues(c: Condition, label: string, issues: Issues, message: (first: Issues[number]) => string): void {
 	if (issues.length > 0) {
-		c.failure(message(issues[0]), { jwks_source: label, issues: JWKUtil.issuesToJson(issues) });
+		c.failure(message(issues[0]), { jwks_source: label, issues: issuesToJson(issues) });
 	}
 }
 
@@ -167,7 +174,7 @@ export async function validateJwks(
 				failOnIssues(
 					c,
 					label,
-					JWKUtil.findPrivateOrSymmetricKeyMembers(jwks),
+					findPrivateOrSymmetricKeyMembers(jwks),
 					(first) =>
 						`The JWK set in ${label} contains private or symmetric key material; a published JWK set must contain public keys only. The key at index ${first.index} ${first.detail}.`,
 				);
@@ -182,7 +189,7 @@ export async function validateJwks(
 			failOnIssues(
 				c,
 				label,
-				JWKUtil.findStructurallyInvalidKeys(jwks),
+				findStructurallyInvalidKeys(jwks),
 				(first) => `The JWK set in ${label} is structurally invalid. The key at index ${first.index} ${first.detail}.`,
 			);
 			c.success("The JWK set in " + label + " is structurally valid", { jwks_source: label });
@@ -192,7 +199,7 @@ export async function validateJwks(
 			failOnIssues(
 				c,
 				label,
-				JWKUtil.findUnparseableUsableKeys(jwks),
+				findUnparseableUsableKeys(jwks),
 				(first) =>
 					`The JWK set in ${label} contains a key that should be usable but the JOSE library cannot parse. The key at index ${first.index} ${first.detail}.`,
 			);
@@ -200,7 +207,7 @@ export async function validateJwks(
 		});
 		soft(() => {
 			const c: Condition = condition("WarnOnUnusableJwksKeys", ...requirements);
-			const issues = JWKUtil.findUnusableKeys(jwks);
+			const issues = findUnusableKeys(jwks);
 			failOnIssues(
 				c,
 				label,
@@ -268,7 +275,7 @@ function pubKeysWithKeyId(c: Condition, inputKeys: JsonKey[]): JsonKey[] {
 	const out: JsonKey[] = [];
 	for (const key of inputKeys) {
 		try {
-			const jwk = JWKUtil.parseJWK(JSON.stringify(key));
+			const jwk = parseJWK(JSON.stringify(key));
 			const requiredParamsJson: JsonKey = getRequiredParams(jwk as never);
 			requiredParamsJson["kid"] = (jwk["kid"] as string | undefined) ?? null;
 			addToSet(out, requiredParamsJson);

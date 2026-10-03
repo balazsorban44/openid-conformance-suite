@@ -6,20 +6,18 @@
 import { createHash } from "node:crypto";
 import { condition, ConditionFailed, skipped, type Condition } from "../suite/conditions.ts";
 import type { Jwks } from "../suite/jose.ts";
-import { InvalidAlgorithmException, JWAUtil } from "../util/JWAUtil.ts";
 import {
-	JWKUtil,
+	InvalidAlgorithmException,
+	getDigestAlgorithmForSigAlg,
 	JWS_FAMILY_EC,
 	JWS_FAMILY_ED,
 	JWS_FAMILY_HMAC_SHA,
 	JWS_FAMILY_RSA,
-	type JWK,
-} from "../util/JWKUtil.ts";
-import { JWTUtil } from "../util/JWTUtil.ts";
-import { toUsAscii } from "../util/jdk/strings.ts";
-import { isJOSEException, ParseException } from "../util/nimbus/errors.ts";
-import { JWSSigner } from "../util/nimbus/jws.ts";
-import { parseClaimsSet } from "../util/nimbus/jwt.ts";
+} from "../suite/jose-algorithms.ts";
+import { parseJWKSet, parseJWK, selectAsymmetricJWSKey, toPublicJWK, type JWK } from "../suite/jose-jwk.ts";
+import { parseJWT, parseClaimsSet } from "../suite/jose-jwt.ts";
+import { isJOSEException, ParseException } from "../suite/errors.ts";
+import { rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
 import type { EmulatedOp } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 import type { UserInfo } from "./userinfo.ts";
@@ -57,7 +55,7 @@ export function oidccExtractServerSigningAlg(client: RpClient, serverJwks: Jwks)
 		typeof client["id_token_signed_response_alg"] === "string" ? client["id_token_signed_response_alg"] : null;
 	let keys: JWK[];
 	try {
-		keys = JWKUtil.parseJWKSet(JSON.stringify(serverJwks)).keys;
+		keys = parseJWKSet(JSON.stringify(serverJwks)).keys;
 	} catch (e) {
 		if (e instanceof ParseException) {
 			c.failureFrom(configuredAlg == null ? "Failed to parse server_jwks" : "Could not parse server jwks.", e, {
@@ -186,7 +184,7 @@ function halfHash(name: string, hashName: string, value: string, algorithm: stri
 	const c: Condition = condition(name, ...requirements);
 	let digestAlgorithm: string;
 	try {
-		digestAlgorithm = JWAUtil.getDigestAlgorithmForSigAlg(algorithm);
+		digestAlgorithm = getDigestAlgorithmForSigAlg(algorithm);
 	} catch (e) {
 		if (e instanceof InvalidAlgorithmException) {
 			c.failureFrom("Unsupported algorithm", e, { alg: algorithm });
@@ -199,6 +197,11 @@ function halfHash(name: string, hashName: string, value: string, algorithm: stri
 	const hash = digest.subarray(0, Math.floor(digest.length / 2)).toString("base64url");
 	c.success(`Successful ${hashName} encoding`, { [hashName]: hash });
 	return hash;
+}
+
+/** Java String.getBytes(US_ASCII): every non-ASCII character (code point) becomes '?' */
+export function toUsAscii(s: string): string {
+	return Array.from(s, (c) => ((c.codePointAt(0) as number) > 0x7f ? "?" : c)).join("");
 }
 
 /** upstream: condition/as/CalculateAtHash.java */
@@ -330,7 +333,7 @@ export async function oidccSignIdToken(
 		if (typeof client["client_secret"] !== "string") {
 			throw new Error("getString called on something that is not a string: " + JSON.stringify(client["client_secret"]));
 		}
-		jwk = JWKUtil.parseJWK({
+		jwk = parseJWK({
 			kty: "oct",
 			use: "sig",
 			alg,
@@ -338,7 +341,7 @@ export async function oidccSignIdToken(
 		});
 	} else {
 		try {
-			jwk = JWKUtil.selectAsymmetricJWSKey(alg, JWKUtil.parseJWKSet(JSON.stringify(serverJwks)).keys);
+			jwk = selectAsymmetricJWSKey(alg, parseJWKSet(JSON.stringify(serverJwks)).keys);
 		} catch (e) {
 			if (e instanceof ParseException) {
 				c.failureFrom("Could not parse jwks. Failed to find a signing key.", e, { jwks: serverJwks, alg });
@@ -353,13 +356,13 @@ export async function oidccSignIdToken(
 		const kty = jwk["kty"];
 		const signer =
 			kty === "RSA"
-				? JWSSigner.rsa(jwk)
+				? rsaSigner(jwk)
 				: kty === "EC"
-					? JWSSigner.ec(jwk)
+					? ecSigner(jwk)
 					: kty === "oct"
-						? JWSSigner.mac(jwk)
+						? macSigner(jwk)
 						: kty === "OKP"
-							? JWSSigner.ed25519(jwk)
+							? ed25519Signer(jwk)
 							: null;
 		if (signer == null) {
 			c.failure("Couldn't create signer from key; kty must be one of 'oct', 'rsa', 'ec'", { jwk: JSON.stringify(jwk) });
@@ -369,7 +372,7 @@ export async function oidccSignIdToken(
 			header["kid"] = jwk["kid"];
 		}
 		const jws = await signer.sign(header as never, JSON.stringify(parseClaimsSet(claims as never)));
-		const publicJwk = JWKUtil.toPublicJWK(jwk);
+		const publicJwk = toPublicJWK(jwk);
 		c.success("Signed the ID token", {
 			id_token: { verifiable_jws: jws, public_jwk: publicJwk != null ? JSON.stringify(publicJwk) : null },
 			algorithm: alg,
@@ -410,7 +413,7 @@ export function invalidateIdTokenSignature(idToken: string, ...requirements: str
 	const c: Condition = condition("InvalidateIdTokenSignature", ...requirements);
 	let invalid: string;
 	try {
-		const jwt = JWTUtil.parseJWT(idToken);
+		const jwt = parseJWT(idToken);
 		if (jwt.type !== "signed") {
 			throw new ParseException("Not a JWS header");
 		}

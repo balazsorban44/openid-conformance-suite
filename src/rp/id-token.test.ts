@@ -9,6 +9,7 @@ import {
 	oidccExtractServerSigningAlg,
 	oidccSignIdToken,
 	signIdTokenWithAlgNone,
+	toUsAscii,
 } from "./id-token.ts";
 import { oidccGenerateServerJWKs, oidccGenerateServerJWKsSingleSigningKeyWithNoKeyId } from "./jwks.ts";
 import type { ServerKeys } from "./jwks.ts";
@@ -105,4 +106,15 @@ test("at_hash: the left half of the digest the signing algorithm uses, base64url
 	expect(calculateAtHash("an-access-token", "ES384")).toBe(half("sha384", 24));
 	expect(calculateAtHash("an-access-token", "EdDSA")).toBe(half("sha512", 32));
 	expect(() => calculateAtHash("an-access-token", "XX1")).toThrow("CalculateAtHash: Unsupported algorithm");
+});
+
+// Expected values were produced with OpenJDK 21.
+test("toUsAscii: String.getBytes(US_ASCII)", () => {
+	expect(toUsAscii("abc-._~")).toBe("abc-._~");
+	expect(toUsAscii("a\u00e9\u20ac")).toBe("a??");
+	// a surrogate pair is one code point, so one ?
+	expect(toUsAscii("x\u{1F600}y")).toBe("x?y");
+	// a lone surrogate is unmappable too
+	expect(toUsAscii("x\uD83Dy")).toBe("x?y");
+	expect(toUsAscii("\u007f\u0080")).toBe("\u007f?");
 });

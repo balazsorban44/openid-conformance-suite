@@ -10,10 +10,8 @@
  */
 import { condition, skipped, skippedWithResult, soft, type Condition } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
-import { Bcp47LocaleValidation } from "../util/Bcp47LocaleValidation.ts";
-import { Bcp47SubtagRegistry } from "../util/Bcp47SubtagRegistry.ts";
-import { JsonSchemaValidation } from "../util/validation/JsonSchemaValidation.ts";
-import { JsonSchemaValidationException } from "../util/validation/JsonSchemaValidationException.ts";
+import { validateSubtags, nonCanonicalCasing, subtagRegistry } from "../suite/bcp47.ts";
+import { JsonSchemaValidation, JsonSchemaValidationException, toInstancePropertyPath } from "../suite/json-schema.ts";
 import {
 	checkDiscEndpointAllEndpointsAreHttps,
 	checkDiscEndpointRequestParameterSupported,
@@ -281,7 +279,7 @@ export function checkForUnexpectedParametersInServerMetadata(
 	const unknownProps: Record<string, unknown>[] = [];
 	const allowListed: string[] = [];
 	for (const msg of result.unknownPropertyErrors().getValidationMessages()) {
-		const path = JsonSchemaValidation.toInstancePropertyPath(msg.getInstanceLocation(), msg.getProperty());
+		const path = toInstancePropertyPath(msg.getInstanceLocation(), msg.getProperty());
 		if (ignored.has(msg.getProperty() as string)) {
 			allowListed.push(path);
 			continue;
@@ -648,13 +646,13 @@ export function checkDiscEndpointLocalesSyntax(metadata: ServerMetadata, ...requ
 				issues.push(`${fieldName}[${i}]: expected string, got ${JSON.stringify(entry)}`);
 				return;
 			}
-			Bcp47LocaleValidation.validateSubtags(entry, `${fieldName}[${i}]`, issues);
+			validateSubtags(entry, `${fieldName}[${i}]`, issues);
 		});
 	}
 	if (issues.length > 0) {
 		c.failure("Invalid BCP47 language tag(s) in authorization server metadata", {
 			issues,
-			language_subtag_registry_date: Bcp47SubtagRegistry.getInstance().getFileDate(),
+			language_subtag_registry_date: subtagRegistry().getFileDate(),
 		});
 	}
 	c.success(
@@ -675,7 +673,7 @@ export function checkDiscEndpointLocalesCanonicalCasing(metadata: ServerMetadata
 			if (typeof entry !== "string") {
 				return;
 			}
-			const canonical = Bcp47LocaleValidation.nonCanonicalCasing(entry);
+			const canonical = nonCanonicalCasing(entry);
 			if (canonical != null) {
 				issues.push(`${fieldName}[${i}]: '${entry}' should be '${canonical}' to match BCP47 canonical casing`);
 			}

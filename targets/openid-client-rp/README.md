@@ -9,7 +9,7 @@ node targets/openid-client-rp/server.ts      # prints "ready" once listening on 
 ```
 
 `PORT` (http, default 4000) and `RP_HTTPS_PORT` (https, default 4443, `0` disables) choose the listeners. The
-configs in `configs/openid-client-rp/` let the runner pick free ports (src/suite/target.ts): `"url":
+configs in `configs/openid-client-rp/` let the suite pick free ports (src/suite/target.ts): `"url":
 "http://localhost:${PORT}"`, `"env": { "RP_HTTPS_PORT": "${PORT_HTTPS}" }`, and use `${TARGET_URL}` and
 `${PORT_HTTPS}` wherever the RP's URLs appear (readyUrl, `client_driver.startUrl`, static `redirect_uri`, browser
 matches), so several projects and workers can run the RP at the same time.
@@ -37,9 +37,10 @@ logout, session management and third party initiated login modules work too.
 
 ## Driver contract
 
-1. The runner starts the process from the config's `target.command` and waits until `target.readyUrl`
+1. The suite starts the process from the config's `target.command` and waits until `target.readyUrl`
    (`${TARGET_URL}/ready`) answers 200.
-2. For every RP test module, once the suite's emulated OP is ready (module `WAITING`), the runner calls
+2. For every RP test module, once the test has started the suite's emulated OP (`rp.start()`), it calls
+   (`rp.driveClient()`, src/rp/rp.ts)
 
    ```
    GET {client_driver.startUrl}?issuer=<url>&module=<testName>&variant=<json>&client_metadata_defaults=<json>&alias=<alias>
@@ -72,8 +73,8 @@ logout, session management and third party initiated login modules work too.
    the response, and `error` carries the rejection. `steps` is a human readable log for the report. A malformed
    request gets 400.
 
-4. The runner then waits for the module to finish, exactly like run-test-plan.py. The module result in the suite
-   is authoritative; `ok` is informational.
+4. Meanwhile the test follows the requests the RP sends to the emulated OP; the answer tells it that no further
+   requests will come. The module result in the suite is authoritative; `ok` is informational.
 
 Static RP configs must register the RP's endpoints at the suite: `client.redirect_uri` `${TARGET_URL}/cb`
 (and for logout plans `post_logout_redirect_uri` `${TARGET_URL}/logged-out`, `backchannel_logout_uri`

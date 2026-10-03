@@ -9,10 +9,10 @@
 import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
 import { endpointResponse, HttpError, request, type EndpointResponse } from "../suite/http.ts";
 import { parseJwt, signJwt, type ParsedJwt } from "../suite/jose.ts";
-import { JWE_FAMILY_ASYMMETRIC, JWKUtil, ParseException } from "../util/JWKUtil.ts";
-import { JWTUtil } from "../util/JWTUtil.ts";
-import { keyTypeForAlgorithm } from "../util/nimbus/algorithms.ts";
-import { JOSEException } from "../util/nimbus/errors.ts";
+import { JWE_FAMILY_ASYMMETRIC, keyTypeForAlgorithm } from "../suite/jose-algorithms.ts";
+import { parseJWKSet } from "../suite/jose-jwk.ts";
+import { ParseException, JOSEException } from "../suite/errors.ts";
+import { parseJWT } from "../suite/jose-jwt.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import {
 	checkContentType,
@@ -365,7 +365,7 @@ export function validateIdTokenFromTokenResponseEncryption(
 /** upstream: condition/client/AbstractVerifyJweEncryption.java; true when encrypted to one of the client's keys */
 export function verifyJweEncryption(c: Condition, token: string, jwks: unknown, tokenName: string): boolean {
 	try {
-		const jwt = JWTUtil.parseJWT(token);
+		const jwt = parseJWT(token);
 		if (jwt.type !== "encrypted") {
 			return false;
 		}
@@ -382,7 +382,7 @@ export function verifyJweEncryption(c: Condition, token: string, jwks: unknown, 
 		if (!JWE_FAMILY_ASYMMETRIC.includes(alg)) {
 			return false;
 		}
-		const keys = JWKUtil.parseJWKSet(JSON.stringify(jwks)).keys;
+		const keys = parseJWKSet(JSON.stringify(jwks)).keys;
 		const ofType = keys.filter((k) => k["kty"] === kty).length;
 		const withKid = keys.filter((k) => k["kty"] === kty && kid != null && k["kid"] === kid).length;
 		const details = { jwks, kid, kty, [tokenName]: token };

@@ -10,7 +10,10 @@
 	"files": [
 		"bin",
 		"src",
+		"!src/**/*.test.ts",
+		"!src/suite/testing.ts",
 		"tests",
+		"configs/certs",
 		"playwright.config.ts",
 		"upstream.lock.json",
 		"README.md",
@@ -31,8 +34,7 @@
 	"dependencies": {
 		"@playwright/test": "^1.63.0",
 		"commander": "^15.0.0",
-		"jose": "^6.2.12",
-		"undici": "^8.11.2"
+		"jose": "^6.2.12"
 	},
 	"devDependencies": {
 		"@types/node": "^24",

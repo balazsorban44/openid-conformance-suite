@@ -6,7 +6,7 @@ import { generateKeyPairSync, randomInt, randomUUID, type KeyObject } from "node
 import { checkDistinctKeyIdValueInServerJWKs, validateJwks } from "../op/jwks.ts";
 import { condition, soft, type Condition } from "../suite/conditions.ts";
 import { privateJwks, publicJwks, type JWK, type Jwks } from "../suite/jose.ts";
-import { JWKUtil } from "../util/JWKUtil.ts";
+import { parseJWK } from "../suite/jose-jwk.ts";
 
 /** upstream env "server_jwks" (the signing keys in use), "server_public_jwks" (published), "server_encryption_keys" */
 export interface ServerKeys {
@@ -67,7 +67,7 @@ function pooledKey(slot: "rsa-2048" | "ec-p-256" | "ec-secp256k1" | "okp-ed25519
 			privateKey = generateKeyPairSync("ed25519").privateKey;
 		}
 		// normalized to Nimbus' member order
-		keys.push(JWKUtil.parseJWK(privateKey.export({ format: "jwk" }) as Record<string, unknown> as never));
+		keys.push(parseJWK(privateKey.export({ format: "jwk" }) as Record<string, unknown> as never));
 	}
 	return structuredClone(keys[index]);
 }
@@ -119,7 +119,7 @@ function generateServerJwks(
 			}
 		}
 	};
-	// changing the order here may affect the signing key selection (JWKUtil.selectAsymmetricJWSKey)
+	// changing the order here may affect the signing key selection (selectAsymmetricJWSKey)
 	create(p.numberOfRSASigningKeysWithNoAlg, "rsa-2048", "sig", null);
 	create(p.numberOfECCurveP256SigningKeysWithNoAlg, "ec-p-256", "sig", null);
 	create(p.numberOfECCurveSECP256KSigningKeysWithNoAlg, "ec-secp256k1", "sig", null);

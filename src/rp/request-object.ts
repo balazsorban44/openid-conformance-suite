@@ -9,12 +9,12 @@ import { condition, skipped, soft, type Condition } from "../suite/conditions.ts
 import { HttpError, request } from "../suite/http.ts";
 import { parseJwksLenientlyLoggingSkips, parseJwt, type Jwks, type ParsedJwt } from "../suite/jose.ts";
 import { currentLog } from "../suite/log.ts";
-import { JWEUtil } from "../util/JWEUtil.ts";
-import { JWKUtil, type JWK } from "../util/JWKUtil.ts";
-import { EC_CURVE_ALGORITHM } from "../util/nimbus/algorithms.ts";
-import { isJOSEException, JOSEException, ParseException } from "../util/nimbus/errors.ts";
-import { selectJWSJwks, verifySignedJWT, type JWSVerifier } from "../util/nimbus/jws.ts";
-import { parseSignedJWT } from "../util/nimbus/jwt.ts";
+import { isSymmetricJWEAlgorithm } from "../suite/jose-jwe.ts";
+import { getPublicJwksAsJsonObject, toPublicJWK, importKey, type JWK } from "../suite/jose-jwk.ts";
+import { EC_CURVE_ALGORITHM } from "../suite/jose-algorithms.ts";
+import { isJOSEException, JOSEException, ParseException } from "../suite/errors.ts";
+import { selectJWSJwks, verifySignedJWT, type JWSVerifier } from "../suite/jose-jws.ts";
+import { parseSignedJWT } from "../suite/jose-jwt.ts";
 import type { AuthorizationParams } from "./authorization.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import type { EmulatedOp, RpVariant } from "./op.ts";
@@ -483,18 +483,18 @@ export async function validateRequestObjectSignature(
 				clientJwks: clientPublicJwks,
 			});
 		}
-		const publicJwks = JWKUtil.getPublicJwksAsJsonObject({ keys: jwkKeys });
+		const publicJwks = getPublicJwksAsJsonObject({ keys: jwkKeys });
 		// why each candidate key did not verify, only reported if no key works
 		const failedKeys: Record<string, unknown>[] = [];
 		for (const jwkKey of jwkKeys) {
 			let verifier: JWSVerifier | null = null;
 			try {
 				if (jwkKey["kty"] === "OKP") {
-					const publicKey = JWKUtil.toPublicJWK(jwkKey) as JWK;
+					const publicKey = toPublicJWK(jwkKey) as JWK;
 					if (publicKey["crv"] === "Ed25519") {
 						verifier = {
 							jwk: publicKey,
-							key: await JWKUtil.importKey(publicKey, headerAlg === "Ed25519" ? "Ed25519" : "EdDSA"),
+							key: await importKey(publicKey, headerAlg === "Ed25519" ? "Ed25519" : "EdDSA"),
 						};
 					} else {
 						recordFailedKey(
@@ -504,13 +504,13 @@ export async function validateRequestObjectSignature(
 						);
 					}
 				} else if (jwkKey["kty"] === "RSA" || jwkKey["kty"] === "EC") {
-					const publicKey = JWKUtil.toPublicJWK(jwkKey) as JWK;
+					const publicKey = toPublicJWK(jwkKey) as JWK;
 					// like Nimbus' ECDSAVerifier, an EC key is bound to the algorithm of its curve
 					const keyAlg =
 						publicKey["kty"] === "EC" ? (EC_CURVE_ALGORITHM[publicKey["crv"] as string] ?? headerAlg) : headerAlg;
-					verifier = { jwk: publicKey, key: await JWKUtil.importKey(publicKey, keyAlg) };
+					verifier = { jwk: publicKey, key: await importKey(publicKey, keyAlg) };
 				} else if (jwkKey["kty"] === "oct") {
-					const secretKey = (await JWKUtil.importKey(jwkKey, headerAlg)) as Uint8Array;
+					const secretKey = (await importKey(jwkKey, headerAlg)) as Uint8Array;
 					if (secretKey.length * 8 < 256) {
 						throw new JOSEException("The secret length must be at least 256 bits");
 					}
@@ -599,7 +599,7 @@ export function validateEncryptedRequestObjectHasKid(requestObject: ParsedJwt, .
 	const c: Condition = condition("ValidateEncryptedRequestObjectHasKid", ...requirements);
 	const jweHeader = requestObject.jwe_header ?? {};
 	const alg = str(jweHeader, "alg");
-	if (JWEUtil.isSymmetricJWEAlgorithm(alg)) {
+	if (isSymmetricJWEAlgorithm(alg)) {
 		c.success("skipping KID check for symmetric alg " + alg);
 		return;
 	}

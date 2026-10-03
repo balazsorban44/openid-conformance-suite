@@ -19,26 +19,26 @@ node bin/cli.ts ci --project op-basic-dynamic
 node bin/cli.ts ci --project rp-basic
 # extra Playwright args after `--`, e.g. one module
 node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
-# a rewritten plan's spec directly (tests/op/*.spec.ts; see .claude/skills/writing-tests)
+# a plan's spec directly (tests/op/*.spec.ts, tests/rp/*.spec.ts; see .claude/skills/writing-tests)
 CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts
 
 # Any plan/config:
 node bin/cli.ts run --plan oidcc-basic-certification-test-plan \
   --variant server_metadata=discovery --variant client_registration=dynamic_client \
   --config configs/oidc-provider/oidcc-basic-dynamic.json [--module 'oidcc-server*'] [--tls] [--headed]
-node bin/cli.ts list [--plans|--modules|--variants]
+node bin/cli.ts list [--modules|--variants]   # plans (spec, variants, CI projects) [+ modules] | variant values
 ```
 
 `ci` and `run` spawn `playwright test` with the `CONFORMANCE_*` environment below (`ci` also sets
-`CONFORMANCE_TLS=1` unless already set). playwright.config.ts matches the plan's rewritten spec file (`portedPlans`
-in `src/runner/projects.ts`) and `tests/plan.spec.ts` (the old framework) for its other modules; the
-`CONFORMANCE_MODULE` glob becomes Playwright's `grep` over both title styles. `pnpm test` is plain `playwright test`: it runs whatever the
-environment selects (`CONFORMANCE_PROJECT=<name>`, or `CONFORMANCE_PLAN` + `CONFORMANCE_CONFIG`) and otherwise
-reports a single skipped test. The Playwright project is named after `CONFORMANCE_PROJECT` (default
-`conformance`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs the Vitest unit tests.
+`CONFORMANCE_TLS=1` unless already set). playwright.config.ts matches the selected plan's spec file (`plans` in
+`src/runner/projects.ts`; every spec when no plan is selected) and turns the `CONFORMANCE_MODULE` glob into
+Playwright's `grep` on the module name before the `:` of the titles. `pnpm test` is plain `playwright test`: it
+runs whatever the environment selects (`CONFORMANCE_PROJECT=<name>`, or `CONFORMANCE_PLAN` +
+`CONFORMANCE_CONFIG`); without a configuration the tests fail with a hint. The Playwright project is named after
+`CONFORMANCE_PROJECT` (default `conformance`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs
+the Vitest unit tests.
 
-One Playwright test = one test module instance (`<plan> › <module>: <behaviour>` in the rewritten specs,
-`<plan> › <module>[variants]` in plan.spec.ts). Each test writes into its
+One Playwright test = one test module instance (`<plan> › <module>: <behaviour>`). Each test writes into its
 `test-results/<test>/` directory (and attaches to the HTML report): `log.json` (the full event log), `log.html`
 (rendered log, same shape as the upstream log-detail page), `module-report.json` (result + expected-failure
 analysis), `target-output.txt` (stdout/stderr of the `target` process), screenshots of every scripted-browser
@@ -51,24 +51,21 @@ Playwright test is reported skipped), and it was not INTERRUPTED. Expected failu
 
 ## Environment variables
 
-| Variable                                                                       | Effect                                                                                  |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `CONFORMANCE_PROJECT`                                                          | select a project from `src/runner/projects.ts` (plan, variant, config, skipped modules) |
-| `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG`                | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)       |
-| `CONFORMANCE_MODULE`                                                           | only modules whose `testName` matches this glob                                         |
-| `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`                             | serve the suite over https (default: the bundled `configs/certs/localhost.*`)           |
-| `CONFORMANCE_PORT`, `CONFORMANCE_HOST`, `CONFORMANCE_EXTERNAL_URL`             | old framework only: where the suite server listens / the URL it advertises              |
-| `CONFORMANCE_CWD`                                                              | directory the config's `target.command` runs in (the CLI sets the caller's cwd)         |
-| `CONFORMANCE_MODULE_TIMEOUT` (s, 150), `CONFORMANCE_TEST_TIMEOUT` (ms, 240000) | per-module run timeout / Playwright test timeout                                        |
-| `CONFORMANCE_WORKERS`                                                          | Playwright workers (default 1)                                                          |
-| `CONFORMANCE_VERBOSE=1`                                                        | stream the event log to the console                                                     |
-| `CONFORMANCE_TARGET_OUTPUT=1`                                                  | echo the target's stdout/stderr                                                         |
-| `CONFORMANCE_KEEP_SERVER=1`                                                    | do not stop the `target` process after the plan                                         |
-| `CONFORMANCE_VIDEO=off`, `CONFORMANCE_TRACE=on`                                | skip video recording / record a trace for every test                                    |
-| `CONFORMANCE_LOG_FINAL_ENV=false`                                              | do not log the final environment at the end of each module                              |
-| `CONFORMANCE_REPORT_DIR`, `CONFORMANCE_SUMMARY_TITLE`                          | where/with which title the summary is written (`conformance-report/`)                   |
-| `CONFORMANCE_PRINT_SUMMARY=1`                                                  | print the summary to stdout (always on when `CI` is set)                                |
-| `CONFORMANCE_OWNER`                                                            | the owner `sub` exposed to modules (default `ci`)                                       |
+| Variable                                                        | Effect                                                                                  |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `CONFORMANCE_PROJECT`                                           | select a project from `src/runner/projects.ts` (plan, variant, config, skipped modules) |
+| `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG` | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)       |
+| `CONFORMANCE_MODULE`                                            | only modules whose `testName` matches this glob                                         |
+| `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`              | serve the suite over https (default: the bundled `configs/certs/localhost.*`)           |
+| `CONFORMANCE_CWD`                                               | directory the config's `target.command` runs in (the CLI sets the caller's cwd)         |
+| `CONFORMANCE_TEST_TIMEOUT` (ms, 240000)                         | Playwright test timeout                                                                 |
+| `CONFORMANCE_WORKERS`                                           | Playwright workers (default 1)                                                          |
+| `CONFORMANCE_VERBOSE=1`                                         | stream the event log to the console                                                     |
+| `CONFORMANCE_TARGET_OUTPUT=1`                                   | echo the target's stdout/stderr                                                         |
+| `CONFORMANCE_KEEP_SERVER=1`                                     | do not stop the `target` process after the plan                                         |
+| `CONFORMANCE_VIDEO=off`, `CONFORMANCE_TRACE=on`                 | skip video recording / record a trace for every test                                    |
+| `CONFORMANCE_REPORT_DIR`, `CONFORMANCE_SUMMARY_TITLE`           | where/with which title the summary is written (`conformance-report/`)                   |
+| `CONFORMANCE_PRINT_SUMMARY=1`                                   | print the summary to stdout (always on when `CI` is set)                                |
 
 ## Configuration file
 
@@ -91,8 +88,8 @@ by the port:
   it does differently (single-use codes, the unusable keys it publishes on purpose) is listed in
   `configs/expected-failures/suite-vs-suite.json`.
 
-Modules that upstream starts manually from the UI (`autoStart() == false`, i.e. `oidcc-server-rotate-keys`) are
-started right away, as upstream's `run-test-plan.py` does in CI.
+Modules that upstream starts manually from the UI (`oidcc-server-rotate-keys`) run right away, as upstream's
+`run-test-plan.py` does in CI.
 
 ## CI matrix
 
@@ -106,10 +103,10 @@ the names from `node bin/cli.ts projects --json`. Adding a project there adds th
 failed/warned condition names with their messages, and links to the artifacts. `playwright-report/` is the full
 HTML report (upload artifact). `conformance-report/results.json` is machine-readable.
 
-## Checking log fidelity after framework changes
+## Checking log fidelity after engine changes
 
-A change to `src/framework`, `src/runner`, `src/util` or `targets` must not change any log entry the ported tests
-produce. `scripts/log-fingerprint.ts` reduces every `test-results/**/log.json` to one line per entry
+A change to `src/suite`, `src/op`, `src/rp`, `tests/fixtures.ts` or `targets` that is not meant to change what is
+checked must not change any log entry the tests produce. `scripts/log-fingerprint.ts` reduces every `test-results/**/log.json` to one line per entry
 (`[src, result, requirements, normalised msg, http/startBlock marker]`, volatile values such as test ids, ports,
 random strings and timestamps masked), keyed by `<testName><variantString>` from `module-report.json`:
 
@@ -127,17 +124,17 @@ node scripts/log-fingerprint.ts --diff /tmp/baseline.json /tmp/current.json [--a
 entries per module, and modules found on one side only (`!!!`); any of these exits 1. `--allow` takes a JSON array
 of regexes; a changed message that matches one (old or new text) is accepted. Entries that only moved (`>`) are
 listed but accepted: the scripted browser and the test module log concurrently, so two runs of unchanged code
-interleave some entries differently (`--strict-order` fails on moves too). The framework messages themselves are
-pinned by the unit tests (`pnpm test:unit`: `src/suite/*.test.ts`, `src/op/*.test.ts`,
-`src/util/{nimbus,jdk}/*.test.ts`). The same fingerprint diff checks a rewritten module against the old
-framework's log of it (only the old framework's own entries and moved entries may differ).
+interleave some entries differently (`--strict-order` fails on moves too). The engine's messages themselves are
+pinned by the unit tests (`pnpm test:unit`: `src/suite/*.test.ts` including the Nimbus/JDK emulation,
+`src/op/*.test.ts`, `src/rp/*.test.ts`).
 
 ## Debugging a failing module
 
-1. Open `log.html` for the module from the report; find the first red entry. The `src` column is the condition
-   class; its message and `args` tell you what was received.
+1. Open `log.html` for the module from the report; find the first red entry. The `src` column is the upstream
+   condition's name; its message and fields tell you what was received.
 2. Compare with the Java upstream condition of the same name if the failure looks like a porting error
-   (`.claude/skills/java-to-ts-porting`): message text, severity and requirement must match.
+   (`grep -rn "upstream: .*/<Name>.java" src` finds the function; porting rules in `.claude/skills/writing-tests`):
+   message text, severity and requirement must match.
 3. Re-run only that module: `--module <testName>` (CLI) or `-g "<testName>"` (playwright). `--headed` opens the
    browser for the scripted-browser steps; `PWDEBUG=1` pauses.
 4. `CONFORMANCE_KEEP_SERVER=1` leaves the `target` (the bundled OP or RP) running after the plan to poke it

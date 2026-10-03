@@ -14,7 +14,7 @@ import { block, condition, type Condition } from "../suite/conditions.ts";
 import { escapeHtml } from "../suite/log.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { htmlResponse } from "../suite/server.ts";
-import { parseJavaURI, URISyntaxException } from "../util/jdk/uri.ts";
+import { parseJavaURI, URISyntaxException } from "../suite/uri.ts";
 import type { AuthorizationParams } from "./authorization.ts";
 import type { IdTokenClaims } from "./id-token.ts";
 import { generateVSChar } from "./registration.ts";
