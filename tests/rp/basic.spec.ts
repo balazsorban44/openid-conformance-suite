@@ -20,6 +20,7 @@ import { failTest } from "../../src/rp/op.ts";
 import * as registration from "../../src/rp/registration.ts";
 import * as userinfo from "../../src/rp/userinfo.ts";
 import { test } from "../fixtures.ts";
+import * as shared from "./shared.ts";
 
 test.describe("oidcc-client-basic-certification-test-plan", () => {
 	test.use({
@@ -172,31 +173,10 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 		test.skip(({ variant }) => variant.response_type !== "code", "not applicable unless response_type=code");
 
 		// upstream: openid/client/OIDCCClientTestIdTokenSigAlgNone.java (rp-id_token-sig-none)
-		test("oidcc-client-test-idtoken-sig-none: the RP accepts an unsigned id_token from the token endpoint, or stops", async ({
-			rp,
-		}) => {
-			const op = await rp.start({
-				registrationSteps: (c) => {
-					registration.setClientIdTokenSignedResponseAlgToNone(c);
-					registration.setClientGrantTypesToAuthorizationCodeOnly(c);
-				},
-				signingAlg: () => idToken.setServerSigningAlgToNone(),
-				checkResponseType: (params) => authz.ensureResponseTypeIs(params, "code", "OIDCR-2"),
-				signIdToken: (claims) => idToken.signIdTokenWithAlgNone(claims),
-			});
-			const client = rp.driveClient();
-			await op.clientRegistered();
-			await op.expect("authorization");
-			await op.expect("token");
-			// clients are not required to support unsigned id_tokens: the RP either calls userinfo or stops
-			const info = await op.waitFor("userinfo", rp.waitTimeoutSeconds);
-			if (info == null) {
-				rp.skipTest(
-					"Client did not send a userinfo request after receiving an unsigned id_token. As clients are not required to support unsigned (alg: none) id_tokens this is okay.",
-				);
-			}
-			await client;
-		});
+		test(
+			"oidcc-client-test-idtoken-sig-none: the RP accepts an unsigned id_token from the token endpoint, or stops",
+			shared.idTokenSigNone,
+		);
 	});
 
 	// upstream: openid/client/OIDCCClientTestInvalidIdTokenSignatureWithRS256.java (rp-id_token-bad-sig-rs256)

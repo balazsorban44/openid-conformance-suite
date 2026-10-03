@@ -275,3 +275,14 @@ export async function configureServerJwks(): Promise<ServerKeys> {
 export function jwksResponse(keys: ServerKeys): Response {
 	return Response.json(keys.publicJwks);
 }
+
+/**
+ * New keys (new kids) for a key rotation: generated and published with the unusable keys, not validated again.
+ *
+ * upstream: AbstractOIDCCClientTest.configureServerJWKS (as the key rotation modules call it again)
+ */
+export function regenerateServerJwks(): ServerKeys {
+	const keys = oidccGenerateServerJWKs();
+	addUnusableKeysToServerPublicJwks(keys, "RFC7517-5");
+	return keys;
+}

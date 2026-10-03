@@ -92,6 +92,23 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 			"oidcc-client-test-client-secret-basic",
 		],
 	},
+	"oidcc-client-dynamic-certification-test-plan": {
+		spec: "tests/rp/dynamic.spec.ts",
+		modules: [
+			"oidcc-client-test-discovery-webfinger-acct",
+			"oidcc-client-test-discovery-webfinger-url",
+			"oidcc-client-test-discovery-openid-config",
+			"oidcc-client-test-discovery-jwks-uri-keys",
+			"oidcc-client-test-discovery-issuer-mismatch",
+			"oidcc-client-test-dynamic-registration",
+			"oidcc-client-test-request-uri-signed-rs256",
+			"oidcc-client-test-request-uri-signed-none",
+			"oidcc-client-test-idtoken-sig-none",
+			"oidcc-client-test-signing-key-rotation-just-before-signing",
+			"oidcc-client-test-signing-key-rotation",
+			"oidcc-client-test-userinfo-signed",
+		],
+	},
 };
 
 export interface ConformanceProject {

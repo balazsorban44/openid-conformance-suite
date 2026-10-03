@@ -18,7 +18,7 @@
 import { extractClientNameFromStoredConfig, storeOriginalClientConfiguration } from "../op/registration.ts";
 import { block, ConditionFailed, logModule, soft } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
-import type { Jwks } from "../suite/jose.ts";
+import type { Jwks, ParsedJwt } from "../suite/jose.ts";
 import { currentContext, withContext } from "../suite/log.ts";
 import type { IncomingRequest, TestServer } from "../suite/server.ts";
 import { handleAuthorizationRequest, type AuthorizationParams, type AuthorizationState } from "./authorization.ts";
@@ -39,8 +39,10 @@ import {
 	validateClientMetadata,
 	type RpClient,
 } from "./registration.ts";
+import { configureRequestObjectSupport } from "./request-object.ts";
 import { handleTokenRequest, type IssuedTokens } from "./token.ts";
 import { handleUserinfoRequest, oidccLoadUserInfo, type UserInfo } from "./userinfo.ts";
+import { handleWebfingerRequest } from "./webfinger.ts";
 
 /** The variant parameters of the OIDCC RP test modules (upstream variant/*.java values) */
 export interface RpVariant {
@@ -101,7 +103,7 @@ export interface EmulatedOpOptions {
 	/** Changes to the id_token claims right after they are generated (upstream generateIdTokenClaims override) */
 	idTokenClaims?: (claims: IdTokenClaims, op: EmulatedOp) => void;
 	/** Signs the id_token instead of OIDCCSignIdToken (upstream signIdToken) */
-	signIdToken?: (claims: IdTokenClaims) => string;
+	signIdToken?: (claims: IdTokenClaims, op: EmulatedOp) => string | Promise<string>;
 	/** Changes the signed id_token (upstream customizeIdTokenSignature) */
 	idTokenSignature?: (idToken: string) => string;
 	/** Runs when the RP exchanges a code, after client authentication (upstream authorizationCodeGrantType override) */
@@ -112,9 +114,25 @@ export interface EmulatedOpOptions {
 	userinfo?: (response: UserInfo) => void;
 	/** The client authentication to require instead of the variant's (upstream getEffectiveClientAuthTypeVariant) */
 	clientAuthType?: RpVariant["client_auth_type"];
+	/**
+	 * Runs when a request to `endpoint` arrives, before the OP handles it (upstream handleClientRequestForPath /
+	 * handle<Endpoint>EndpointRequest overrides): a check that fails ends the test, state may change (key rotation)
+	 */
+	onRequest?: (endpoint: Endpoint, request: IncomingRequest, op: EmulatedOp) => void | Promise<void>;
+	/**
+	 * Checks / changes after the standard client metadata checks, on the registration request or the static client
+	 * (upstream validateClientMetadata override)
+	 */
+	checkClientMetadata?: (client: Record<string, unknown>) => void;
+	/** Checks after the standard request object checks (upstream validateRequestObject override) */
+	checkRequestObject?: (requestObject: ParsedJwt) => void;
+	/** The name of the authorization endpoint's block (upstream getAuthorizationEndpointBlockText) */
+	authorizationBlock?: (op: EmulatedOp) => string;
+	/** Checks the resource syntax of a webfinger request (upstream validateWebfingerRequestResource) */
+	validateWebfingerResource?: (resourcePrefix: "acct" | "https") => void;
 }
 
-export type Endpoint = "discovery" | "jwks" | "registration" | "authorization" | "token" | "userinfo";
+export type Endpoint = "discovery" | "jwks" | "registration" | "authorization" | "token" | "userinfo" | "webfinger";
 
 /** What expect()/waitFor() resolve with: the request and what the OP answered */
 export interface OpEvents {
@@ -129,6 +147,8 @@ export interface OpEvents {
 	};
 	token: { request: IncomingRequest; response: Record<string, unknown> };
 	userinfo: { request: IncomingRequest; response: UserInfo };
+	/** `response`: the webfinger response, null when the resource does not name this test */
+	webfinger: { request: IncomingRequest; response: Record<string, unknown> | null };
 }
 
 /** The emulated OP of one test: its state (upstream's environment) and the requests the RP sent */
@@ -145,7 +165,8 @@ export interface EmulatedOp {
 	readonly responseType: ResponseTypeParts;
 	/** upstream "server" */
 	readonly metadata: ServerMetadata;
-	readonly keys: ServerKeys;
+	/** upstream "server_jwks" / "server_public_jwks": replaced when a module rotates the keys */
+	keys: ServerKeys;
 	/** upstream "user_info" */
 	readonly userInfo: UserInfo;
 	/** upstream "client" (null until the RP registered) */
@@ -175,6 +196,8 @@ export interface EmulatedOp {
 	clientRegistered(): Promise<RpClient>;
 	/** The RP under test reported that it finished (its client driver call returned) */
 	rpFinished(): void;
+	/** How many requests to `endpoint` the OP has answered (upstream's received<Endpoint>Request flags) */
+	received(endpoint: Endpoint): number;
 }
 
 /**
@@ -209,17 +232,16 @@ export async function startEmulatedOp(
 	if (clientAuthType === "tls_client_auth" || clientAuthType === "self_signed_tls_client_auth") {
 		throw new Error(`TODO(port): client_auth_type=${clientAuthType} (ChangeTokenEndpointInServerConfigurationToMtls)`);
 	}
-	if (variant.request_type !== "plain_http_request") {
-		throw new Error(`TODO(port): request_type=${variant.request_type} is not supported by the emulated OP yet`);
-	}
 
 	const metadata = (options.serverConfiguration ?? oidccGenerateServerConfiguration)(server.baseUrl);
 	setTokenEndpointAuthMethodsSupportedOnly(metadata, clientAuthType);
+	configureRequestObjectSupport(metadata, variant.request_type);
 	ensureServerConfigurationHasRequiredOidcMetadata(metadata, "OIDCD-3");
 	const keys = await (options.serverJwks ?? configureServerJwks)();
 	const userInfo = oidccLoadUserInfo();
 
 	const events = new Map<Endpoint, unknown[]>();
+	const counts = new Map<Endpoint, number>();
 	const waiters: Waiter[] = [];
 	let failure: { error: unknown } | null = null;
 	let finished = false;
@@ -242,7 +264,7 @@ export async function startEmulatedOp(
 		authorization: null,
 		tokens: null,
 		chooseSigningAlg: (client) =>
-			options.signingAlg ? options.signingAlg(client, op) : oidccExtractServerSigningAlg(client, keys.jwks),
+			options.signingAlg ? options.signingAlg(client, op) : oidccExtractServerSigningAlg(client, op.keys.jwks),
 		expect(endpoint, opts = {}) {
 			return currentContext().step(`The RP sends a ${endpoint} request`, () =>
 				next(endpoint, opts.timeoutSeconds ?? 60, false),
@@ -269,6 +291,7 @@ export async function startEmulatedOp(
 				}
 			}
 		},
+		received: (endpoint) => counts.get(endpoint) ?? 0,
 	};
 
 	function next(endpoint: Endpoint, seconds: number, optional: boolean): Promise<unknown> {
@@ -302,6 +325,7 @@ export async function startEmulatedOp(
 	}
 
 	function record(endpoint: Endpoint, event: unknown): void {
+		counts.set(endpoint, (counts.get(endpoint) ?? 0) + 1);
 		const i = waiters.findIndex((w) => w.endpoint === endpoint);
 		if (i !== -1) {
 			waiters.splice(i, 1)[0].resolve(event);
@@ -326,8 +350,12 @@ export async function startEmulatedOp(
 				}
 				try {
 					// a request handler is not a Playwright step of the test: blocks only go to the log
-					const { response, event } = await withContext({ severity: "failure", step: (_name, fn) => fn() }, () =>
-						handle(req),
+					const { response, event } = await withContext(
+						{ severity: "failure", step: (_name, fn) => fn() },
+						async () => {
+							await options.onRequest?.(endpoint, req, op);
+							return handle(req);
+						},
 					);
 					record(endpoint, event);
 					return response;
@@ -349,13 +377,31 @@ export async function startEmulatedOp(
 		});
 	}
 
-	serve("discovery", ".well-known/openid-configuration", async (request) => {
-		await block("Discovery endpoint", () => {});
-		return { response: discoveryResponse(metadata), event: { request } };
-	});
-	serve("jwks", "jwks", async (request) => {
+	// the endpoints are where the metadata says: a module may move the issuer (webfinger) or the jwks_uri
+	const relative = (url: unknown, fallback: string) =>
+		typeof url === "string" && url.startsWith(server.baseUrl + "/")
+			? url.substring(server.baseUrl.length + 1)
+			: fallback;
+	const issuerPath = relative(metadata.issuer, "").replace(/\/$/, "");
+	const discoveryPaths = [".well-known/openid-configuration"];
+	if (issuerPath !== "") {
+		discoveryPaths.push(issuerPath + "/.well-known/openid-configuration");
+	}
+	for (const path of discoveryPaths) {
+		serve("discovery", path, async (request) => {
+			await block("Discovery endpoint", () => {});
+			return { response: discoveryResponse(metadata), event: { request } };
+		});
+	}
+	serve("jwks", relative(metadata.jwks_uri, "jwks"), async (request) => {
 		await block("Jwks endpoint", () => {});
-		return { response: jwksResponse(keys), event: { request } };
+		return { response: jwksResponse(op.keys), event: { request } };
+	});
+	// upstream env "issuer": the issuer the configuration was generated with
+	const configuredIssuer = metadata.issuer as string;
+	serve("webfinger", "/.well-known/webfinger", async (request) => {
+		const { response, webfinger } = await handleWebfingerRequest(op, request, configuredIssuer);
+		return { response, event: { request, response: webfinger } };
 	});
 	if (variant.client_registration === "dynamic_client") {
 		serve("registration", "register", async (request) => {
@@ -382,6 +428,7 @@ export async function startEmulatedOp(
 		const client = oidccGetStaticClientConfigurationForRPTests(config);
 		op.clientPublicJwks = await processAndValidateClientJwks(client, clientAuthType, variant.request_type);
 		await validateClientMetadata(client, metadata);
+		options.checkClientMetadata?.(client);
 		op.client = client;
 		op.signingAlg = op.chooseSigningAlg(client);
 		setClientIdTokenSignedResponseAlgToServerSigningAlg(client, op.signingAlg);

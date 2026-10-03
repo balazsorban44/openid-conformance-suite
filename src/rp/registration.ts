@@ -1059,6 +1059,7 @@ export async function handleRegistrationRequest(
 		// because the python suite requires this
 		soft(() => ensureRegistrationRequestContainsAtLeastOneContact(request), "info");
 		await validateClientMetadata(request, op.metadata);
+		op.options.checkClientMetadata?.(request);
 		await soft(() => validateClientRegistrationRequestSectorIdentifierUri(request, "OIDCR-2", "OIDCR-5"));
 
 		const client = oidccRegisterClient(request);

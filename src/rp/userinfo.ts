@@ -2,9 +2,15 @@
  * The emulated OP's user and its userinfo endpoint: the bearer token checks upstream runs on the RP's userinfo
  * request and the response (the user's claims filtered by the granted scopes).
  */
-import { block, condition, skipped, type Condition } from "../suite/conditions.ts";
+import { block, condition, ConditionFailed, skipped, type Condition } from "../suite/conditions.ts";
+import type { Jwks } from "../suite/jose.ts";
 import type { IncomingRequest } from "../suite/server.ts";
+import { JWKUtil, JWS_FAMILY_HMAC_SHA, type JWK } from "../util/JWKUtil.ts";
+import { isJOSEException, ParseException } from "../util/nimbus/errors.ts";
+import { JWSSigner } from "../util/nimbus/jws.ts";
+import { parseClaimsSet } from "../util/nimbus/jwt.ts";
 import type { EmulatedOp } from "./op.ts";
+import type { RpClient } from "./registration.ts";
 
 /** The claims the emulated user has (upstream OIDCCLoadUserInfo.SUPPORTED_CLAIMS) */
 export const SUPPORTED_CLAIMS: readonly string[] = [
@@ -195,7 +201,8 @@ export function clearAccessTokenFromRequest(): void {
 /**
  * The userinfo request: a valid bearer token (header, form body or query, upstream supports all but rejects the
  * query), the response is the user's claims for the granted scopes, `customize` (the module's change, e.g.
- * ChangeSubInUserInfoResponseToBeInvalid) applied. Signed / encrypted userinfo responses are not supported yet.
+ * ChangeSubInUserInfoResponseToBeInvalid) applied, signed when the client registered userinfo_signed_response_alg
+ * (encrypted userinfo responses are not supported yet).
  *
  * upstream: AbstractOIDCCClientTest.handleUserinfoEndpointRequest (validateUserinfoRequest, prepareUserinfoResponse,
  * signUserInfoResponseIfNecessary, encryptUserInfoResponseIfNecessary)
@@ -205,25 +212,145 @@ export async function handleUserinfoRequest(
 	req: IncomingRequest,
 	customize?: (response: UserInfo) => void,
 ): Promise<{ response: Response; userinfo: UserInfo }> {
-	return block("Userinfo endpoint", () => {
+	return block("Userinfo endpoint", async () => {
 		const token = oidccExtractBearerAccessTokenFromRequest(req, "RFC6750-2", "OIDCC-5.3.1");
 		requireBearerAccessToken(token, op.tokens?.accessToken ?? null, "OIDCC-5.3.1");
 		const userinfo = filterUserInfoForScopes(op.userInfo, op.authorization?.scope ?? "", "OIDCC-5.4");
 		customize?.(userinfo);
 		clearAccessTokenFromRequest();
 		const client: Record<string, unknown> = op.client ?? {};
+		let signed: string | null = null;
 		if (client["userinfo_signed_response_alg"] == null) {
 			// If signed, the UserInfo Response SHOULD contain the Claims iss (issuer) and aud (audience) as members.
 			skipped("AddIssAndAudToUserInfoResponse", { element: ["client", "userinfo_signed_response_alg"] }, "OIDCC-5.3.2");
 			skipped("SignUserInfoResponse", { element: ["client", "userinfo_signed_response_alg"] }, "OIDCC-5.3.2");
 		} else {
-			throw new Error("TODO(port): signed userinfo responses (AddIssAndAudToUserInfoResponse, SignUserInfoResponse)");
+			addIssAndAudToUserInfoResponse(userinfo, op.issuer, client as RpClient, "OIDCC-5.3.2");
+			signed = await signUserInfoResponse(userinfo, op.keys.jwks, client as RpClient, "OIDCC-5.3.2");
 		}
 		if (client["userinfo_encrypted_response_alg"] == null) {
 			skipped("EncryptUserInfoResponse", { element: ["client", "userinfo_encrypted_response_alg"] }, "OIDCC-5.3.2");
 		} else {
 			throw new Error("TODO(port): encrypted userinfo responses (EncryptUserInfoResponse)");
 		}
-		return { response: Response.json(userinfo), userinfo };
+		// a signed (or encrypted) response is a JWT with content-type application/jwt
+		const response =
+			signed != null
+				? new Response(signed, { status: 200, headers: { "content-type": "application/jwt;charset=UTF-8" } })
+				: Response.json(userinfo);
+		return { response, userinfo };
 	});
+}
+
+/** upstream: condition/as/SetUserinfoSignedResponseAlgToRS256.java */
+export function setUserinfoSignedResponseAlgToRS256(client: Record<string, unknown>): void {
+	client["userinfo_signed_response_alg"] = "RS256";
+	condition("SetUserinfoSignedResponseAlgToRS256").log("Set userinfo_signed_response_alg to RS256");
+}
+
+/** `issuer`: upstream env "issuer". upstream: condition/as/AddIssAndAudToUserInfoResponse.java */
+export function addIssAndAudToUserInfoResponse(
+	response: UserInfo,
+	issuer: string,
+	client: RpClient,
+	...requirements: string[]
+): void {
+	response["iss"] = issuer;
+	response["aud"] = client.client_id;
+	condition("AddIssAndAudToUserInfoResponse", ...requirements).log("Added iss and aud claims to userinfo response", {
+		iss: issuer,
+		aud: client.client_id,
+	});
+}
+
+const ALG_NONE_HEADER = Buffer.from('{"alg":"none"}').toString("base64url");
+
+/**
+ * Signs the userinfo response with the client's userinfo_signed_response_alg: a key of the OP's for it (an HMAC key
+ * from the client secret for HS*), unsigned for none.
+ *
+ * upstream: condition/as/SignUserInfoResponse.java (AbstractSignJWT.selectOrCreateKey, signJWTUsingKey,
+ * signWithAlgNone)
+ */
+export async function signUserInfoResponse(
+	response: UserInfo,
+	serverJwks: Jwks,
+	client: RpClient,
+	...requirements: string[]
+): Promise<string> {
+	const c: Condition = condition("SignUserInfoResponse", ...requirements);
+	const alg = client["userinfo_signed_response_alg"] as string;
+	if (alg === "none") {
+		const signed = ALG_NONE_HEADER + "." + Buffer.from(JSON.stringify(response)).toString("base64url") + ".";
+		c.success("Signed the userinfo response with alg none", { userinfo: signed });
+		return signed;
+	}
+	// selectOrCreateKey
+	let jwk: JWK | null;
+	if (JWS_FAMILY_HMAC_SHA.includes(alg)) {
+		// a MAC based alg: the key is the client secret
+		if (typeof client["client_secret"] !== "string") {
+			throw new Error("getString called on something that is not a string: " + JSON.stringify(client["client_secret"]));
+		}
+		jwk = JWKUtil.parseJWK({
+			kty: "oct",
+			use: "sig",
+			alg,
+			k: Buffer.from(client["client_secret"]).toString("base64url"),
+		});
+	} else {
+		try {
+			jwk = JWKUtil.selectAsymmetricJWSKey(alg, JWKUtil.parseJWKSet(JSON.stringify(serverJwks)).keys);
+		} catch (e) {
+			if (e instanceof ParseException) {
+				c.failureFrom("Could not parse jwks. Failed to find a signing key.", e, { jwks: serverJwks, alg });
+			}
+			throw e;
+		}
+		if (jwk == null) {
+			c.failure("Jwks does not contain a suitable signing key for the selected algorithm", { signing_algorithm: alg });
+		}
+	}
+	// signJWTUsingKey
+	try {
+		const kty = jwk["kty"];
+		const signer =
+			kty === "RSA"
+				? JWSSigner.rsa(jwk)
+				: kty === "EC"
+					? JWSSigner.ec(jwk)
+					: kty === "oct"
+						? JWSSigner.mac(jwk)
+						: kty === "OKP"
+							? JWSSigner.ed25519(jwk)
+							: null;
+		if (signer == null) {
+			c.failure("Couldn't create signer from key; kty must be one of 'oct', 'rsa', 'ec'", { jwk: JSON.stringify(jwk) });
+		}
+		const header: Record<string, unknown> = { alg };
+		if (jwk["kid"] != null) {
+			header["kid"] = jwk["kid"];
+		}
+		const jws = await signer.sign(header as never, JSON.stringify(parseClaimsSet(response as never)));
+		const publicJwk = JWKUtil.toPublicJWK(jwk);
+		c.success("Signed the userinfo response", {
+			userinfo: { verifiable_jws: jws, public_jwk: publicJwk != null ? JSON.stringify(publicJwk) : null },
+		});
+		return jws;
+	} catch (e) {
+		if (e instanceof ConditionFailed) {
+			throw e;
+		}
+		if (e instanceof ParseException) {
+			c.failureFrom(e.message, e);
+		}
+		if (isJOSEException(e)) {
+			const cause = (e as Error).cause;
+			c.failureFrom(
+				"Unable to sign: " + (e as Error).message + (cause instanceof Error ? " (" + cause.message + ")" : ""),
+				e,
+			);
+		}
+		throw e;
+	}
 }

@@ -10,3 +10,14 @@ export function randomAlphanumeric(length: number): string {
 	}
 	return out;
 }
+
+const ALPHABETIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/** A random string of letters (upstream RandomStringUtils.secure().nextAlphabetic) */
+export function randomAlphabetic(length: number): string {
+	let out = "";
+	for (let i = 0; i < length; i++) {
+		out += ALPHABETIC[randomInt(ALPHABETIC.length)];
+	}
+	return out;
+}

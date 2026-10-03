@@ -467,7 +467,7 @@ export async function createIdToken(op: EmulatedOp, codeGrant: boolean): Promise
 		}
 	}
 	let idToken = op.options.signIdToken
-		? await op.options.signIdToken(claims)
+		? await op.options.signIdToken(claims, op)
 		: await oidccSignIdToken(claims, op.keys.jwks, client, op.signingAlg as string, "OIDCC-2");
 	if (op.options.idTokenSignature) {
 		idToken = op.options.idTokenSignature(idToken);

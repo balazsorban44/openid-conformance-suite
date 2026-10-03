@@ -45,11 +45,14 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
   authorization.ts    the authorization endpoint: request checks, code, response (query / fragment / form_post)
   token.ts            the token endpoint: client authentication, code exchange checks, token response
   id-token.ts         signing algorithm, id_token claims, at_hash/c_hash, signing, the negative tests' defects
-  userinfo.ts         the user, the userinfo endpoint (bearer token checks, claims filtered by scope)
+  userinfo.ts         the user, the userinfo endpoint (bearer token checks, claims filtered by scope, signing)
+  request-object.ts   request objects (request_type request_object / request_uri): fetching, claim and signature checks
+  webfinger.ts        WebFinger issuer discovery (/.well-known/webfinger on the test's server)
 tests/fixtures.ts     the `test` with the `op`, `client`, `client2`, `configureClient`, `rp`, `variant`, `plan` fixtures
 tests/op/*.spec.ts    one file per OP plan (basic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
                       session-management, 3rdparty-init-login so far)
-tests/rp/*.spec.ts    one file per RP plan (basic.spec.ts so far)
+tests/rp/*.spec.ts    one file per RP plan (basic.spec.ts, dynamic.spec.ts); tests/rp/shared.ts: the bodies of
+                      modules that are in several plans (each spec registers them with its title and upstream comment)
 tests/plan.spec.ts    the old framework, for the modules not rewritten yet (see "Transition")
 ```
 
@@ -180,8 +183,12 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   as plain values / callbacks, named after what they change: `serverConfiguration`, `serverJwks`, `signingAlg`,
   `registrationSteps`, `checkNonce`, `checkResponseType`, `checkAuthorizationRequest`,
   `allowMaxAgeZeroWithPromptNone`, `customizeAuthorizationResponse`, `idTokenClaims`, `signIdToken`,
-  `idTokenSignature`, `onCodeExchange`, `onUserinfoRequest`, `userinfo`, `clientAuthType`. A callback calls the
-  upstream condition functions itself (with upstream's requirements), so the test shows what is logged.
+  `idTokenSignature`, `onCodeExchange`, `onUserinfoRequest`, `userinfo`, `clientAuthType`, `onRequest` (before
+  any endpoint handles a request: the module's checks on the order of requests, key rotation), `checkClientMetadata`,
+  `checkRequestObject`, `authorizationBlock`, `validateWebfingerResource`. A callback calls the upstream condition
+  functions itself (with upstream's requirements), so the test shows what is logged. The endpoints are served where
+  the metadata says (a module that moves the issuer or the jwks_uri gets them there); `op.keys` may be replaced
+  (key rotation) and `op.received(endpoint)` counts the answered requests (upstream's received<Endpoint>Request).
 - `op.expect(endpoint)` resolves with `{ request, ... }` once the OP answered the next request to `endpoint`
   (`registration` -> `client`, `authorization` -> `authorization` state + `response` params, `token` -> `response`,
   `userinfo` -> `response`); it fails when the RP finished without sending one (the client driver call returned),
@@ -198,10 +205,9 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `client_driver.startUrl` with issuer, module, variant, client_metadata_defaults, alias and a static client's
   credentials; logged under TEST-RUNNER. The call blocks until the RP has run its flow, so its return tells the OP
   that no further requests will come.
-- Not supported yet by the emulated OP (they throw a TODO(port) error): request objects (request_type
-  request_object / request_uri), client_secret_jwt / private_key_jwt / mTLS client authentication, signed or
-  encrypted userinfo responses, encrypted id_tokens, refresh tokens, webfinger, logout / session management
-  endpoints. Add them to the concern file (new endpoints: `serve(...)` in op.ts, a handler in a new concern file
+- Not supported yet by the emulated OP (they throw a TODO(port) error): client_secret_jwt / private_key_jwt /
+  mTLS client authentication, encrypted userinfo responses, encrypted id_tokens, refresh tokens, logout / session
+  management endpoints. Add them to the concern file (new endpoints: `serve(...)` in op.ts, a handler in a new concern file
   such as `src/rp/logout.ts`).
 
 ## Fixtures (tests/fixtures.ts)

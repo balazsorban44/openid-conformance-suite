@@ -5,6 +5,7 @@
  */
 import { randomAlphanumeric } from "../suite/random.ts";
 import { block, condition, skipped, soft, type Condition } from "../suite/conditions.ts";
+import type { ParsedJwt } from "../suite/jose.ts";
 import { escapeHtml } from "../suite/log.ts";
 import { htmlResponse, type IncomingRequest } from "../suite/server.ts";
 import { encodeQueryParam, toUriString } from "../util/UriComponentsBuilder.ts";
@@ -12,6 +13,11 @@ import { RedirectURIValidationUtil } from "../util/validation/RedirectURIValidat
 import { calculateCHash, createIdToken } from "./id-token.ts";
 import type { EmulatedOp } from "./op.ts";
 import type { RpClient } from "./registration.ts";
+import {
+	checkForUnexpectedClaimsInRequestObject,
+	checkRequestObject,
+	extractRequestObjectFromAuthorizationRequest,
+} from "./request-object.ts";
 import { generateAccessToken } from "./token.ts";
 
 /** The authorization request parameters (upstream "authorization_endpoint_http_request_params" / the effective request) */
@@ -79,13 +85,14 @@ export function ensureAuthorizationHttpRequestContainsOpenIDScope(
 }
 
 /**
- * The request parameters (a request object's claims would override them; request objects are not supported yet),
- * request_uri removed, max_age as a number.
+ * The request parameters, request_uri removed, max_age as a number, overridden by the request object's claims
+ * (upstream "authorization_request_object") when there is one.
  *
  * upstream: condition/as/CreateEffectiveAuthorizationRequestParameters.java
  */
 export function createEffectiveAuthorizationRequestParameters(
 	params: AuthorizationParams,
+	requestObject: ParsedJwt | null = null,
 	...requirements: string[]
 ): AuthorizationParams {
 	const c: Condition = condition("CreateEffectiveAuthorizationRequestParameters", ...requirements);
@@ -105,6 +112,11 @@ export function createEffectiveAuthorizationRequestParameters(
 	const maxAge = effective["max_age"];
 	if (typeof maxAge === "string" && maxAge.trim() !== "" && !Number.isNaN(Number(maxAge))) {
 		effective["max_age"] = Number(maxAge);
+	}
+	// the request object's claims override the request parameters (after the max_age conversion: a request object
+	// with max_age as a string is a protocol violation another check reports)
+	if (requestObject != null) {
+		Object.assign(effective, structuredClone(requestObject.claims));
 	}
 	c.success("Merged http request parameters with request object claims", {
 		effective_authorization_endpoint_request: effective,
@@ -689,7 +701,7 @@ export async function handleAuthorizationRequest(
 	op: EmulatedOp,
 	req: IncomingRequest,
 ): Promise<{ response: Response; authorization: AuthorizationState; responseParams: Record<string, string> }> {
-	return block("Authorization endpoint", async () => {
+	return block(op.options.authorizationBlock?.(op) ?? "Authorization endpoint", async () => {
 		let httpParams: AuthorizationParams;
 		if (req.method === "POST") {
 			httpParams = req.body_form_params ?? {};
@@ -700,12 +712,17 @@ export async function handleAuthorizationRequest(
 		}
 
 		// extractAuthorizationEndpointRequestParameters
-		if (op.variant.request_type !== "plain_http_request") {
-			throw new Error(`TODO(port): request_type=${op.variant.request_type} is not supported by the emulated OP yet`);
+		let requestObject: ParsedJwt | null = null;
+		if (op.variant.request_type === "plain_http_request") {
+			ensureRequestDoesNotContainRequestObject(httpParams, "OIDCC-6.1");
+		} else {
+			requestObject = await extractRequestObjectFromAuthorizationRequest(op, httpParams);
 		}
-		ensureRequestDoesNotContainRequestObject(httpParams, "OIDCC-6.1");
 		ensureAuthorizationHttpRequestContainsOpenIDScope(httpParams, "OIDCC-6.1", "OIDCC-6.2");
-		const params = createEffectiveAuthorizationRequestParameters(httpParams, "OIDCC-6.1", "OIDCC-6.2");
+		if (requestObject != null) {
+			await checkRequestObject(op, httpParams, requestObject);
+		}
+		const params = createEffectiveAuthorizationRequestParameters(httpParams, requestObject, "OIDCC-6.1", "OIDCC-6.2");
 		const scope = extractRequestedScopes(params);
 		const nonce = param(params, "response_type")?.includes("id_token")
 			? extractNonceFromAuthorizationRequest(params, "OIDCC-3.1.2.1", "OIDCC-3.2.2.1")
@@ -740,10 +757,7 @@ export async function handleAuthorizationRequest(
 		}
 		op.options.checkAuthorizationRequest?.(params, scope);
 
-		// only request objects carry claims of their own
-		skipped(
-			"CheckForUnexpectedClaimsInRequestObject",
-			{ element: ["authorization_request_object", "claims"] },
+		const unexpectedClaimsRequirements = [
 			"RFC6749-4.1.1",
 			"OIDCC-3.1.2.1",
 			"RFC7636-4.3",
@@ -753,7 +767,18 @@ export async function handleAuthorizationRequest(
 			"RFC8485-4.1",
 			"RFC8707-2.1",
 			"RFC9396-2",
-		);
+		];
+		if (requestObject == null) {
+			// only request objects carry claims of their own
+			skipped(
+				"CheckForUnexpectedClaimsInRequestObject",
+				{ element: ["authorization_request_object", "claims"] },
+				...unexpectedClaimsRequirements,
+			);
+		} else {
+			const ro = requestObject;
+			soft(() => checkForUnexpectedClaimsInRequestObject(ro, ...unexpectedClaimsRequirements), "warning");
+		}
 		const claimsChecks: [string, (p: AuthorizationParams, ...r: string[]) => void, "warning" | "failure", string[]][] =
 			[
 				[
