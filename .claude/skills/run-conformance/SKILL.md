@@ -70,6 +70,30 @@ started right away, as upstream's `run-test-plan.py` does in CI.
 failed/warned condition names with their messages, and links to the artifacts. `playwright-report/` is the full
 HTML report (upload artifact). `conformance-report/results.json` is machine-readable.
 
+## Checking log fidelity after framework changes
+
+A change to `src/framework`, `src/runner`, `src/util` or `targets` must not change any log entry the ported tests
+produce. `scripts/log-fingerprint.ts` reduces every `test-results/**/log.json` to one line per entry
+(`[src, result, requirements, normalised msg, http/startBlock marker]`, volatile values such as test ids, ports,
+random strings and timestamps masked), keyed by `<testName><variantString>` from `module-report.json`:
+
+```bash
+# before the change; Playwright empties test-results/ on every run, so fingerprint right after each one
+CONFORMANCE_VIDEO=off node bin/openid-conformance.ts ci --project suite-vs-suite
+node scripts/log-fingerprint.ts --out /tmp/baseline.json test-results
+# after the change: the same projects/configs
+CONFORMANCE_VIDEO=off node bin/openid-conformance.ts ci --project suite-vs-suite
+node scripts/log-fingerprint.ts --out /tmp/current.json test-results
+node scripts/log-fingerprint.ts --diff /tmp/baseline.json /tmp/current.json [--allow allowed.json] [--strict-order]
+```
+
+`--diff` prints added (`+`), removed (`-`) and changed (`~`, same src/result/requirements, different message)
+entries per module, and modules found on one side only (`!!!`); any of these exits 1. `--allow` takes a JSON array
+of regexes; a changed message that matches one (old or new text) is accepted. Entries that only moved (`>`) are
+listed but accepted: the scripted browser and the test module log concurrently, so two runs of unchanged code
+interleave some entries differently (`--strict-order` fails on moves too). The framework messages themselves are
+pinned by the unit tests (`npm run test:unit`: `src/framework/*.test.ts`, `src/util/nimbus-helpers.test.ts`).
+
 ## Debugging a failing module
 
 1. Open `log.html` for the module from the report; find the first red entry. The `src` column is the condition
