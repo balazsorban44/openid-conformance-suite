@@ -2,36 +2,82 @@
 import type { AbstractTestModule } from "./framework/AbstractTestModule.ts";
 import type { TestPlanClass } from "./framework/plan.ts";
 import type { TestModuleClass } from "./framework/TestModule.ts";
+import { OIDCC3rdPartyInitLogin } from "./openid/OIDCC3rdPartyInitLogin.ts";
+import { OIDCC3rdPartyInitLoginNonHttps } from "./openid/OIDCC3rdPartyInitLoginNonHttps.ts";
 import { OIDCCAlternateHappyFlow } from "./openid/OIDCCAlternateHappyFlow.ts";
 import { OIDCCAuthCodeReuse } from "./openid/OIDCCAuthCodeReuse.ts";
 import { OIDCCAuthCodeReuseAfter30Seconds } from "./openid/OIDCCAuthCodeReuseAfter30Seconds.ts";
+import { OIDCCBackChannelRpInitiatedLogout } from "./openid/OIDCCBackChannelRpInitiatedLogout.ts";
+import { OIDCCBackchannelLogoutDiscoveryEndpointVerification } from "./openid/OIDCCBackchannelLogoutDiscoveryEndpointVerification.ts";
+import { OIDCCClaimsEssential } from "./openid/OIDCCClaimsEssential.ts";
 import { OIDCCClaimsLocales } from "./openid/OIDCCClaimsLocales.ts";
+import { OIDCCDiscoveryEndpointVerification } from "./openid/OIDCCDiscoveryEndpointVerification.ts";
 import { OIDCCDisplayPage } from "./openid/OIDCCDisplayPage.ts";
 import { OIDCCDisplayPopup } from "./openid/OIDCCDisplayPopup.ts";
+import { OIDCCEnsureClientAssertionWithIssAudSucceeds } from "./openid/OIDCCEnsureClientAssertionWithIssAudSucceeds.ts";
+import { OIDCCEnsurePostRequestSucceeds } from "./openid/OIDCCEnsurePostRequestSucceeds.ts";
+import { OIDCCEnsureRedirectUriInAuthorizationRequest } from "./openid/OIDCCEnsureRedirectUriInAuthorizationRequest.ts";
+import { OIDCCEnsureRegisteredRedirectUri } from "./openid/OIDCCEnsureRegisteredRedirectUri.ts";
+import { OIDCCEnsureRequestObjectWithRedirectUri } from "./openid/OIDCCEnsureRequestObjectWithRedirectUri.ts";
 import { OIDCCEnsureRequestWithAcrValuesSucceeds } from "./openid/OIDCCEnsureRequestWithAcrValuesSucceeds.ts";
 import { OIDCCEnsureRequestWithUnknownParameterSucceeds } from "./openid/OIDCCEnsureRequestWithUnknownParameterSucceeds.ts";
 import { OIDCCEnsureRequestWithValidPkceSucceeds } from "./openid/OIDCCEnsureRequestWithValidPkceSucceeds.ts";
 import { OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow } from "./openid/OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow.ts";
+import { OIDCCFrontChannelRpInitiatedLogout } from "./openid/OIDCCFrontChannelRpInitiatedLogout.ts";
+import { OIDCCFrontchannelLogoutDiscoveryEndpointVerification } from "./openid/OIDCCFrontchannelLogoutDiscoveryEndpointVerification.ts";
 import { OIDCCIdTokenHint } from "./openid/OIDCCIdTokenHint.ts";
 import { OIDCCIdTokenRS256 } from "./openid/OIDCCIdTokenRS256.ts";
 import { OIDCCIdTokenSignature } from "./openid/OIDCCIdTokenSignature.ts";
+import { OIDCCIdTokenUnsigned } from "./openid/OIDCCIdTokenUnsigned.ts";
 import { OIDCCLoginHint } from "./openid/OIDCCLoginHint.ts";
+import { OIDCCMaxAge1 } from "./openid/OIDCCMaxAge1.ts";
+import { OIDCCMaxAge10000 } from "./openid/OIDCCMaxAge10000.ts";
+import { OIDCCPromptLogin } from "./openid/OIDCCPromptLogin.ts";
 import { OIDCCPromptNoneLoggedIn } from "./openid/OIDCCPromptNoneLoggedIn.ts";
 import { OIDCCPromptNoneNotLoggedIn } from "./openid/OIDCCPromptNoneNotLoggedIn.ts";
 import { OIDCCRedirectUriQueryAdded } from "./openid/OIDCCRedirectUriQueryAdded.ts";
+import { OIDCCRedirectUriQueryMismatch } from "./openid/OIDCCRedirectUriQueryMismatch.ts";
 import { OIDCCRedirectUriQueryOK } from "./openid/OIDCCRedirectUriQueryOK.ts";
+import { OIDCCRedirectUriRegFrag } from "./openid/OIDCCRedirectUriRegFrag.ts";
+import { OIDCCRefreshToken } from "./openid/OIDCCRefreshToken.ts";
+import { OIDCCRefreshTokenRPKeyRotation } from "./openid/OIDCCRefreshTokenRPKeyRotation.ts";
+import { OIDCCRegistrationJwksUri } from "./openid/OIDCCRegistrationJwksUri.ts";
+import { OIDCCRegistrationLogoUri } from "./openid/OIDCCRegistrationLogoUri.ts";
+import { OIDCCRegistrationPolicyUri } from "./openid/OIDCCRegistrationPolicyUri.ts";
+import { OIDCCRegistrationSectorBad } from "./openid/OIDCCRegistrationSectorBad.ts";
+import { OIDCCRegistrationSectorUri } from "./openid/OIDCCRegistrationSectorUri.ts";
+import { OIDCCRegistrationTosUri } from "./openid/OIDCCRegistrationTosUri.ts";
+import { OIDCCRequestUriSignedRS256 } from "./openid/OIDCCRequestUriSignedRS256.ts";
+import { OIDCCRequestUriUnsigned } from "./openid/OIDCCRequestUriUnsigned.ts";
+import { OIDCCRequestUriUnsignedSupportedCorrectlyOrRejectedAsUnsupported } from "./openid/OIDCCRequestUriUnsignedSupportedCorrectlyOrRejectedAsUnsupported.ts";
+import { OIDCCResponseTypeMissing } from "./openid/OIDCCResponseTypeMissing.ts";
+import { OIDCCRpInitiatedLogout } from "./openid/OIDCCRpInitiatedLogout.ts";
+import { OIDCCRpInitiatedLogoutBadIdTokenHint } from "./openid/OIDCCRpInitiatedLogoutBadIdTokenHint.ts";
+import { OIDCCRpInitiatedLogoutBadLogoutRedirectUri } from "./openid/OIDCCRpInitiatedLogoutBadLogoutRedirectUri.ts";
+import { OIDCCRpInitiatedLogoutDiscoveryEndpointVerification } from "./openid/OIDCCRpInitiatedLogoutDiscoveryEndpointVerification.ts";
+import { OIDCCRpInitiatedLogoutModifiedIdTokenHint } from "./openid/OIDCCRpInitiatedLogoutModifiedIdTokenHint.ts";
+import { OIDCCRpInitiatedLogoutNoIdTokenHint } from "./openid/OIDCCRpInitiatedLogoutNoIdTokenHint.ts";
+import { OIDCCRpInitiatedLogoutNoParams } from "./openid/OIDCCRpInitiatedLogoutNoParams.ts";
+import { OIDCCRpInitiatedLogoutNoPostLogoutRedirectUri } from "./openid/OIDCCRpInitiatedLogoutNoPostLogoutRedirectUri.ts";
+import { OIDCCRpInitiatedLogoutNoState } from "./openid/OIDCCRpInitiatedLogoutNoState.ts";
+import { OIDCCRpInitiatedLogoutOnlyState } from "./openid/OIDCCRpInitiatedLogoutOnlyState.ts";
+import { OIDCCRpInitiatedLogoutQueryAddedToLogoutRedirectUri } from "./openid/OIDCCRpInitiatedLogoutQueryAddedToLogoutRedirectUri.ts";
 import { OIDCCScopeAddress } from "./openid/OIDCCScopeAddress.ts";
 import { OIDCCScopeAll } from "./openid/OIDCCScopeAll.ts";
 import { OIDCCScopeEmail } from "./openid/OIDCCScopeEmail.ts";
 import { OIDCCScopePhone } from "./openid/OIDCCScopePhone.ts";
 import { OIDCCScopeProfile } from "./openid/OIDCCScopeProfile.ts";
+import { OIDCCServerRotateKeys } from "./openid/OIDCCServerRotateKeys.ts";
 import { OIDCCServerTest } from "./openid/OIDCCServerTest.ts";
 import { OIDCCServerTestClientSecretPost } from "./openid/OIDCCServerTestClientSecretPost.ts";
+import { OIDCCSessionManagementDiscoveryEndpointVerification } from "./openid/OIDCCSessionManagementDiscoveryEndpointVerification.ts";
+import { OIDCCSessionManagementRpInitiatedLogout } from "./openid/OIDCCSessionManagementRpInitiatedLogout.ts";
 import { OIDCCUiLocales } from "./openid/OIDCCUiLocales.ts";
 import { OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported } from "./openid/OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported.ts";
 import { OIDCCUserInfoGet } from "./openid/OIDCCUserInfoGet.ts";
 import { OIDCCUserInfoPostBody } from "./openid/OIDCCUserInfoPostBody.ts";
 import { OIDCCUserInfoPostHeader } from "./openid/OIDCCUserInfoPostHeader.ts";
+import { OIDCCUserInfoRS256 } from "./openid/OIDCCUserInfoRS256.ts";
 import { OIDCCClient3rdPartyInitiatedLoginTest } from "./openid/client/OIDCCClient3rdPartyInitiatedLoginTest.ts";
 import { OIDCCClientTest } from "./openid/client/OIDCCClientTest.ts";
 import { OIDCCClientTestClientSecretBasic } from "./openid/client/OIDCCClientTestClientSecretBasic.ts";
@@ -75,6 +121,14 @@ import { OIDCCClientTestRPInitLogout } from "./openid/client/logout/OIDCCClientT
 import { OIDCCClientTestRPInitLogoutInvalidState } from "./openid/client/logout/OIDCCClientTestRPInitLogoutInvalidState.ts";
 import { OIDCCClientTestRPInitLogoutNoState } from "./openid/client/logout/OIDCCClientTestRPInitLogoutNoState.ts";
 import { OIDCCClientTestSessionManagement } from "./openid/client/logout/OIDCCClientTestSessionManagement.ts";
+import { OIDCC3rdPartyInitLoginTestPlan } from "./openid/OIDCC3rdPartyInitLoginTestPlan.ts";
+import { OIDCCBackchannelRpInitiatedLogoutTestPlan } from "./openid/OIDCCBackchannelRpInitiatedLogoutTestPlan.ts";
+import { OIDCCBasicTestPlan } from "./openid/OIDCCBasicTestPlan.ts";
+import { OIDCCConfigTestPlan } from "./openid/OIDCCConfigTestPlan.ts";
+import { OIDCCDynamicTestPlan } from "./openid/OIDCCDynamicTestPlan.ts";
+import { OIDCCFrontchannelRpInitiatedLogoutTestPlan } from "./openid/OIDCCFrontchannelRpInitiatedLogoutTestPlan.ts";
+import { OIDCCRpInitiatedLogoutTestPlan } from "./openid/OIDCCRpInitiatedLogoutTestPlan.ts";
+import { OIDCCSessionManagementTestPlan } from "./openid/OIDCCSessionManagementTestPlan.ts";
 import { OIDCCClient3rdPartyInitiatedLoginTestPlan } from "./openid/client/OIDCCClient3rdPartyInitiatedLoginTestPlan.ts";
 import { OIDCCClientBasicTestPlan } from "./openid/client/OIDCCClientBasicTestPlan.ts";
 import { OIDCCClientDynamicTestPlan } from "./openid/client/OIDCCClientDynamicTestPlan.ts";
@@ -85,36 +139,82 @@ import { OIDCCClientRPInitiatedLogoutRPBasicTestPlan } from "./openid/client/log
 import { OIDCCClientSessionManagementRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientSessionManagementRPBasicTestPlan.ts";
 
 export const modules: TestModuleClass<AbstractTestModule>[] = [
+	OIDCC3rdPartyInitLogin, // oidcc-3rd_party-init-login
+	OIDCC3rdPartyInitLoginNonHttps, // oidcc-3rd_party-init-login-nohttps
 	OIDCCAlternateHappyFlow, // oidcc-alternate-happy-flow
 	OIDCCAuthCodeReuse, // oidcc-codereuse
 	OIDCCAuthCodeReuseAfter30Seconds, // oidcc-codereuse-30seconds
+	OIDCCBackChannelRpInitiatedLogout, // oidcc-backchannel-rp-initiated-logout
+	OIDCCBackchannelLogoutDiscoveryEndpointVerification, // oidcc-backchannel-logout-discovery-endpoint-verification
+	OIDCCClaimsEssential, // oidcc-claims-essential
 	OIDCCClaimsLocales, // oidcc-claims-locales
+	OIDCCDiscoveryEndpointVerification, // oidcc-discovery-endpoint-verification
 	OIDCCDisplayPage, // oidcc-display-page
 	OIDCCDisplayPopup, // oidcc-display-popup
+	OIDCCEnsureClientAssertionWithIssAudSucceeds, // oidcc-ensure-client-assertion-with-iss-aud-succeeds
+	OIDCCEnsurePostRequestSucceeds, // oidcc-ensure-post-request-succeeds
+	OIDCCEnsureRedirectUriInAuthorizationRequest, // oidcc-ensure-redirect-uri-in-authorization-request
+	OIDCCEnsureRegisteredRedirectUri, // oidcc-ensure-registered-redirect-uri
+	OIDCCEnsureRequestObjectWithRedirectUri, // oidcc-ensure-request-object-with-redirect-uri
 	OIDCCEnsureRequestWithAcrValuesSucceeds, // oidcc-ensure-request-with-acr-values-succeeds
 	OIDCCEnsureRequestWithUnknownParameterSucceeds, // oidcc-ensure-request-with-unknown-parameter-succeeds
 	OIDCCEnsureRequestWithValidPkceSucceeds, // oidcc-ensure-request-with-valid-pkce-succeeds
 	OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow, // oidcc-ensure-request-without-nonce-succeeds-for-code-flow
+	OIDCCFrontChannelRpInitiatedLogout, // oidcc-frontchannel-rp-initiated-logout
+	OIDCCFrontchannelLogoutDiscoveryEndpointVerification, // oidcc-frontchannel-logout-discovery-endpoint-verification
 	OIDCCIdTokenHint, // oidcc-id-token-hint
 	OIDCCIdTokenRS256, // oidcc-idtoken-rs256
 	OIDCCIdTokenSignature, // oidcc-idtoken-signature
+	OIDCCIdTokenUnsigned, // oidcc-idtoken-unsigned
 	OIDCCLoginHint, // oidcc-login-hint
+	OIDCCMaxAge1, // oidcc-max-age-1
+	OIDCCMaxAge10000, // oidcc-max-age-10000
+	OIDCCPromptLogin, // oidcc-prompt-login
 	OIDCCPromptNoneLoggedIn, // oidcc-prompt-none-logged-in
 	OIDCCPromptNoneNotLoggedIn, // oidcc-prompt-none-not-logged-in
 	OIDCCRedirectUriQueryAdded, // oidcc-redirect-uri-query-added
+	OIDCCRedirectUriQueryMismatch, // oidcc-redirect-uri-query-mismatch
 	OIDCCRedirectUriQueryOK, // oidcc-redirect-uri-query-OK
+	OIDCCRedirectUriRegFrag, // oidcc-redirect-uri-regfrag
+	OIDCCRefreshToken, // oidcc-refresh-token
+	OIDCCRefreshTokenRPKeyRotation, // oidcc-refresh-token-rp-key-rotation
+	OIDCCRegistrationJwksUri, // oidcc-registration-jwks-uri
+	OIDCCRegistrationLogoUri, // oidcc-registration-logo-uri
+	OIDCCRegistrationPolicyUri, // oidcc-registration-policy-uri
+	OIDCCRegistrationSectorBad, // oidcc-registration-sector-bad
+	OIDCCRegistrationSectorUri, // oidcc-registration-sector-uri
+	OIDCCRegistrationTosUri, // oidcc-registration-tos-uri
+	OIDCCRequestUriSignedRS256, // oidcc-request-uri-signed-rs256
+	OIDCCRequestUriUnsigned, // oidcc-request-uri-unsigned
+	OIDCCRequestUriUnsignedSupportedCorrectlyOrRejectedAsUnsupported, // oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported
+	OIDCCResponseTypeMissing, // oidcc-response-type-missing
+	OIDCCRpInitiatedLogout, // oidcc-rp-initiated-logout
+	OIDCCRpInitiatedLogoutBadIdTokenHint, // oidcc-rp-initiated-logout-bad-id-token-hint
+	OIDCCRpInitiatedLogoutBadLogoutRedirectUri, // oidcc-rp-initiated-logout-bad-post-logout-redirect-uri
+	OIDCCRpInitiatedLogoutDiscoveryEndpointVerification, // oidcc-rp-initiated-logout-discovery-endpoint-verification
+	OIDCCRpInitiatedLogoutModifiedIdTokenHint, // oidcc-rp-initiated-logout-modified-id-token-hint
+	OIDCCRpInitiatedLogoutNoIdTokenHint, // oidcc-rp-initiated-logout-no-id-token-hint
+	OIDCCRpInitiatedLogoutNoParams, // oidcc-rp-initiated-logout-no-params
+	OIDCCRpInitiatedLogoutNoPostLogoutRedirectUri, // oidcc-rp-initiated-logout-no-post-logout-redirect-uri
+	OIDCCRpInitiatedLogoutNoState, // oidcc-rp-initiated-logout-no-state
+	OIDCCRpInitiatedLogoutOnlyState, // oidcc-rp-initiated-logout-only-state
+	OIDCCRpInitiatedLogoutQueryAddedToLogoutRedirectUri, // oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri
 	OIDCCScopeAddress, // oidcc-scope-address
 	OIDCCScopeAll, // oidcc-scope-all
 	OIDCCScopeEmail, // oidcc-scope-email
 	OIDCCScopePhone, // oidcc-scope-phone
 	OIDCCScopeProfile, // oidcc-scope-profile
+	OIDCCServerRotateKeys, // oidcc-server-rotate-keys
 	OIDCCServerTest, // oidcc-server
 	OIDCCServerTestClientSecretPost, // oidcc-server-client-secret-post
+	OIDCCSessionManagementDiscoveryEndpointVerification, // oidcc-session-management-discovery-endpoint-verification
+	OIDCCSessionManagementRpInitiatedLogout, // oidcc-session-management-rp-initiated-logout
 	OIDCCUiLocales, // oidcc-ui-locales
 	OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported, // oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported
 	OIDCCUserInfoGet, // oidcc-userinfo-get
 	OIDCCUserInfoPostBody, // oidcc-userinfo-post-body
 	OIDCCUserInfoPostHeader, // oidcc-userinfo-post-header
+	OIDCCUserInfoRS256, // oidcc-userinfo-rs256
 	OIDCCClient3rdPartyInitiatedLoginTest, // oidcc-client-test-3rd-party-init-login
 	OIDCCClientTest, // oidcc-client-test
 	OIDCCClientTestClientSecretBasic, // oidcc-client-test-client-secret-basic
@@ -161,6 +261,14 @@ export const modules: TestModuleClass<AbstractTestModule>[] = [
 ];
 
 export const plans: TestPlanClass[] = [
+	OIDCC3rdPartyInitLoginTestPlan, // oidcc-3rdparty-init-login-certification-test-plan
+	OIDCCBackchannelRpInitiatedLogoutTestPlan, // oidcc-backchannel-rp-initiated-logout-certification-test-plan
+	OIDCCBasicTestPlan, // oidcc-basic-certification-test-plan
+	OIDCCConfigTestPlan, // oidcc-config-certification-test-plan
+	OIDCCDynamicTestPlan, // oidcc-dynamic-certification-test-plan
+	OIDCCFrontchannelRpInitiatedLogoutTestPlan, // oidcc-frontchannel-rp-initiated-logout-certification-test-plan
+	OIDCCRpInitiatedLogoutTestPlan, // oidcc-rp-initiated-logout-certification-test-plan
+	OIDCCSessionManagementTestPlan, // oidcc-session-management-certification-test-plan
 	OIDCCClient3rdPartyInitiatedLoginTestPlan, // oidcc-client-test-3rd-party-init-login-test-plan
 	OIDCCClientBasicTestPlan, // oidcc-client-basic-certification-test-plan
 	OIDCCClientDynamicTestPlan, // oidcc-client-dynamic-certification-test-plan

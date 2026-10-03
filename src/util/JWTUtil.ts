@@ -146,7 +146,8 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 			throw new TypeError('The encryption method "enc" header parameter must not be null');
 		}
 	}
-	const registered = kind === "plain" ? COMMON_HEADER_PARAMS : kind === "signed" ? JWS_HEADER_PARAMS : JWE_HEADER_PARAMS;
+	const registered =
+		kind === "plain" ? COMMON_HEADER_PARAMS : kind === "signed" ? JWS_HEADER_PARAMS : JWE_HEADER_PARAMS;
 
 	const out: JsonObject = {};
 	// custom parameters first
@@ -645,11 +646,7 @@ export class JWTUtil {
 				}
 				const jwkSet = JWKUtil.parseJWKSet(JSON.stringify(privateJwksWithEncKeys));
 				const kid = encryptedJWT.header["kid"];
-				decryptionKey = JWEUtil.selectAsymmetricKeyForEncryption(
-					jwkSet,
-					alg,
-					typeof kid === "string" ? kid : null,
-				);
+				decryptionKey = JWEUtil.selectAsymmetricKeyForEncryption(jwkSet, alg, typeof kid === "string" ? kid : null);
 				if (decryptionKey == null) {
 					throw new ParseException(
 						"No suitable key for decrypting this JWT was provided in the test configuration. A private key of the correct key type with 'use': 'enc' and other matching properties is required.",

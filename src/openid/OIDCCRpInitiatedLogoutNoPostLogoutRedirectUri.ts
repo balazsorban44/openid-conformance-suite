@@ -1,6 +1,12 @@
 import { ExpectSuccessfulLogoutPage } from "../condition/client/ExpectSuccessfulLogoutPage.ts";
 import { RemovePostLogoutRedirectUriFromEndSessionEndpointRequest } from "../condition/client/RemovePostLogoutRedirectUriFromEndSessionEndpointRequest.ts";
-import { TestFailureException, type HttpSession, type IncomingHttpRequest, type JsonObject, type PublishTestModule } from "../framework/index.ts";
+import {
+	TestFailureException,
+	type HttpSession,
+	type IncomingHttpRequest,
+	type JsonObject,
+	type PublishTestModule,
+} from "../framework/index.ts";
 import { AbstractOIDCCRpInitiatedLogout } from "./AbstractOIDCCRpInitiatedLogout.ts";
 
 // Corresponds to https://www.heenan.me.uk/~joseph/2020-06-05-test_desc_op.html#OP_RpInitLogout_No_post_logout_redirect_uri

@@ -2,7 +2,13 @@ import { ExpectInvalidIdTokenHintErrorPage } from "../condition/client/ExpectInv
 import { GenerateFakeIdTokenClaims } from "../condition/client/GenerateFakeIdTokenClaims.ts";
 import { GenerateJWKsFromClientSecret } from "../condition/client/GenerateJWKsFromClientSecret.ts";
 import { SignFakeIdToken } from "../condition/client/SignFakeIdToken.ts";
-import { TestFailureException, type HttpSession, type IncomingHttpRequest, type JsonObject, type PublishTestModule } from "../framework/index.ts";
+import {
+	TestFailureException,
+	type HttpSession,
+	type IncomingHttpRequest,
+	type JsonObject,
+	type PublishTestModule,
+} from "../framework/index.ts";
 import { AbstractOIDCCRpInitiatedLogout } from "./AbstractOIDCCRpInitiatedLogout.ts";
 
 // Corresponds to https://www.heenan.me.uk/~joseph/2020-06-05-test_desc_op.html#OP_RpInitLogout_Wrong_id_token_hint

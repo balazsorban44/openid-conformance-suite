@@ -1,4 +1,3 @@
-
 import { AbstractOIDCCServerTest } from "./AbstractOIDCCServerTest.ts";
 
 export class AbstractOIDCCServerTestExpectingAuthorizationEndpointPlaceholderOrCallback extends AbstractOIDCCServerTest {

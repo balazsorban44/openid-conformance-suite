@@ -26,7 +26,9 @@ export class OIDCCEnsureRequestWithAcrValuesSucceeds extends AbstractOIDCCServer
 	protected override createAuthorizationRequestSequence(): ConditionSequence {
 		return super
 			.createAuthorizationRequestSequence()
-			.then(this.condition(OIDCCAddAcrValuesToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1", "OIDCC-15.1"));
+			.then(
+				this.condition(OIDCCAddAcrValuesToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1", "OIDCC-15.1"),
+			);
 	}
 
 	protected override async performIdTokenValidation(): Promise<void> {

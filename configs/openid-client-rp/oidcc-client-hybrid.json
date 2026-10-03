@@ -1,0 +1,19 @@
+{
+	"description": "openid-client RP (hybrid)",
+	"alias": "openid-client-rp",
+	"plan": "oidcc-client-hybrid-certification-test-plan",
+	"variant": {
+		"client_registration": "dynamic_client",
+		"request_type": "plain_http_request"
+	},
+	"waitTimeoutSeconds": 5,
+	"target": {
+		"command": "node targets/openid-client-rp/server.ts",
+		"readyUrl": "http://localhost:4000/ready",
+		"env": {}
+	},
+	"client_driver": {
+		"startUrl": "http://localhost:4000/start"
+	},
+	"expectedFailures": "configs/expected-failures/openid-client-rp.json"
+}

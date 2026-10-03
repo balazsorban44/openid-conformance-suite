@@ -33,11 +33,7 @@ export class OIDCCEnsurePostRequestSucceeds extends AbstractOIDCCServerTest {
 			await sleep(this.SECONDS_TO_WAIT_FOR_CALLBACK * 1000, this.getTestExecutionManager().signal);
 			if (this.getStatus() === Status.WAITING) {
 				await this.setStatus(Status.RUNNING);
-				await this.callAndContinueOnFailure(
-					ExpectRedirectUriHasBeenCalled,
-					ConditionResult.WARNING,
-					"OIDCC-3.1.2.1",
-				);
+				await this.callAndContinueOnFailure(ExpectRedirectUriHasBeenCalled, ConditionResult.WARNING, "OIDCC-3.1.2.1");
 				await this.fireTestFinished();
 			}
 			return "done";

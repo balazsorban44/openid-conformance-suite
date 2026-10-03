@@ -1,0 +1,24 @@
+{
+	"description": "openid-client RP (basic, static client)",
+	"alias": "openid-client-rp",
+	"plan": "oidcc-client-basic-certification-test-plan",
+	"variant": {
+		"client_registration": "static_client",
+		"request_type": "plain_http_request"
+	},
+	"waitTimeoutSeconds": 5,
+	"client": {
+		"client_id": "openid-client-rp",
+		"client_secret": "rp-secret-0123456789abcdefghij",
+		"redirect_uri": "http://localhost:4000/cb"
+	},
+	"target": {
+		"command": "node targets/openid-client-rp/server.ts",
+		"readyUrl": "http://localhost:4000/ready",
+		"env": {}
+	},
+	"client_driver": {
+		"startUrl": "http://localhost:4000/start"
+	},
+	"expectedFailures": "configs/expected-failures/openid-client-rp.json"
+}

@@ -354,7 +354,8 @@ export abstract class AbstractOIDCCServerTest extends AbstractRedirectServerTest
 	// @VariantSetup(parameter = ClientAuthType.class, value = "none")
 	setupNone(): void {
 		this.profileStaticClientConfiguration = ConfigureStaticClient;
-		this.profileCompleteClientConfiguration = () => new ConfigureClientForAuthTypeNone(this.serverSupportsDiscoveryFlag);
+		this.profileCompleteClientConfiguration = () =>
+			new ConfigureClientForAuthTypeNone(this.serverSupportsDiscoveryFlag);
 		this.addTokenEndpointClientAuthentication = AddAuthClientNoneAuthenticationToTokenRequest;
 	}
 
@@ -384,7 +385,8 @@ export abstract class AbstractOIDCCServerTest extends AbstractRedirectServerTest
 	// @VariantSetup(parameter = ClientAuthType.class, value = "private_key_jwt")
 	setupPrivateKeyJwt(): void {
 		this.profileStaticClientConfiguration = ConfigureStaticClientForPrivateKeyJwt;
-		this.profileCompleteClientConfiguration = () => new ConfigureClientForPrivateKeyJwt(this.serverSupportsDiscoveryFlag);
+		this.profileCompleteClientConfiguration = () =>
+			new ConfigureClientForPrivateKeyJwt(this.serverSupportsDiscoveryFlag);
 		this.addTokenEndpointClientAuthentication = CreateJWTClientAuthenticationAssertionAndAddToTokenEndpointRequest;
 	}
 

@@ -1,4 +1,4 @@
-import { JWS_FAMILY_EC, JWS_FAMILY_ED, JWS_FAMILY_HMAC_SHA, JWS_FAMILY_RSA } from "./JWKUtil.ts";
+import { JWS_FAMILY_EC, JWS_FAMILY_ED, JWS_FAMILY_HMAC_SHA, JWS_FAMILY_RSA, requireAlgorithmName } from "./JWKUtil.ts";
 
 export class JWSUtil {
 	/**
@@ -16,7 +16,8 @@ export class JWSUtil {
 	 * @param alg
 	 * @return
 	 */
-	static isValidJWSAlgorithm(alg: string): boolean {
+	static isValidJWSAlgorithm(alg: string | null | undefined): boolean {
+		alg = requireAlgorithmName(alg);
 		if (
 			JWS_FAMILY_EC.includes(alg) ||
 			JWS_FAMILY_ED.includes(alg) ||
@@ -37,7 +38,8 @@ export class JWSUtil {
 	 * @param alg
 	 * @return
 	 */
-	static isAsymmetricJWSAlgorithm(alg: string): boolean {
+	static isAsymmetricJWSAlgorithm(alg: string | null | undefined): boolean {
+		alg = requireAlgorithmName(alg);
 		if (JWS_FAMILY_EC.includes(alg) || JWS_FAMILY_ED.includes(alg) || JWS_FAMILY_RSA.includes(alg)) {
 			return true;
 		}

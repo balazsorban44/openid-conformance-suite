@@ -110,6 +110,17 @@ export const ENC_FAMILY_AES_CBC_HMAC_SHA: readonly string[] = ["A128CBC-HS256", 
 /** EncryptionMethod.Family.AES_GCM */
 export const ENC_FAMILY_AES_GCM: readonly string[] = ["A128GCM", "A192GCM", "A256GCM"];
 
+/**
+ * @internal Nimbus `JWSAlgorithm.parse(null)` / `JWEAlgorithm.parse(null)` / `EncryptionMethod.parse(null)` throw a
+ * NullPointerException; the predicates built on them do the same.
+ */
+export function requireAlgorithmName(name: string | null | undefined): string {
+	if (name == null) {
+		throw new TypeError('Cannot invoke "String.equals(Object)" because "s" is null');
+	}
+	return name;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Minimal port of the Nimbus JSON / JWK parsing semantics (JSONObjectUtils, JWK.parse, JWKSet.parse,
 // JWK.toJSONObject). The JSON form produced here has the same members, in the same order, as Nimbus'
@@ -477,11 +488,9 @@ function nimbusParseJWK(o: JsonObject): JWK {
 			throw new ParseException("Unknown / unsupported curve: " + crv);
 		}
 		try {
-			createPublicKey({ key: { kty: "EC", crv, x: params["x"], y: params["y"] }, format: "jwk" });
+			createPublicKey({ key: { kty: "EC", crv: crv as string, x: params["x"], y: params["y"] }, format: "jwk" });
 		} catch {
-			throw new ParseException(
-				"Invalid EC JWK: The 'x' and 'y' public coordinates are not on the " + crv + " curve",
-			);
+			throw new ParseException("Invalid EC JWK: The 'x' and 'y' public coordinates are not on the " + crv + " curve");
 		}
 		if (firstCert != null) {
 			const certJwk = certPublicJwk(firstCert);
@@ -799,9 +808,7 @@ export class JWKUtil {
 			}
 			const missing = JWKUtil.firstMissingMember(key, ...required);
 			if (missing != null) {
-				issues.push(
-					new JwkIssue(i, keyEl, "is missing the required '" + missing + "' member for a " + kty + " key"),
-				);
+				issues.push(new JwkIssue(i, keyEl, "is missing the required '" + missing + "' member for a " + kty + " key"));
 				continue;
 			}
 			const badMember = JWKUtil.firstNonBase64UrlMember(key, ...base64urlMembers);

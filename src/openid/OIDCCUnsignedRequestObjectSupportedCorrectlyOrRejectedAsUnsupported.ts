@@ -1,4 +1,3 @@
-
 import { type PublishTestModule } from "../framework/index.ts";
 import { AbstractOIDCCRequestObjectServerTest } from "./AbstractOIDCCRequestObjectServerTest.ts";
 

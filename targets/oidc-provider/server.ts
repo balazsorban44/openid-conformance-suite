@@ -137,6 +137,10 @@ async function generateJwks(): Promise<{ keys: JWK[] }> {
 	return { keys };
 }
 
+function noPq(algs: string[]): string[] {
+	return algs.filter((alg) => !alg.startsWith("ML-DSA"));
+}
+
 function sha256url(input: string): string {
 	return createHash("sha256").update(input).digest("base64url");
 }
@@ -230,13 +234,15 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	const autoApprove = opts.autoApprove ?? process.env["OIDC_PROVIDER_AUTO_APPROVE"] === "1";
 	const staticClients = opts.clients ?? loadStaticClients();
 	const staticClientIds = new Set(staticClients.map((c) => String(c["client_id"])));
-	const jwks = opts.jwks ?? (process.env["OIDC_PROVIDER_JWKS"] ? JSON.parse(process.env["OIDC_PROVIDER_JWKS"]) : null) ?? (await generateJwks());
+	const jwks =
+		opts.jwks ??
+		(process.env["OIDC_PROVIDER_JWKS"] ? JSON.parse(process.env["OIDC_PROVIDER_JWKS"]) : null) ??
+		(await generateJwks());
 
 	const issuer = (opts.issuer ?? process.env["ISSUER"] ?? `http://localhost:${port}`).replace(/\/$/, "");
 
 	// ML-DSA is filtered out like upstream's CI (conformance-suite#1598); everything else oidc-provider implements is
 	// enabled so the suite can register clients with any id_token/userinfo/request object alg it wants to test
-	const noPq = (algs: string[]) => algs.filter((alg) => !alg.startsWith("ML-DSA"));
 	const enabledJWA = {
 		clientAuthSigningAlgValues: noPq(jwa.clientAuthSigningAlgValues),
 		idTokenSigningAlgValues: noPq(jwa.idTokenSigningAlgValues),
@@ -360,7 +366,11 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 		responseTypes: ["code id_token token", "code id_token", "code token", "code", "id_token token", "id_token", "none"],
 		subjectTypes: ["public", "pairwise"],
 		pairwiseIdentifier(_ctx: Any, accountId: string, { sectorIdentifier }: { sectorIdentifier: string }) {
-			return createHash("sha256").update(sectorIdentifier).update(accountId).update("oidc-provider-target").digest("hex");
+			return createHash("sha256")
+				.update(sectorIdentifier)
+				.update(accountId)
+				.update("oidc-provider-target")
+				.digest("hex");
 		},
 		clientAuthMethods: ["none", "client_secret_basic", "client_secret_jwt", "client_secret_post", "private_key_jwt"],
 		enabledJWA,
@@ -390,6 +400,13 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 			RegistrationAccessToken: 24 * 60 * 60,
 		},
 		renderError: defaults.renderError,
+		// outgoing requests (backchannel_logout_uri, jwks_uri, sector_identifier_uri, request_uri) go to the suite on
+		// localhost; oidc-provider's default dispatcher refuses loopback/private addresses, so use plain fetch like
+		// upstream's certification config does for oidcc-dynamic-* and oidcc-backchannel-rp-initiated-logout
+		fetch(url: URL | string, options: RequestInit & { dispatcher?: unknown }) {
+			delete options.dispatcher;
+			return globalThis.fetch(url, options);
+		},
 	};
 
 	const provider = new Provider(issuer, configuration);
@@ -419,6 +436,10 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 		}
 		return postLogoutRedirectUriAllowed.call(this, value);
 	};
+
+	// oidcc-frontchannel-rp-initiated-logout (CheckIdTokenSidMatchesFrontChannelLogoutRequest) and the back-channel
+	// logout plan compare the sid of the ID Token with the logout request: always include sid in ID Tokens
+	provider.Client.prototype.includeSid = () => true;
 
 	// oidcc-ensure-request-with-acr-values-succeeds etc.: like upstream, assert a static acr/amr on every login
 	const { interactionFinished } = provider;
@@ -504,9 +525,7 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 			const pending = params.xsrf ? pendingFrontchannel.get(params.xsrf) : undefined;
 			if (pending) {
 				pendingFrontchannel.delete(params.xsrf);
-				const frames = pending.frames
-					.filter((f) => params.logout || f.clientId === pending.clientId)
-					.map((f) => f.url);
+				const frames = pending.frames.filter((f) => params.logout || f.clientId === pending.clientId).map((f) => f.url);
 				if (frames.length) {
 					const location = ctx.response.get("location");
 					ctx.status = 200;
@@ -552,7 +571,9 @@ async function autoApproveInteraction(provider: Any, ctx: Any): Promise<void> {
 		if (details.missingOIDCClaims) {
 			grant.addOIDCClaims(details.missingOIDCClaims);
 		}
-		for (const [indicator, scope] of Object.entries((details.missingResourceScopes ?? {}) as Record<string, string[]>)) {
+		for (const [indicator, scope] of Object.entries(
+			(details.missingResourceScopes ?? {}) as Record<string, string[]>,
+		)) {
 			grant.addResourceScope(indicator, scope.join(" "));
 		}
 		result = { consent: { grantId: await grant.save() } };
@@ -595,7 +616,10 @@ async function dereferenceRequestUri(ctx: Any): Promise<void> {
 	}
 	let requestObject: string;
 	try {
-		const res = await fetch(requestUri, { signal: AbortSignal.timeout(5000), headers: { accept: "application/oauth-authz-req+jwt, application/jwt" } });
+		const res = await fetch(requestUri, {
+			signal: AbortSignal.timeout(5000),
+			headers: { accept: "application/oauth-authz-req+jwt, application/jwt" },
+		});
 		if (!res.ok) {
 			return;
 		}

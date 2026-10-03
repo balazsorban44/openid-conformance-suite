@@ -13,6 +13,8 @@ export class OIDCCUiLocales extends AbstractOIDCCServerTest {
 	};
 
 	protected override createAuthorizationRequestSequence(): ConditionSequence {
-		return super.createAuthorizationRequestSequence().then(this.condition(AddUiLocalesFromConfigurationToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1"));
+		return super
+			.createAuthorizationRequestSequence()
+			.then(this.condition(AddUiLocalesFromConfigurationToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1"));
 	}
 }

@@ -12,6 +12,7 @@ import {
 	JWE_FAMILY_SYMMETRIC,
 	JWKUtil,
 	ParseException,
+	requireAlgorithmName,
 	SkippedJwk,
 	type JWK,
 	type JWKSet,
@@ -99,7 +100,8 @@ export class JWEEncrypter {
 			}
 		}
 		const { apu, apv, ...protectedHeader } = header;
-		const keyJwk = this.name === "AESEncrypter" || this.name === "DirectEncrypter" ? this.key : JWKUtil.toPublicJWK(this.key);
+		const keyJwk =
+			this.name === "AESEncrypter" || this.name === "DirectEncrypter" ? this.key : JWKUtil.toPublicJWK(this.key);
 		const key = await JWKUtil.importKey(keyJwk as JWK, alg);
 		const jwe = new CompactEncrypt(typeof payload === "string" ? new TextEncoder().encode(payload) : payload);
 		jwe.setProtectedHeader(protectedHeader as CompactJWEHeaderParameters);
@@ -219,7 +221,8 @@ export class JWEUtil {
 		const keyType = JWEUtil.keyTypeForEncryptionAlg(alg);
 
 		// JWKMatcher.Builder().keyType(keyType).keyUses(KeyUse.ENCRYPTION, null)
-		const matches = (jwk: JWK) => (keyType == null || jwk["kty"] === keyType) && (jwk["use"] == null || jwk["use"] === "enc");
+		const matches = (jwk: JWK) =>
+			(keyType == null || jwk["kty"] === keyType) && (jwk["use"] == null || jwk["use"] === "enc");
 		const requiresKidMatch = kid != null && kid.trim().length > 0;
 		let currentMatch: JWK | null = null;
 		for (const jwk of (jwkSet["keys"] ?? []) as JWK[]) {
@@ -337,7 +340,7 @@ export class JWEUtil {
 			key = build(secretBytes);
 		} else if ("dir" === algorithm) {
 			if (encMethod == null) {
-				throw new TypeError("Cannot invoke \"com.nimbusds.jose.EncryptionMethod.getName()\" because \"encMethod\" is null");
+				throw new TypeError('Cannot invoke "com.nimbusds.jose.EncryptionMethod.getName()" because "encMethod" is null');
 			}
 			const secretBytes = JWEUtil.deriveEncryptionKey(encMethod, secret);
 			key = build(secretBytes);
@@ -447,11 +450,13 @@ export class JWEUtil {
 		}
 	}
 
-	static isAsymmetricJWEAlgorithm(algorithmName: string): boolean {
+	static isAsymmetricJWEAlgorithm(algorithmName: string | null | undefined): boolean {
+		algorithmName = requireAlgorithmName(algorithmName);
 		return JWE_FAMILY_ASYMMETRIC.includes(algorithmName);
 	}
 
-	static isSymmetricJWEAlgorithm(algorithmName: string): boolean {
+	static isSymmetricJWEAlgorithm(algorithmName: string | null | undefined): boolean {
+		algorithmName = requireAlgorithmName(algorithmName);
 		return JWE_FAMILY_SYMMETRIC.includes(algorithmName);
 	}
 
@@ -460,7 +465,8 @@ export class JWEUtil {
 	 * symmetric Nimbus JWEAlgorithm families. Used to validate published
 	 * `alg_values_supported` metadata entries.
 	 */
-	static isValidJWEAlgorithm(algorithmName: string): boolean {
+	static isValidJWEAlgorithm(algorithmName: string | null | undefined): boolean {
+		algorithmName = requireAlgorithmName(algorithmName);
 		return JWE_FAMILY_ASYMMETRIC.includes(algorithmName) || JWE_FAMILY_SYMMETRIC.includes(algorithmName);
 	}
 
@@ -481,7 +487,8 @@ export class JWEUtil {
 	 * extras (e.g. deprecated aliases, `XC20P`) are intentionally excluded
 	 * because they are not in the JWA registry and would not interoperate.
 	 */
-	static isValidEncryptionMethod(enc: string): boolean {
+	static isValidEncryptionMethod(enc: string | null | undefined): boolean {
+		enc = requireAlgorithmName(enc);
 		return ENC_FAMILY_AES_CBC_HMAC_SHA.includes(enc) || ENC_FAMILY_AES_GCM.includes(enc);
 	}
 

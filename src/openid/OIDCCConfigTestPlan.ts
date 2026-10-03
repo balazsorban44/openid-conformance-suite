@@ -1,0 +1,57 @@
+import { ClientRegistration } from "../variant/ClientRegistration.ts";
+import { ServerMetadata } from "../variant/ServerMetadata.ts";
+import {
+	ModuleListEntry,
+	ProfileNames,
+	SpecFamilyNames,
+	TestPlan,
+	Variant,
+	type PublishTestPlan,
+	type VariantSelection,
+} from "../framework/index.ts";
+import { OIDCCDiscoveryEndpointVerification } from "./OIDCCDiscoveryEndpointVerification.ts";
+
+export class OIDCCConfigTestPlan extends TestPlan {
+	static override readonly meta: PublishTestPlan = {
+		testPlanName: "oidcc-config-certification-test-plan",
+		displayName: "OpenID Connect Core: Config Certification Profile Authorization server test ",
+		profile: ProfileNames.optest,
+		specFamily: SpecFamilyNames.oidcc,
+	};
+
+	override testModulesWithVariants(): ModuleListEntry[] {
+		return [
+			new ModuleListEntry(
+				[
+					// This plan attempts to match 'config' as defined here:
+					// https://openid.net/wordpress-content/uploads/2018/06/OpenID-Connect-Conformance-Profiles.pdf
+					// the tests are in the same order as the table and the comments list the 3rd column in the table.
+					// OP-IDToken-none - this appears to be a mistake in the above PDF; this test has no relevance to the config
+					// profile and it not included in the python config profile.
+					OIDCCDiscoveryEndpointVerification, // OP-Discovery-Config
+					// ProviderConfigurationResponse.verify() included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointIssuer
+					// ProviderConfigurationResponse.verify() included in OIDCCDiscoveryEndpointVerification, also in CheckDiscEndpointIssuer
+					// IdToken.verify() - described as "Discovered issuer matches ID Token iss value" - isn't in the python config
+					//                    tests, can't be done in a pure discovery test as we have no id token (checked by
+					//                    OIDCCServerTest in the other certification profiles)
+					// CheckEndpoint() included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointAuthorizationEndpoint
+					// CheckEndpoint() included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointTokenEndpoint
+					// CheckEndpoint() included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointUserinfoEndpoint
+					// OP-Discovery-jwks_uri included in OIDCCDiscoveryEndpointVerification, CheckJwksUri
+					// OP-Discovery-JWKs - included in OIDCCDiscoveryEndpointVerification, ValidateServerJWKs
+					// CheckScopeSupport() - included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointScopesSupportedContainsOpenId
+					// ProviderConfigurationResponse.verify() - included in OIDCCDiscoveryEndpointVerification, OIDCCCheckDiscEndpointResponseTypesSupported
+					// ProviderConfigurationResponse.verify() - included in OIDCCDiscoveryEndpointVerification, OIDCCCheckDiscEndpointSubjectTypesSupported
+					// ProviderConfigurationResponse.verify() - included in OIDCCDiscoveryEndpointVerification, OIDCCCheckDiscEndpointIdTokenSigningAlgValuesSupported
+					// OP-Discovery-claims_supported - included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointClaimsParameterSupported
+					// VerifyOPEndpointsUseHTTPS() - included in OIDCCDiscoveryEndpointVerification, CheckDiscEndpointAllEndpointsAreHttps
+				],
+				[new Variant(ServerMetadata, "discovery"), new Variant(ClientRegistration, "static_client")],
+			),
+		];
+	}
+
+	override certificationProfileName(_variant: VariantSelection): string[] {
+		return ["Config OP"];
+	}
+}

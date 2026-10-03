@@ -7,13 +7,8 @@ import { ValidateErrorDescriptionFromTokenEndpointResponseError } from "../condi
 import { ValidateErrorFromTokenEndpointResponseError } from "../condition/client/ValidateErrorFromTokenEndpointResponseError.ts";
 import { ValidateErrorUriFromTokenEndpointResponseError } from "../condition/client/ValidateErrorUriFromTokenEndpointResponseError.ts";
 import { CreateJWTClientAuthenticationAssertionAndAddToTokenEndpointRequest } from "../sequence/client/CreateJWTClientAuthenticationAssertionAndAddToTokenEndpointRequest.ts";
-import { ClientAuthType } from "../variant/ClientAuthType.ts";
 import { ResponseType } from "../variant/ResponseType.ts";
-import {
-	ConditionResult,
-	type ConditionSequenceClass,
-	type ModuleVariantMetadata,
-} from "../framework/index.ts";
+import { ConditionResult, type ConditionSequenceClass, type ModuleVariantMetadata } from "../framework/index.ts";
 import { AbstractOIDCCServerTest } from "./AbstractOIDCCServerTest.ts";
 
 export abstract class AbstractOIDCCAuthCodeReuse extends AbstractOIDCCServerTest {

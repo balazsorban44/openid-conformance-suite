@@ -21,9 +21,7 @@ export class OIDCCRedirectUriQueryAdded extends AbstractOIDCCServerTestExpecting
 	}
 
 	protected override createAuthorizationRequestSequence(): ConditionSequence {
-		return super
-			.createAuthorizationRequestSequence()
-			.then(this.condition(AddQueryToRedirectUriInAuthorizationRequest));
+		return super.createAuthorizationRequestSequence().then(this.condition(AddQueryToRedirectUriInAuthorizationRequest));
 	}
 
 	protected override async processCallback(): Promise<void> {

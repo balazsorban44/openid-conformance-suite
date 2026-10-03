@@ -18,9 +18,7 @@ export class OIDCCIdTokenHint extends AbstractOIDCCSameAuthTwiceServerTest {
 	protected override async createSecondAuthorizationRequest(): Promise<void> {
 		await this.call(
 			this.createAuthorizationRequestSequence()
-				.then(
-					this.condition(AddPromptNoneToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1", "OIDCC-15.1"),
-				)
+				.then(this.condition(AddPromptNoneToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1", "OIDCC-15.1"))
 				.then(
 					this.condition(AddIdTokenHintFromFirstLoginToAuthorizationEndpointRequest).requirements(
 						"OIDCC-3.1.2.1",

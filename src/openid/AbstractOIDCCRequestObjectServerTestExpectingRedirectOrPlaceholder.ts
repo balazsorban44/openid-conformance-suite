@@ -1,4 +1,3 @@
-
 import { AbstractOIDCCRequestObjectServerTest } from "./AbstractOIDCCRequestObjectServerTest.ts";
 
 export class AbstractOIDCCRequestObjectServerTestExpectingRedirectOrPlaceholder extends AbstractOIDCCRequestObjectServerTest {

@@ -13,6 +13,8 @@ export class OIDCCDisplayPopup extends AbstractOIDCCServerTest {
 	};
 
 	protected override createAuthorizationRequestSequence(): ConditionSequence {
-		return super.createAuthorizationRequestSequence().then(this.condition(AddDisplayPopupToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1", "OIDCC-15.1"));
+		return super
+			.createAuthorizationRequestSequence()
+			.then(this.condition(AddDisplayPopupToAuthorizationEndpointRequest).requirements("OIDCC-3.1.2.1", "OIDCC-15.1"));
 	}
 }

@@ -25,7 +25,13 @@ export class JavaLocale {
 	/** singleton -> extension value (without the singleton), lowercased; 'x' holds the private use value */
 	private readonly extensions: Map<string, string>;
 
-	private constructor(language: string, script: string, region: string, variant: string, extensions: Map<string, string>) {
+	private constructor(
+		language: string,
+		script: string,
+		region: string,
+		variant: string,
+		extensions: Map<string, string>,
+	) {
 		this.language = language;
 		this.script = script;
 		this.region = region;

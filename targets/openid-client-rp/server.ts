@@ -186,7 +186,9 @@ function describeError(err: unknown): string {
 			parts.push(`(${code})`);
 		}
 		if (oauthError) {
-			parts.push(`[${oauthError}${(err as { error_description?: string }).error_description ? `: ${(err as { error_description?: string }).error_description}` : ""}]`);
+			parts.push(
+				`[${oauthError}${(err as { error_description?: string }).error_description ? `: ${(err as { error_description?: string }).error_description}` : ""}]`,
+			);
 		}
 		const cause = err.cause;
 		if (cause instanceof URLSearchParams && cause.get("error")) {
@@ -195,6 +197,10 @@ function describeError(err: unknown): string {
 		return parts.join(" ");
 	}
 	return String(err);
+}
+
+function norm(issuer: string): string {
+	return issuer.replace(/\/$/, "");
 }
 
 function htmlSafe(value: unknown): string {
@@ -239,7 +245,9 @@ async function validateAtHash(idToken: string, accessToken: string): Promise<voi
 	if (typeof claims["at_hash"] !== "string") {
 		throw new Error("missing required property at_hash");
 	}
-	const digest = new Uint8Array(await crypto.subtle.digest(hashAlgForJws(String(alg)), new TextEncoder().encode(accessToken)));
+	const digest = new Uint8Array(
+		await crypto.subtle.digest(hashAlgForJws(String(alg)), new TextEncoder().encode(accessToken)),
+	);
 	const expected = Buffer.from(digest.slice(0, digest.length / 2)).toString("base64url");
 	if (claims["at_hash"] !== expected) {
 		throw new Error(`at_hash mismatch, expected ${expected}, got: ${claims["at_hash"]}`);
@@ -521,9 +529,31 @@ async function browserUserAgent(): Promise<UserAgent> {
  * responses to /cb-fragment (what the /cb page's script does in a browser). Enough for the login modules.
  */
 function fetchUserAgent(): UserAgent {
+	// host -> cookie name -> value (enough for an OP's login/interaction cookies; attributes are ignored)
+	const jar = new Map<string, Map<string, string>>();
+	const withCookies = (target: URL, init: RequestInit): RequestInit => {
+		const cookies = jar.get(target.host);
+		if (!cookies?.size) {
+			return init;
+		}
+		const headers = new Headers(init.headers);
+		headers.set("cookie", [...cookies].map(([k, v]) => `${k}=${v}`).join("; "));
+		return { ...init, headers };
+	};
+	const storeCookies = (target: URL, res: Response) => {
+		for (const line of res.headers.getSetCookie()) {
+			const [pair] = line.split(";");
+			const eq = pair.indexOf("=");
+			if (eq > 0) {
+				const cookies = jar.get(target.host) ?? new Map<string, string>();
+				cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+				jar.set(target.host, cookies);
+			}
+		}
+	};
 	return {
-		async open(start) {
-			let url = start;
+		async open(startUrl) {
+			let url = startUrl;
 			let init: RequestInit = { redirect: "manual" };
 			for (let i = 0; i < 20; i++) {
 				const target = new URL(url);
@@ -538,7 +568,8 @@ function fetchUserAgent(): UserAgent {
 					continue;
 				}
 				target.hash = "";
-				const res = await fetch(target, init);
+				const res = await fetch(target, withCookies(target, init));
+				storeCookies(target, res);
 				const location = res.headers.get("location");
 				if (res.status >= 300 && res.status < 400 && location) {
 					url = new URL(location, target).href;
@@ -547,7 +578,8 @@ function fetchUserAgent(): UserAgent {
 				}
 				const type = res.headers.get("content-type") ?? "";
 				const body = await res.text();
-				const form = type.includes("html") ? /<form[^>]*method="post"[^>]*action="([^"]+)"/i.exec(body) : null;
+				const formTag = type.includes("html") ? /<form\b[^>]*>/i.exec(body)?.[0] : undefined;
+				const form = formTag && /method="post"/i.test(formTag) ? /action="([^"]+)"/i.exec(formTag) : null;
 				if (form) {
 					const params = new URLSearchParams();
 					for (const m of body.matchAll(/<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi)) {
@@ -621,8 +653,13 @@ function needsJwks(metadata: Record<string, unknown>): boolean {
 	);
 }
 
-async function clientAuthFor(method: string, metadata: Record<string, unknown>, input: StartInput): Promise<client.ClientAuth> {
-	const secret = input.variant["client_registration"] === "static_client" ? (input.clientSecret ?? STATIC_CLIENT_SECRET) : undefined;
+async function clientAuthFor(
+	method: string,
+	metadata: Record<string, unknown>,
+	input: StartInput,
+): Promise<client.ClientAuth> {
+	const secret =
+		input.variant["client_registration"] === "static_client" ? (input.clientSecret ?? STATIC_CLIENT_SECRET) : undefined;
 	switch (method) {
 		case "none":
 			return client.None();
@@ -641,7 +678,11 @@ async function clientAuthFor(method: string, metadata: Record<string, unknown>, 
 	}
 }
 
-async function setUpClient(flowLike: { steps: string[]; module: string }, input: StartInput, spec: ModuleSpec): Promise<RpClient> {
+async function setUpClient(
+	flowLike: { steps: string[]; module: string },
+	input: StartInput,
+	spec: ModuleSpec,
+): Promise<RpClient> {
 	const { variant } = input;
 	const responseType = variant["response_type"] ?? "code";
 	const requestType = spec.requestType ?? variant["request_type"] ?? "plain_http_request";
@@ -724,7 +765,12 @@ async function enableDecryption(config: client.Configuration): Promise<void> {
 
 /** a fresh Configuration for the same client, i.e. without cached JWKS (key rotation modules) */
 async function freshConfig(rp: RpClient, responseType: string, issuer: string): Promise<client.Configuration> {
-	const config = new client.Configuration(rp.config.serverMetadata(), rp.clientId, { ...rp.config.clientMetadata() }, rp.clientAuth);
+	const config = new client.Configuration(
+		rp.config.serverMetadata(),
+		rp.clientId,
+		{ ...rp.config.clientMetadata() },
+		rp.clientAuth,
+	);
 	for (const ext of executeFor(issuer)) {
 		ext(config);
 	}
@@ -738,7 +784,8 @@ async function freshConfig(rp: RpClient, responseType: string, issuer: string): 
 
 function newFlow(input: StartInput, spec: ModuleSpec, rp: RpClient, steps: string[]): Flow {
 	const variant = input.variant;
-	const responseMode = variant["response_mode"] && variant["response_mode"] !== "default" ? variant["response_mode"] : undefined;
+	const responseMode =
+		variant["response_mode"] && variant["response_mode"] !== "default" ? variant["response_mode"] : undefined;
 	const flow: Flow = {
 		id: randomUUID(),
 		module: input.module,
@@ -790,7 +837,11 @@ async function buildAuthorizationUrl(flow: Flow, extra: Record<string, string> =
 		return client.buildAuthorizationUrl(config, params);
 	}
 
-	const alg = String(config.clientMetadata().request_object_signing_alg ?? flow.rp.requestedMetadata["request_object_signing_alg"] ?? "RS256");
+	const alg = String(
+		config.clientMetadata().request_object_signing_alg ??
+			flow.rp.requestedMetadata["request_object_signing_alg"] ??
+			"RS256",
+	);
 	let requestObject: string;
 	if (alg === "none") {
 		requestObject = new jose.UnsecuredJWT({ ...params, client_id: flow.rp.clientId })
@@ -887,7 +938,12 @@ async function completeLogin(flow: Flow, params: URLSearchParams, config = flow.
 	return result;
 }
 
-async function userinfo(flow: Flow, config: client.Configuration, accessToken: string, sub: string): Promise<Record<string, unknown>> {
+async function userinfo(
+	flow: Flow,
+	config: client.Configuration,
+	accessToken: string,
+	sub: string,
+): Promise<Record<string, unknown>> {
 	let info: Record<string, unknown>;
 	if (flow.spec.userinfoVia === "body") {
 		// RFC 6750 section 2.2 form-encoded body parameter (openid-client only sends the Authorization header)
@@ -915,7 +971,9 @@ async function userinfo(flow: Flow, config: client.Configuration, accessToken: s
 /** OIDC Core 5.6.2 aggregated and distributed claims */
 async function resolveClaimSources(flow: Flow, claims: Record<string, unknown>, accessToken: string): Promise<void> {
 	const names = claims["_claim_names"] as Record<string, string> | undefined;
-	const sources = claims["_claim_sources"] as Record<string, { JWT?: string; endpoint?: string; access_token?: string }> | undefined;
+	const sources = claims["_claim_sources"] as
+		| Record<string, { JWT?: string; endpoint?: string; access_token?: string }>
+		| undefined;
 	if (!names || !sources) {
 		return;
 	}
@@ -966,12 +1024,21 @@ async function handleAuthorizationResponse(params: URLSearchParams): Promise<{ s
 		flow.login.resolve(result);
 		return {
 			status: 200,
-			html: page("Signed in", `<h1 id="rp-login-complete">Signed in as ${htmlSafe(result.claims?.["sub"] ?? "?")}</h1>`),
+			html: page(
+				"Signed in",
+				`<h1 id="rp-login-complete">Signed in as ${htmlSafe(result.claims?.["sub"] ?? "?")}</h1>`,
+			),
 		};
 	} catch (err) {
 		step(flow, `authorization response rejected: ${describeError(err)}`);
 		flow.login.reject(err);
-		return { status: 400, html: page("Login failed", `<h1 id="rp-login-failed">Login failed</h1><pre>${htmlSafe(describeError(err))}</pre>`) };
+		return {
+			status: 400,
+			html: page(
+				"Login failed",
+				`<h1 id="rp-login-failed">Login failed</h1><pre>${htmlSafe(describeError(err))}</pre>`,
+			),
+		};
 	}
 }
 
@@ -990,12 +1057,21 @@ async function runModule(input: StartInput): Promise<StartResult> {
 	const spec = moduleSpec(input.module);
 	const steps: string[] = [];
 	const ctx = { steps, module: input.module };
-	step(ctx, `start (variant ${JSON.stringify(input.variant)}, metadata defaults ${JSON.stringify(input.clientMetadataDefaults)})`);
+	step(
+		ctx,
+		`start (variant ${JSON.stringify(input.variant)}, metadata defaults ${JSON.stringify(input.clientMetadataDefaults)})`,
+	);
 
 	const expectRejection = async (fn: () => Promise<unknown>): Promise<StartResult> => {
 		try {
 			await fn();
-			return { ok: false, error: "the RP did not reject the response", steps, module: input.module, outcome: "accepted" };
+			return {
+				ok: false,
+				error: "the RP did not reject the response",
+				steps,
+				module: input.module,
+				outcome: "accepted",
+			};
 		} catch (err) {
 			step(ctx, `rejected as expected: ${describeError(err)}`);
 			return { ok: true, steps, module: input.module, outcome: "rejected", error: describeError(err) };
@@ -1005,12 +1081,16 @@ async function runModule(input: StartInput): Promise<StartResult> {
 	const execute = executeFor(input.issuer);
 	switch (spec.kind) {
 		case "discovery": {
-			const config = await client.discovery(new URL(input.issuer), "discovery-only", undefined, client.None(), { execute });
+			const config = await client.discovery(new URL(input.issuer), "discovery-only", undefined, client.None(), {
+				execute,
+			});
 			step(ctx, `discovered ${config.serverMetadata().issuer}`);
 			return { ok: true, steps, module: input.module };
 		}
 		case "jwks": {
-			const config = await client.discovery(new URL(input.issuer), "discovery-only", undefined, client.None(), { execute });
+			const config = await client.discovery(new URL(input.issuer), "discovery-only", undefined, client.None(), {
+				execute,
+			});
 			step(ctx, `discovered ${config.serverMetadata().issuer}`);
 			const res = await fetch(config.serverMetadata().jwks_uri!);
 			const jwks = (await res.json()) as jose.JSONWebKeySet;
@@ -1106,7 +1186,12 @@ async function runModule(input: StartInput): Promise<StartResult> {
 		if (spec.kind === "key-rotation") {
 			await login();
 			// second authentication with a configuration that has no cached JWKS, so the rotated key is fetched
-			const second = newFlow(input, spec, { ...rp, config: await freshConfig(rp, flow.responseType, input.issuer) }, steps);
+			const second = newFlow(
+				input,
+				spec,
+				{ ...rp, config: await freshConfig(rp, flow.responseType, input.issuer) },
+				steps,
+			);
 			step(flow, "second authentication after OP key rotation");
 			await login(second);
 			return { ok: true, steps, module: input.module, outcome: "signed in twice" };
@@ -1140,7 +1225,12 @@ async function runModule(input: StartInput): Promise<StartResult> {
 			const accepted = outcome.accepted ? "accepted" : `rejected (${outcome.error})`;
 			step(flow, `back-channel logout_token ${accepted}`);
 			if ((spec.backchannel === "accept") !== outcome.accepted) {
-				return { ok: false, error: `expected the logout_token to be ${spec.backchannel}ed but it was ${accepted}`, steps, module: input.module };
+				return {
+					ok: false,
+					error: `expected the logout_token to be ${spec.backchannel}ed but it was ${accepted}`,
+					steps,
+					module: input.module,
+				};
 			}
 		}
 
@@ -1308,7 +1398,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	switch (`${req.method} ${url.pathname}`) {
 		case "GET /":
 		case "GET /ready":
-			return sendJson(res, 200, { ready: true, base: BASE, redirect_uri: REDIRECT_URI, initiate_login_uri: INITIATE_LOGIN_URI });
+			return sendJson(res, 200, {
+				ready: true,
+				base: BASE,
+				redirect_uri: REDIRECT_URI,
+				initiate_login_uri: INITIATE_LOGIN_URI,
+			});
 
 		case "GET /jwks":
 			return sendJson(res, 200, PUBLIC_JWKS);
@@ -1469,7 +1564,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		case "GET /initiate-login": {
 			// OIDC Core 4: third party initiated login (iss, login_hint, target_link_uri)
 			const iss = q.get("iss") ?? "";
-			const norm = (s: string) => s.replace(/\/$/, "");
 			const flow = [...flows.values()]
 				.filter((f) => f.waitingForInitiateLogin && norm(f.rp.config.serverMetadata().issuer) === norm(iss))
 				.at(-1);
@@ -1539,7 +1633,9 @@ function selfSignedCertificate(): { key: string; cert: string } | undefined {
 		);
 		return { key: readFileSync(join(dir, "key.pem"), "utf8"), cert: readFileSync(join(dir, "cert.pem"), "utf8") };
 	} catch (err) {
-		console.warn(`[rp] could not create a self-signed certificate with openssl (${describeError(err)}), https disabled`);
+		console.warn(
+			`[rp] could not create a self-signed certificate with openssl (${describeError(err)}), https disabled`,
+		);
 		return undefined;
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -1587,7 +1683,9 @@ export async function start(): Promise<RunningRp> {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 	const running = await start();
-	console.log(`openid-client RP listening on ${BASE} (redirect_uri ${REDIRECT_URI}, initiate_login_uri ${INITIATE_LOGIN_URI})`);
+	console.log(
+		`openid-client RP listening on ${BASE} (redirect_uri ${REDIRECT_URI}, initiate_login_uri ${INITIATE_LOGIN_URI})`,
+	);
 	console.log("ready");
 	const shutdown = () => {
 		void running.close().then(() => process.exit(0));

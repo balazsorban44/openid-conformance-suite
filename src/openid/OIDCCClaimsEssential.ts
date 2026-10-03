@@ -52,11 +52,6 @@ export class OIDCCClaimsEssential extends AbstractOIDCCReturnedClaimsServerTest 
 
 	protected override async validateIdTokenForResponseTypeIdToken(): Promise<void> {
 		await super.validateIdTokenForResponseTypeIdToken();
-		await this.callAndContinueOnFailure(
-			EnsureIdTokenContainsName,
-			ConditionResult.WARNING,
-			"OIDCC-5.5",
-			"OIDCC-5.5.1",
-		);
+		await this.callAndContinueOnFailure(EnsureIdTokenContainsName, ConditionResult.WARNING, "OIDCC-5.5", "OIDCC-5.5.1");
 	}
 }

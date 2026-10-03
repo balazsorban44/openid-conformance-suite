@@ -13,6 +13,8 @@ export class OIDCCEnsureRequestWithUnknownParameterSucceeds extends AbstractOIDC
 	};
 
 	protected override createAuthorizationRequestSequence(): ConditionSequence {
-		return super.createAuthorizationRequestSequence().then(this.condition(AddExtraFoobarToAuthorizationEndpointRequest).requirements("RFC6749-3.1"));
+		return super
+			.createAuthorizationRequestSequence()
+			.then(this.condition(AddExtraFoobarToAuthorizationEndpointRequest).requirements("RFC6749-3.1"));
 	}
 }

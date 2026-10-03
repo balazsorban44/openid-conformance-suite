@@ -1,4 +1,3 @@
-
 import { type PublishTestModule } from "../framework/index.ts";
 import { AbstractOIDCCUserInfoTest } from "./AbstractOIDCCUserInfoTest.ts";
 

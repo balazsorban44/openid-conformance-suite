@@ -51,7 +51,10 @@ export class RedirectURIValidationUtil {
 	 * @return false if invalid
 	 * @throws URISyntaxException
 	 */
-	static dontAllowHttpIfNativeAndNotLocalhost(applicationType: string | null | undefined, redirectUri: string): boolean {
+	static dontAllowHttpIfNativeAndNotLocalhost(
+		applicationType: string | null | undefined,
+		redirectUri: string,
+	): boolean {
 		if ("native" === applicationType) {
 			const actualLower = redirectUri.toLowerCase();
 			if (actualLower.startsWith("http://")) {
