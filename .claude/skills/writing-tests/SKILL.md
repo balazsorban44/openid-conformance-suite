@@ -244,7 +244,8 @@ sequential (browser entries, setup checks run by the test where they are used).
 `portedPlans` in src/runner/projects.ts lists, per plan, the spec file and the modules it covers.
 playwright.config.ts adds the spec to the selected project and tests/plan.spec.ts leaves those modules out, so a
 CI project keeps running its whole plan. Porting a module: write the test, add the module to `portedPlans`, run
-the project, diff the fingerprints against the old framework's run, `pnpm lock-symbols`.
+the project, diff the fingerprints against the old framework's run, `pnpm lock-symbols`. A project marked `legacy: true`
+(suite-vs-suite: the emulated OP is an old-framework RP module) runs every module on the old framework.
 
 ## Sync with upstream
 

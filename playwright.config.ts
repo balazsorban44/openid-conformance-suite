@@ -16,11 +16,12 @@ import { globBody } from "./src/suite/config.ts";
 const project = projects.find((p) => p.name === process.env["CONFORMANCE_PROJECT"]);
 const plan = process.env["CONFORMANCE_PLAN"] ?? project?.plan;
 const configured = Boolean(process.env["CONFORMANCE_CONFIG"] ?? project?.config);
-const specs = configured
-	? Object.entries(portedPlans)
-			.filter(([name]) => !plan || name === plan)
-			.map(([, p]) => p.spec)
-	: [];
+const specs =
+	configured && !project?.legacy
+		? Object.entries(portedPlans)
+				.filter(([name]) => !plan || name === plan)
+				.map(([, p]) => p.spec)
+		: [];
 const moduleGlob = process.env["CONFORMANCE_MODULE"];
 
 export default defineConfig({

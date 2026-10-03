@@ -26,6 +26,11 @@ export interface ConformanceProject {
 	config: string;
 	/** modules not run in this project: testName -> why (shown as the Playwright skip reason) */
 	skipModules?: Record<string, string>;
+	/**
+	 * Run every module on the old framework (tests/plan.spec.ts), ignoring portedPlans: for setups the rewritten
+	 * fixtures do not support yet (suite_target, the suite's own RP module acting as the OP)
+	 */
+	legacy?: boolean;
 }
 
 const DISCOVERY_DYNAMIC = "[server_metadata=discovery][client_registration=dynamic_client]";
@@ -144,6 +149,7 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-basic-certification-test-plan",
 		variant: DISCOVERY_DYNAMIC,
 		config: "configs/suite-vs-suite/oidcc-basic.json",
+		legacy: true,
 		// the emulated OP is upstream's single-flow RP test module (oidcc-client-test); what it cannot do is skipped
 		// here, what it does differently is in configs/expected-failures/suite-vs-suite.json
 		skipModules: {
