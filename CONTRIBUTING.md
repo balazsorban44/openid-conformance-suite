@@ -24,7 +24,8 @@ The whole point of this repository is to stay a faithful, file-by-file port of t
 
 Adding a plan in short: `npm run sync-upstream -- --fetch`, `--closure net.openid.conformance.<Plan>` to list
 what is missing, `--add` to register it, port, `node scripts/gen-registry.ts`, add a CI target config under
-`configs/` and a project in `src/runner/projects.ts` + `.github/workflows/ci.yml`.
+`configs/` and a project in `src/runner/projects.ts` (the CI matrix is read from it via
+`node bin/openid-conformance.ts projects --json`).
 
 ## Framework changes
 

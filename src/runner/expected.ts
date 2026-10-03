@@ -1,11 +1,8 @@
 import type { LogEntry } from "../framework/EventLog.ts";
 import type { Result } from "../framework/TestModule.ts";
 import type { ExpectedFailure, ExpectedSkip } from "./config.ts";
+import { fnmatch } from "./glob.ts";
 
-/**
- * Port of analyze_result_logs() from upstream scripts/run-test-plan.py: compare a module's log against the
- * expected-failure / expected-skip lists.
- */
 export interface ConditionRef {
 	current_block: string;
 	src: string;
@@ -27,21 +24,25 @@ export interface ModuleAnalysis {
 	ok: boolean;
 }
 
-/** fnmatch-style glob (`*`, `?`) */
-export function fnmatch(pattern: string, s: string): boolean {
-	const re = new RegExp(
-		"^" +
-			pattern
-				.split("")
-				.map((c) => (c === "*" ? ".*" : c === "?" ? "." : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
-				.join("") +
-			"$",
-	);
-	return re.test(s);
+/** An analysis of nothing (e.g. a test that crashed before its module ran); `ok` is false */
+export function emptyAnalysis(): ModuleAnalysis {
+	return {
+		expected_failures: [],
+		unexpected_failures: [],
+		expected_failures_did_not_happen: [],
+		expected_warnings: [],
+		unexpected_warnings: [],
+		expected_warnings_did_not_happen: [],
+		expected_skip: false,
+		unexpected_skip: false,
+		expected_skip_did_not_happen: false,
+		counts: { SUCCESS: 0, WARNING: 0, FAILURE: 0 },
+		ok: false,
+	};
 }
 
 function isExpectedForThisTest(
-	obj: { "test-name": string; variant: "*" | Record<string, string>; "configuration-filename"?: string },
+	obj: ExpectedFailure | ExpectedSkip,
 	testName: string,
 	variant: Record<string, string>,
 	configFilename: string,
@@ -56,17 +57,13 @@ function isExpectedForThisTest(
 	if (expectedVariant === "*" || expectedVariant == null) {
 		return true;
 	}
-	for (const k of Object.keys(expectedVariant)) {
-		if (!(k in variant)) {
-			return false;
-		}
-		if (expectedVariant[k] !== variant[k]) {
-			return false;
-		}
-	}
-	return true;
+	return Object.entries(expectedVariant).every(([k, v]) => k in variant && variant[k] === v);
 }
 
+/**
+ * Port of analyze_result_logs() from upstream scripts/run-test-plan.py: compare a module's log against the
+ * expected-failure / expected-skip lists.
+ */
 export function analyzeResultLogs(
 	testName: string,
 	variant: Record<string, string>,
@@ -76,72 +73,43 @@ export function analyzeResultLogs(
 	expectedSkipsList: ExpectedSkip[],
 	configFilename: string,
 ): ModuleAnalysis {
-	const counts = { SUCCESS: 0, WARNING: 0, FAILURE: 0 };
-	const out: ModuleAnalysis = {
-		expected_failures: [],
-		unexpected_failures: [],
-		expected_failures_did_not_happen: [],
-		expected_warnings: [],
-		unexpected_warnings: [],
-		expected_warnings_did_not_happen: [],
-		expected_skip: false,
-		unexpected_skip: false,
-		expected_skip_did_not_happen: false,
-		counts,
-		ok: true,
-	};
-
-	const testExpectedFailures = expectedFailuresList.filter((o) =>
-		isExpectedForThisTest(o, testName, variant, configFilename),
-	);
-	const testExpectedSkips = expectedSkipsList.filter((o) =>
-		isExpectedForThisTest(o, testName, variant, configFilename),
-	);
+	const out = emptyAnalysis();
+	const isForThisTest = (o: ExpectedFailure | ExpectedSkip) =>
+		isExpectedForThisTest(o, testName, variant, configFilename);
+	const testExpectedFailures = expectedFailuresList.filter(isForThisTest);
+	const testExpectedSkips = expectedSkipsList.filter(isForThisTest);
 	const used = new Set<ExpectedFailure>();
 
 	const blockNames = new Map<string, string>();
-	let blockMsg = "";
 	for (const entry of logs) {
 		if (entry["startBlock"] === true && entry.src === "-START-BLOCK-") {
 			blockNames.set(String(entry["blockId"]), String(entry["msg"]));
 			continue;
 		}
-		if (!("result" in entry) || entry["result"] == null) {
+		if (entry["result"] == null) {
 			continue;
-		}
-		if (entry["blockId"] != null) {
-			blockMsg = blockNames.get(String(entry["blockId"])) ?? "";
-		} else {
-			blockMsg = "";
 		}
 		const logResult = String(entry["result"]);
-		if (!(logResult in counts)) {
+		if (!(logResult in out.counts)) {
 			continue;
 		}
-		counts[logResult as keyof typeof counts]++;
-		let existsInExpectedList = false;
-		for (const expected of testExpectedFailures) {
-			const expectedBlock = expected["current-block"];
-			if ((expectedBlock === blockMsg || expectedBlock === "*") && expected.condition === entry.src) {
-				if (logResult === "FAILURE" && expected["expected-result"] === "failure") {
-					out.expected_failures.push({ current_block: blockMsg, src: entry.src, msg: msgOf(entry) });
-				} else if (logResult === "WARNING" && expected["expected-result"] === "warning") {
-					out.expected_warnings.push({ current_block: blockMsg, src: entry.src, msg: msgOf(entry) });
-				} else {
-					continue;
-				}
-				existsInExpectedList = true;
-				used.add(expected);
-				break;
-			}
-		}
-		if (!existsInExpectedList) {
-			if (logResult === "FAILURE") {
-				out.unexpected_failures.push({ current_block: blockMsg, src: entry.src, msg: msgOf(entry) });
-			}
-			if (logResult === "WARNING") {
-				out.unexpected_warnings.push({ current_block: blockMsg, src: entry.src, msg: msgOf(entry) });
-			}
+		out.counts[logResult as keyof ModuleAnalysis["counts"]]++;
+		const blockMsg = entry["blockId"] != null ? (blockNames.get(String(entry["blockId"])) ?? "") : "";
+		const ref: ConditionRef = { current_block: blockMsg, src: entry.src, msg: msgOf(entry) };
+		// SUCCESS never matches: expected-result is "failure" or "warning"
+		const expected = testExpectedFailures.find(
+			(e) =>
+				(e["current-block"] === blockMsg || e["current-block"] === "*") &&
+				e.condition === entry.src &&
+				e["expected-result"] === logResult.toLowerCase(),
+		);
+		if (expected) {
+			used.add(expected);
+			(logResult === "FAILURE" ? out.expected_failures : out.expected_warnings).push(ref);
+		} else if (logResult === "FAILURE") {
+			out.unexpected_failures.push(ref);
+		} else if (logResult === "WARNING") {
+			out.unexpected_warnings.push(ref);
 		}
 	}
 
@@ -157,7 +125,7 @@ export function analyzeResultLogs(
 		}
 	}
 
-	for (const _skip of testExpectedSkips) {
+	if (testExpectedSkips.length > 0) {
 		if (testResult === "SKIPPED" || testResult === "FAILED") {
 			out.expected_skip = true;
 		} else {
@@ -169,15 +137,59 @@ export function analyzeResultLogs(
 	}
 
 	const knownResult = ["PASSED", "WARNING", "REVIEW", "SKIPPED", "FAILED"].includes(String(testResult));
-	out.ok =
-		knownResult &&
-		out.unexpected_failures.length === 0 &&
-		out.unexpected_warnings.length === 0 &&
-		!out.unexpected_skip &&
-		out.expected_failures_did_not_happen.length === 0 &&
-		out.expected_warnings_did_not_happen.length === 0 &&
-		!out.expected_skip_did_not_happen;
+	out.ok = knownResult && describeProblems(out).length === 0;
 	return out;
+}
+
+/** Everything noteworthy in an analysis, in report order */
+export type Finding =
+	| {
+			kind:
+				| "unexpected failure"
+				| "unexpected warning"
+				| "expected failure"
+				| "expected warning"
+				| "expected failure did not happen"
+				| "expected warning did not happen";
+			ref: ConditionRef;
+	  }
+	| { kind: "unexpected skip" | "expected skip did not happen" };
+
+export function findings(a: ModuleAnalysis): Finding[] {
+	const refs = (kind: Extract<Finding, { ref: ConditionRef }>["kind"], list: ConditionRef[]): Finding[] =>
+		list.map((ref) => ({ kind, ref }));
+	return [
+		...refs("unexpected failure", a.unexpected_failures),
+		...refs("unexpected warning", a.unexpected_warnings),
+		...refs("expected failure", a.expected_failures),
+		...refs("expected warning", a.expected_warnings),
+		...refs("expected failure did not happen", a.expected_failures_did_not_happen),
+		...refs("expected warning did not happen", a.expected_warnings_did_not_happen),
+		...(a.unexpected_skip ? [{ kind: "unexpected skip" } as const] : []),
+		...(a.expected_skip_did_not_happen ? [{ kind: "expected skip did not happen" } as const] : []),
+	];
+}
+
+/** The findings that make a module fail (expected failures/warnings are not problems), one line each */
+export function describeProblems(a: ModuleAnalysis): string[] {
+	return findings(a).flatMap((f): string[] => {
+		switch (f.kind) {
+			case "unexpected failure":
+				return [`FAILURE ${f.ref.src}${f.ref.current_block ? ` [${f.ref.current_block}]` : ""}: ${f.ref.msg ?? ""}`];
+			case "unexpected warning":
+				return [`WARNING ${f.ref.src}: ${f.ref.msg ?? ""}`];
+			case "expected failure did not happen":
+			case "expected warning did not happen":
+				return [`${f.kind}: ${f.ref.src}`];
+			case "unexpected skip":
+				return ["module was unexpectedly SKIPPED"];
+			case "expected skip did not happen":
+				return ["module was expected to be skipped but completed"];
+			case "expected failure":
+			case "expected warning":
+				return [];
+		}
+	});
 }
 
 function msgOf(entry: LogEntry): string | undefined {

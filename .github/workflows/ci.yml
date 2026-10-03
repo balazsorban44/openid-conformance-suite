@@ -32,31 +32,28 @@ jobs:
         run: node scripts/gen-registry.ts && git diff --exit-code -- src/registry.ts
       - run: npm run test:unit
 
+  matrix:
+    name: list projects
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.list.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      # the matrix is src/runner/projects.ts; listing it needs no dependencies
+      - id: list
+        run: echo "projects=$(node bin/openid-conformance.ts projects --json)" >> "$GITHUB_OUTPUT"
+
   conformance:
     name: ${{ matrix.project }}
     runs-on: ubuntu-latest
-    needs: check
+    needs: [check, matrix]
     strategy:
       fail-fast: false
       matrix:
-        project:
-          - op-basic-static
-          - op-basic-dynamic
-          - op-config
-          - op-dynamic
-          - op-rp-initiated-logout
-          - op-backchannel-logout
-          - op-frontchannel-logout
-          - op-session-management
-          - op-3rdparty-init-login
-          - rp-basic
-          - rp-dynamic
-          - rp-rp-initiated-logout
-          - rp-backchannel-logout
-          - rp-frontchannel-logout
-          - rp-session-management
-          - rp-3rdparty-init-login
-          - suite-vs-suite
+        project: ${{ fromJSON(needs.matrix.outputs.projects) }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

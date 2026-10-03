@@ -5,28 +5,27 @@
  *   openid-conformance list [--plans|--modules|--variants]
  *   openid-conformance run --plan <name> [--variant k=v ...] --config <file> [--module <glob>] [--headed] [-- <playwright args>]
  *   openid-conformance ci --project <name from src/runner/projects.ts> [-- <playwright args>]
- *   openid-conformance projects
+ *   openid-conformance projects [--json]
  *
  * `run` and `ci` execute Playwright (tests/plan.spec.ts) with the matching CONFORMANCE_* environment.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, "..");
-const require = createRequire(import.meta.url);
+const root = resolve(import.meta.dirname, "..");
 
-function usage(code = 0): never {
+type Opts = Record<string, string | string[] | true>;
+
+function usage(code: number): number {
 	console.log(`openid-conformance - OpenID Connect OP/RP conformance tests (TypeScript port of the OIDF suite)
 
 Usage:
   openid-conformance list [--plans | --modules | --variants]
   openid-conformance run --plan <plan> --config <file> [--variant k=v]... [--module <glob>] [--tls] [--headed] [--report-dir <dir>] [-- <playwright args>]
   openid-conformance ci --project <name> [-- <playwright args>]
-  openid-conformance projects
+  openid-conformance projects [--json]
 
 Examples:
   openid-conformance run --plan oidcc-basic-certification-test-plan \\
@@ -34,12 +33,13 @@ Examples:
      --config ./conformance.json
   openid-conformance ci --project op-basic-dynamic
 `);
-	process.exit(code);
+	return code;
 }
 
-function parseArgs(argv: string[]): { cmd: string; opts: Record<string, string | string[] | boolean>; rest: string[] } {
-	const [cmd, ...args] = argv;
-	const opts: Record<string, string | string[] | boolean> = {};
+/** `--key value`, `--flag` (when followed by nothing or another `--option`), repeatable `--variant`, `-- rest` */
+function parseArgs(argv: string[]): { cmd: string; opts: Opts; rest: string[] } {
+	const [cmd = "", ...args] = argv;
+	const opts: Opts = {};
 	const rest: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
@@ -47,39 +47,46 @@ function parseArgs(argv: string[]): { cmd: string; opts: Record<string, string |
 			rest.push(...args.slice(i + 1));
 			break;
 		}
-		if (a.startsWith("--")) {
-			const key = a.slice(2);
-			const next = args[i + 1];
-			if (next === undefined || next.startsWith("--")) {
-				opts[key] = true;
-			} else {
-				if (key === "variant") {
-					opts[key] = [...((opts[key] as string[] | undefined) ?? []), next];
-				} else {
-					opts[key] = next;
-				}
-				i++;
-			}
-		} else {
+		if (!a.startsWith("--")) {
 			rest.push(a);
+			continue;
 		}
+		const key = a.slice(2);
+		const next = args[i + 1];
+		if (next === undefined || next.startsWith("--")) {
+			opts[key] = true;
+			continue;
+		}
+		i++;
+		const prev = opts[key];
+		opts[key] = key === "variant" ? [...(Array.isArray(prev) ? prev : []), next] : next;
 	}
-	return { cmd: cmd ?? "", opts, rest };
+	return { cmd, opts, rest };
 }
 
-async function list(opts: Record<string, unknown>): Promise<void> {
+async function list(opts: Opts): Promise<void> {
 	const { modules, plans } = await import("../src/registry.ts");
 	const { VariantService } = await import("../src/framework/VariantService.ts");
-	const { collectVariantMetadata } = await import("../src/framework/variants.ts");
-	const what = opts["modules"] ? "modules" : opts["variants"] ? "variants" : "plans";
-	if (what === "plans") {
+	const { collectVariantMetadata, VariantSelection } = await import("../src/framework/variants.ts");
+	if (opts["modules"]) {
+		for (const m of modules) {
+			console.log(`${m.meta?.testName}\n    ${m.meta?.displayName}`);
+		}
+	} else if (opts["variants"]) {
+		const seen = new Map<string, Set<string>>();
+		for (const m of modules) {
+			for (const v of collectVariantMetadata(m).parameters) {
+				seen.set(v.parameter.name, new Set(v.values().map(String)));
+			}
+		}
+		for (const [k, vals] of seen) {
+			console.log(`${k}: ${[...vals].join(", ")}`);
+		}
+	} else {
 		for (const p of plans) {
 			console.log(`${p.meta.testPlanName}\n    ${p.meta.displayName}`);
 			const params = new Set<string>();
-			for (const m of VariantService.expandPlan(
-				p,
-				new (await import("../src/framework/variants.ts")).VariantSelection({}),
-			)) {
+			for (const m of VariantService.expandPlan(p, new VariantSelection({}))) {
 				for (const v of collectVariantMetadata(m.moduleClass).parameters) {
 					if (!m.variantFromPlanDefinition.has(v)) {
 						params.add(`${v.parameter.name}=${v.values().map(String).join("|")}`);
@@ -90,25 +97,11 @@ async function list(opts: Record<string, unknown>): Promise<void> {
 				console.log(`    variants: ${[...params].join(" ")}`);
 			}
 		}
-	} else if (what === "modules") {
-		for (const m of modules) {
-			console.log(`${m.meta?.testName}\n    ${m.meta?.displayName}`);
-		}
-	} else {
-		const seen = new Map<string, Set<string>>();
-		for (const m of modules) {
-			for (const v of collectVariantMetadata(m).parameters) {
-				seen.set(v.parameter.name, new Set(v.values().map(String)));
-			}
-		}
-		for (const [k, vals] of seen) {
-			console.log(`${k}: ${[...vals].join(", ")}`);
-		}
 	}
 }
 
 function playwright(env: Record<string, string>, extra: string[]): number {
-	const cli = require.resolve("@playwright/test/cli");
+	const cli = fileURLToPath(import.meta.resolve("@playwright/test/cli"));
 	const args = [cli, "test", "tests/plan.spec.ts", "--config", join(root, "playwright.config.ts"), ...extra];
 	const r = spawnSync(process.execPath, args, {
 		stdio: "inherit",
@@ -119,90 +112,83 @@ function playwright(env: Record<string, string>, extra: string[]): number {
 	return r.status ?? 1;
 }
 
-async function main(): Promise<void> {
+function run(opts: Opts, rest: string[]): number {
+	const { plan, config, variant, module, tls, headed } = opts;
+	const reportDir = opts["report-dir"];
+	if (typeof plan !== "string" || typeof config !== "string") {
+		return usage(1);
+	}
+	const configPath = resolve(process.cwd(), config);
+	if (!existsSync(configPath)) {
+		console.error(`config not found: ${configPath}`);
+		return 1;
+	}
+	const env: Record<string, string> = { CONFORMANCE_PLAN: plan, CONFORMANCE_CONFIG: configPath };
+	if (Array.isArray(variant)) {
+		env["CONFORMANCE_VARIANT"] = variant.map((v) => `[${v}]`).join("");
+	}
+	if (typeof module === "string") {
+		env["CONFORMANCE_MODULE"] = module;
+	}
+	if (tls) {
+		env["CONFORMANCE_TLS"] = "1";
+	}
+	if (typeof reportDir === "string") {
+		env["CONFORMANCE_REPORT_DIR"] = resolve(process.cwd(), reportDir);
+	}
+	return playwright(env, headed ? [...rest, "--headed"] : rest);
+}
+
+async function main(): Promise<number> {
 	const { cmd, opts, rest } = parseArgs(process.argv.slice(2));
 	switch (cmd) {
 		case "list":
 			await list(opts);
-			return;
+			return 0;
 		case "projects": {
 			const { projects } = await import("../src/runner/projects.ts");
-			for (const p of projects) {
-				console.log(`${p.name}\t${p.plan}\t${p.variant}\t${p.config}`);
+			if (opts["json"]) {
+				console.log(JSON.stringify(projects.map((p) => p.name)));
+			} else {
+				for (const p of projects) {
+					console.log(`${p.name}\t${p.plan}\t${p.variant}\t${p.config}`);
+				}
 			}
-			return;
+			return 0;
 		}
-		case "run": {
-			const plan = opts["plan"];
-			const config = opts["config"];
-			if (typeof plan !== "string" || typeof config !== "string") {
-				usage(1);
-			}
-			const configPath = resolve(process.cwd(), config);
-			if (!existsSync(configPath)) {
-				console.error(`config not found: ${configPath}`);
-				process.exit(1);
-			}
-			const variants = (opts["variant"] as string[] | undefined) ?? [];
-			const env: Record<string, string> = {
-				CONFORMANCE_PLAN: plan,
-				CONFORMANCE_CONFIG: configPath,
-			};
-			if (variants.length > 0) {
-				env["CONFORMANCE_VARIANT"] = variants.map((v) => `[${v}]`).join("");
-			}
-			if (typeof opts["module"] === "string") {
-				env["CONFORMANCE_MODULE"] = opts["module"];
-			}
-			if (opts["tls"]) {
-				env["CONFORMANCE_TLS"] = "1";
-			}
-			if (typeof opts["report-dir"] === "string") {
-				env["CONFORMANCE_REPORT_DIR"] = resolve(process.cwd(), opts["report-dir"]);
-			}
-			const extra = [...rest];
-			if (opts["headed"]) {
-				extra.push("--headed");
-			}
-			process.exit(playwright(env, extra));
-		}
-		// eslint-disable-next-line no-fallthrough
+		case "run":
+			return run(opts, rest);
 		case "ci": {
-			const name = opts["project"];
 			const { projects } = await import("../src/runner/projects.ts");
-			const p = projects.find((x) => x.name === name);
+			const p = projects.find((x) => x.name === opts["project"]);
 			if (!p) {
-				console.error(`unknown project '${String(name)}'; known: ${projects.map((x) => x.name).join(", ")}`);
-				process.exit(1);
+				console.error(`unknown project '${String(opts["project"])}'; known: ${projects.map((x) => x.name).join(", ")}`);
+				return 1;
 			}
-			process.exit(
-				playwright(
-					{
-						CONFORMANCE_PROJECT: p.name,
-						CONFORMANCE_PLAN: p.plan,
-						CONFORMANCE_VARIANT: p.variant,
-						CONFORMANCE_CONFIG: resolve(root, p.config),
-						CONFORMANCE_SUMMARY_TITLE: `OpenID conformance: ${p.name}`,
-						CONFORMANCE_TLS: process.env["CONFORMANCE_TLS"] ?? "1",
-					},
-					rest,
-				),
+			return playwright(
+				{
+					CONFORMANCE_PROJECT: p.name,
+					CONFORMANCE_PLAN: p.plan,
+					CONFORMANCE_VARIANT: p.variant,
+					CONFORMANCE_CONFIG: resolve(root, p.config),
+					CONFORMANCE_SUMMARY_TITLE: `OpenID conformance: ${p.name}`,
+					CONFORMANCE_TLS: process.env["CONFORMANCE_TLS"] ?? "1",
+				},
+				rest,
 			);
 		}
-		// eslint-disable-next-line no-fallthrough
 		case "help":
 		case "--help":
 		case "-h":
 		case "":
-			usage(0);
-		// eslint-disable-next-line no-fallthrough
+			return usage(0);
 		default:
 			console.error(`unknown command '${cmd}'`);
-			usage(1);
+			return usage(1);
 	}
 }
 
-main().catch((e) => {
+process.exitCode = await main().catch((e: unknown) => {
 	console.error(e);
-	process.exit(1);
+	return 1;
 });

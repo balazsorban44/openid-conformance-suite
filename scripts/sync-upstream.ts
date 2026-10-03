@@ -53,10 +53,11 @@ function fetch(): void {
 
 function blobOf(javaPath: string): string | null {
 	const p = join(upstreamDir, javaPath);
-	if (!existsSync(p)) {
-		return null;
-	}
-	return git(["hash-object", p]);
+	return existsSync(p) ? git(["hash-object", p]) : null;
+}
+
+function locOf(javaPath: string): number {
+	return readFileSync(join(upstreamDir, javaPath), "utf8").split("\n").length;
 }
 
 function status(): void {
@@ -182,8 +183,7 @@ function add(fqns: string[]): void {
 		if (!blob) {
 			continue;
 		}
-		const loc = readFileSync(join(upstreamDir, java), "utf8").split("\n").length;
-		lock.files[ts] = { java, blob, loc };
+		lock.files[ts] = { java, blob, loc: locOf(java) };
 		console.log(`added ${ts} <- ${java}`);
 	}
 	save();
@@ -195,7 +195,7 @@ function pin(): void {
 		const blob = blobOf(info.java);
 		if (blob) {
 			info.blob = blob;
-			info.loc = readFileSync(join(upstreamDir, info.java), "utf8").split("\n").length;
+			info.loc = locOf(info.java);
 		}
 	}
 	lock.upstream.commit = git(["rev-parse", "HEAD"]);

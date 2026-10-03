@@ -1,14 +1,14 @@
-import { test, expect, type BrowserContext } from "@playwright/test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { test, expect } from "@playwright/test";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { LogEntry } from "../src/framework/EventLog.ts";
 import { SuiteServer } from "../src/framework/server.ts";
 import { VariantSelection } from "../src/framework/variants.ts";
-import { VariantService, type PlanModule } from "../src/framework/VariantService.ts";
+import { VariantService } from "../src/framework/VariantService.ts";
 import { findPlan } from "../src/registry.ts";
 import { loadConfig, type LoadedConfig } from "../src/runner/config.ts";
-import { analyzeResultLogs } from "../src/runner/expected.ts";
+import { analyzeResultLogs, describeProblems } from "../src/runner/expected.ts";
+import { globToRegExp } from "../src/runner/glob.ts";
 import { renderLogHtml, type ModuleReport } from "../src/runner/report.ts";
 import { projects } from "../src/runner/projects.ts";
 import { Target } from "../src/runner/target.ts";
@@ -17,14 +17,14 @@ import { runModule } from "../src/runner/TestRunner.ts";
 /**
  * One Playwright test per test module instance of the selected plan.
  *
- * Selection: a Playwright project from src/runner/projects.ts (`--project=op-basic-static`), or the environment:
+ * Selection: CONFORMANCE_PROJECT=<name from src/runner/projects.ts> (`openid-conformance ci --project op-basic-static`
+ * sets it and names the Playwright project after it), or the environment:
  *   CONFORMANCE_PLAN      plan name (e.g. oidcc-basic-certification-test-plan)
  *   CONFORMANCE_VARIANT   [k=v][k2=v2] (user's variant selection)
  *   CONFORMANCE_CONFIG    path to the configuration (JSON or .ts)
  *   CONFORMANCE_MODULE    optional: only run modules whose testName matches this glob
  */
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectName = process.env["CONFORMANCE_PROJECT"];
 const project = projectName ? projects.find((p) => p.name === projectName) : undefined;
 const planName = process.env["CONFORMANCE_PLAN"] ?? project?.plan;
@@ -42,12 +42,10 @@ if (!planName || !configPath) {
 	if (!planClass) {
 		throw new Error(`Unknown test plan '${planName}'`);
 	}
-	const selection = VariantSelection.fromBracketString(variantString);
-	let modules: PlanModule[] = VariantService.expandPlan(planClass, selection);
-	if (moduleFilter) {
-		const re = new RegExp("^" + moduleFilter.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
-		modules = modules.filter((m) => re.test(m.testName));
-	}
+	const moduleRe = moduleFilter ? globToRegExp(moduleFilter) : null;
+	const modules = VariantService.expandPlan(planClass, VariantSelection.fromBracketString(variantString)).filter(
+		(m) => !moduleRe || moduleRe.test(m.testName),
+	);
 
 	let loaded: LoadedConfig;
 	let server: SuiteServer;
@@ -63,26 +61,11 @@ if (!planName || !configPath) {
 				target = new Target(loaded.target, process.env["CONFORMANCE_CWD"] ?? process.cwd());
 				await target.start();
 			}
-			// CONFORMANCE_TLS=1 serves the suite over https with the bundled localhost certificate (or
-			// CONFORMANCE_TLS_CERT / CONFORMANCE_TLS_KEY); the specs require https for several suite-hosted URLs
-			const tls =
-				process.env["CONFORMANCE_TLS"] && process.env["CONFORMANCE_TLS"] !== "0"
-					? {
-							cert: readFileSync(
-								process.env["CONFORMANCE_TLS_CERT"] ?? resolve(__dirname, "../configs/certs/localhost.crt"),
-								"utf8",
-							),
-							key: readFileSync(
-								process.env["CONFORMANCE_TLS_KEY"] ?? resolve(__dirname, "../configs/certs/localhost.key"),
-								"utf8",
-							),
-						}
-					: undefined;
 			server = new SuiteServer({
 				port: Number(process.env["CONFORMANCE_PORT"] ?? 0),
 				host: process.env["CONFORMANCE_HOST"],
 				externalUrl: process.env["CONFORMANCE_EXTERNAL_URL"],
-				tls,
+				tls: loadTls(),
 			});
 			await server.start();
 		});
@@ -107,19 +90,9 @@ if (!planName || !configPath) {
 					variant: m.variant,
 					loaded,
 					server,
-					context: context as BrowserContext,
+					context,
 					timeoutSeconds: Number(process.env["CONFORMANCE_MODULE_TIMEOUT"] ?? 150),
-					onLog: process.env["CONFORMANCE_VERBOSE"]
-						? (e) => {
-								const extra = ["url", "match", "error", "request_uri", "response_status_code"]
-									.filter((k) => e[k] != null)
-									.map((k) => `${k}=${String(e[k])}`)
-									.join(" ");
-								process.stdout.write(
-									`${e.src}: ${String(e["msg"] ?? "")} ${e["result"] ? `[${String(e["result"])}]` : ""} ${extra}\n`,
-								);
-							}
-						: undefined,
+					onLog: process.env["CONFORMANCE_VERBOSE"] ? printEntry : undefined,
 				});
 
 				const analysis = analyzeResultLogs(
@@ -188,29 +161,9 @@ if (!planName || !configPath) {
 					test.skip(true, "test module reported SKIPPED");
 				}
 
-				const problems: string[] = [];
-				for (const f of analysis.unexpected_failures) {
-					problems.push(`FAILURE ${f.src}${f.current_block ? ` [${f.current_block}]` : ""}: ${f.msg ?? ""}`);
-				}
-				for (const f of analysis.unexpected_warnings) {
-					problems.push(`WARNING ${f.src}: ${f.msg ?? ""}`);
-				}
-				for (const f of analysis.expected_failures_did_not_happen) {
-					problems.push(`expected failure did not happen: ${f.src}`);
-				}
-				for (const f of analysis.expected_warnings_did_not_happen) {
-					problems.push(`expected warning did not happen: ${f.src}`);
-				}
-				if (analysis.unexpected_skip) {
-					problems.push("module was unexpectedly SKIPPED");
-				}
-				if (analysis.expected_skip_did_not_happen) {
-					problems.push("module was expected to be skipped but completed");
-				}
+				const problems = describeProblems(analysis);
 				if (run.status === "INTERRUPTED") {
-					const last = [...run.entries]
-						.reverse()
-						.find((e) => e["result"] === "INTERRUPTED" || e["result"] === "FAILURE");
+					const last = run.entries.findLast((e) => e["result"] === "INTERRUPTED" || e["result"] === "FAILURE");
 					problems.push(`module was INTERRUPTED: ${String(last?.["msg"] ?? "")}`);
 				}
 				expect
@@ -222,6 +175,31 @@ if (!planName || !configPath) {
 	});
 }
 
-export function configExists(p: string): boolean {
-	return existsSync(p);
+/**
+ * CONFORMANCE_TLS=1 serves the suite over https with the bundled localhost certificate (or CONFORMANCE_TLS_CERT /
+ * CONFORMANCE_TLS_KEY); the specs require https for several suite-hosted URLs.
+ */
+function loadTls(): { cert: string; key: string } | undefined {
+	if (!process.env["CONFORMANCE_TLS"] || process.env["CONFORMANCE_TLS"] === "0") {
+		return undefined;
+	}
+	return {
+		cert: readPem("CONFORMANCE_TLS_CERT", "localhost.crt"),
+		key: readPem("CONFORMANCE_TLS_KEY", "localhost.key"),
+	};
+}
+
+function readPem(envName: string, bundled: string): string {
+	return readFileSync(process.env[envName] ?? resolve(import.meta.dirname, "../configs/certs", bundled), "utf8");
+}
+
+/** CONFORMANCE_VERBOSE: stream the event log to the console */
+function printEntry(e: LogEntry): void {
+	const extra = ["url", "match", "error", "request_uri", "response_status_code"]
+		.filter((k) => e[k] != null)
+		.map((k) => `${k}=${String(e[k])}`)
+		.join(" ");
+	process.stdout.write(
+		`${e.src}: ${String(e["msg"] ?? "")} ${e["result"] ? `[${String(e["result"])}]` : ""} ${extra}\n`,
+	);
 }

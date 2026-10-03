@@ -1,9 +1,8 @@
 import type { BrowserContext } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import type { AbstractTestModule } from "../framework/AbstractTestModule.ts";
-import { BrowserControl } from "../framework/BrowserControl.ts";
+import { BrowserControl, type BrowserHook } from "../framework/BrowserControl.ts";
 import { ConditionResult } from "../framework/Condition.ts";
-import { args } from "../framework/DataUtils.ts";
 import { TestInstanceEventLog, type LogEntry } from "../framework/EventLog.ts";
 import { TestExecutionManager, sleep } from "../framework/execution.ts";
 import { ImageService } from "../framework/ImageService.ts";
@@ -57,9 +56,7 @@ export function applyOverride(config: JsonObject, moduleName: string): JsonObjec
 	if (override != null && typeof override === "object" && !Array.isArray(override)) {
 		const overrides = override[moduleName];
 		if (overrides != null && typeof overrides === "object" && !Array.isArray(overrides)) {
-			for (const [k, v] of Object.entries(overrides)) {
-				config[k] = v;
-			}
+			Object.assign(config, overrides);
 		}
 	}
 	return config;
@@ -71,8 +68,89 @@ const OWNER: Record<string, string> = {
 	iss: "openid-conformance-suite",
 };
 
-function newTestId(): string {
-	return randomBytes(6).toString("hex");
+const SETTLED = [Status.WAITING, Status.FINISHED, Status.INTERRUPTED];
+
+/** A test module instance wired to its log, execution manager and browser, and registered with the suite server */
+interface Instance {
+	testId: string;
+	eventLog: TestInstanceEventLog;
+	module: AbstractTestModule;
+	executionManager: TestExecutionManager;
+	browser: BrowserControl;
+	url: string;
+	mtlsUrl: string;
+	/** Resolves with the module's status once it is one of `statuses` */
+	reached: (statuses: Status[]) => Promise<Status>;
+}
+
+/** Port of the instance setup in runner/TestRunner.java createTest() */
+function createInstance(
+	moduleClass: TestModuleClass<AbstractTestModule>,
+	variant: VariantSelection,
+	browserConfig: ConstructorParameters<typeof BrowserControl>[0],
+	alias: string | null,
+	opts: ModuleRunOptions,
+): Instance {
+	const testId = randomBytes(6).toString("hex");
+	const eventLog = new TestInstanceEventLog(testId, opts.onLog);
+	const imageService = new ImageService(eventLog);
+	const module = VariantService.newInstance(moduleClass, variant);
+	const executionManager = new TestExecutionManager(testId, {
+		onError: (error, source) => module.handleException(error, source),
+		afterTask: () => module.forceReleaseLock(),
+	});
+	const browser = new BrowserControl(
+		browserConfig,
+		testId,
+		eventLog,
+		executionManager,
+		imageService,
+		async () => opts.context,
+	);
+	const waiters = new Set<{ statuses: Status[]; resolve: (status: Status) => void }>();
+	module.setProperties(testId, OWNER, eventLog, browser, executionManager, imageService, {
+		onStatusChange: (status) => {
+			for (const w of waiters) {
+				if (w.statuses.includes(status)) {
+					waiters.delete(w);
+					w.resolve(status);
+				}
+			}
+		},
+	});
+	const reached = (statuses: Status[]): Promise<Status> => {
+		if (statuses.includes(module.getStatus())) {
+			return Promise.resolve(module.getStatus());
+		}
+		const { promise, resolve } = Promise.withResolvers<Status>();
+		waiters.add({ statuses, resolve });
+		return promise;
+	};
+	const { url, mtlsUrl } = opts.server.register(module, { alias });
+	return { testId, eventLog, module, executionManager, browser, url, mtlsUrl, reached };
+}
+
+/**
+ * Configure and start the module in the background. A module that waits for the user to press 'Start'
+ * (`autoStart() == false`) is only started when `unattended`.
+ */
+function startInBackground(inst: Instance, config: JsonObject, externalUrlOverride: string, unattended: boolean): void {
+	const { module, eventLog } = inst;
+	inst.executionManager.runInBackground(async () => {
+		await module.configure(config, inst.url, externalUrlOverride, inst.mtlsUrl);
+		if (module.getStatus() === Status.CONFIGURED && (module.autoStart() || unattended)) {
+			if (!module.autoStart()) {
+				// as upstream's run-test-plan.py does for oidcc-server-rotate-keys: a module that waits for the user to
+				// press 'Start' (after rotating the OP's keys) is started right away in an unattended run
+				eventLog.log("TEST-RUNNER", {
+					msg: "Starting the test module without waiting for the user to press 'Start' (unattended run)",
+					result: ConditionResult.INFO,
+				});
+			}
+			await module.start();
+		}
+		return "done";
+	}, "test");
 }
 
 /**
@@ -81,14 +159,7 @@ function newTestId(): string {
  */
 export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult> {
 	const started = Date.now();
-	const testId = newTestId();
-	const eventLog = new TestInstanceEventLog(testId, opts.onLog);
-	const imageService = new ImageService(eventLog);
-	const module = VariantService.newInstance(opts.moduleClass, opts.variant);
-	const executionManager = new TestExecutionManager(testId, {
-		onError: (error, source) => module.handleException(error, source),
-		afterTask: () => module.forceReleaseLock(),
-	});
+	const testName = opts.moduleClass.meta?.testName ?? opts.moduleClass.name;
 	const config = applyOverride(
 		structuredClone(opts.loaded.config) as JsonObject,
 		opts.moduleClass.meta?.testName ?? "",
@@ -100,102 +171,58 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 		server["discoveryUrl"] = emulated.url + "/.well-known/openid-configuration";
 		config["server"] = server;
 	}
-	const browserConfig: JsonObject & { browser?: unknown } = { ...config };
+	const browserConfig: JsonObject & { browser?: BrowserHook } = { ...config };
 	if (opts.loaded.browserHook) {
 		browserConfig.browser = opts.loaded.browserHook;
 	}
-	const browser = new BrowserControl(
-		browserConfig,
-		testId,
-		eventLog,
-		executionManager,
-		imageService,
-		async () => opts.context,
-	);
-	module.setProperties(testId, OWNER, eventLog, browser, executionManager, imageService, {});
-
 	const alias = typeof config["alias"] === "string" && config["alias"] ? config["alias"] : null;
-	const { url, mtlsUrl } = opts.server.register(module, { alias });
-	const externalUrlOverride = opts.externalUrlOverride ?? "";
-	const testName = opts.moduleClass.meta?.testName ?? opts.moduleClass.name;
+	const inst = createInstance(opts.moduleClass, opts.variant, browserConfig, alias, opts);
+	const { testId, eventLog, module, url } = inst;
 
-	eventLog.log(
-		"TEST-RUNNER",
-		args(
-			"msg",
-			"Test instance " + testId + " created",
-			"result",
-			ConditionResult.INFO,
-			"baseUrl",
-			url,
-			"baseMtlsUrl",
-			mtlsUrl,
-			"config",
-			config,
-			"alias",
-			alias,
-			"testName",
-			testName,
-			"variant",
-			opts.variant.getVariant(),
-		),
-	);
-
-	executionManager.runInBackground(async () => {
-		await module.configure(config, url, externalUrlOverride, mtlsUrl);
-		if (module.getStatus() === Status.CONFIGURED) {
-			if (!module.autoStart()) {
-				// as upstream's run-test-plan.py does for oidcc-server-rotate-keys: a module that waits for the user to
-				// press 'Start' (after rotating the OP's keys) is started right away in an unattended run
-				eventLog.log(
-					"TEST-RUNNER",
-					args(
-						"msg",
-						"Starting the test module without waiting for the user to press 'Start' (unattended run)",
-						"result",
-						ConditionResult.INFO,
-					),
-				);
-			}
-			await module.start();
-		}
-		return "done";
-	}, "test");
+	eventLog.log("TEST-RUNNER", {
+		msg: "Test instance " + testId + " created",
+		result: ConditionResult.INFO,
+		baseUrl: url,
+		baseMtlsUrl: inst.mtlsUrl,
+		config,
+		alias,
+		testName,
+		variant: opts.variant.getVariant(),
+	});
+	startInBackground(inst, config, opts.externalUrlOverride ?? "", true);
 
 	const timeoutMs = (opts.timeoutSeconds ?? 150) * 1000;
+	const timeout = sleep(timeoutMs).then(() => "timeout" as const);
 	let clientDriverResult: unknown;
 	const driver = opts.loaded.clientDriver;
-	const finished = module.whenFinished();
-	const timeout = sleep(timeoutMs).then(() => "timeout" as const);
 	if (driver) {
 		// RP plans: once the emulated OP is waiting for the RP, kick the RP off (Java: run-test-plan.py waits for
 		// WAITING then runs the client, then waits for FINISHED)
-		const waiting = waitForStatus(module, [Status.WAITING, Status.FINISHED, Status.INTERRUPTED], timeoutMs);
-		const which = await Promise.race([waiting, timeout]);
-		if (which === "timeout") {
+		if ((await Promise.race([inst.reached(SETTLED), timeout])) === "timeout") {
 			await module.stop("Timed out waiting for the test to finish setting up");
 		} else if (module.getStatus() === Status.WAITING) {
 			clientDriverResult = await driveClient(driver, url, testName, opts.variant.getVariant(), config, eventLog);
 		}
 	}
-	const outcome = await Promise.race([finished.then(() => "finished" as const), timeout]);
+	const outcome = await Promise.race([module.whenFinished().then(() => "finished" as const), timeout]);
 	if (outcome === "timeout") {
 		await module.stop(`Timed out after ${timeoutMs / 1000} seconds waiting for the test to finish`);
 	}
-	await executionManager.drain();
+	await inst.executionManager.drain();
 	opts.server.unregister(module);
 
 	let nested: ModuleRunResult["nested"];
 	if (emulated) {
-		if (emulated.module.getStatus() !== Status.FINISHED && emulated.module.getStatus() !== Status.INTERRUPTED) {
-			await emulated.module.stop("The test under test has finished");
+		const op = emulated.module;
+		if (op.getStatus() !== Status.FINISHED && op.getStatus() !== Status.INTERRUPTED) {
+			await op.stop("The test under test has finished");
 		}
 		await emulated.executionManager.drain();
-		opts.server.unregister(emulated.module);
+		opts.server.unregister(op);
 		nested = {
-			testName: emulated.module.getName(),
-			result: emulated.module.getResult(),
-			status: emulated.module.getStatus(),
+			testName: op.getName(),
+			result: op.getResult(),
+			status: op.getStatus(),
 			entries: emulated.eventLog.entries,
 		};
 	}
@@ -208,7 +235,7 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 		status: module.getStatus(),
 		result: module.getResult(),
 		entries: eventLog.entries,
-		screenshots: browser.screenshots,
+		screenshots: inst.browser.screenshots,
 		exposed: module.getExposedValues(),
 		url,
 		durationMs: Date.now() - started,
@@ -219,22 +246,11 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 /**
  * Start an RP test module of this suite to act as the OP under test (upstream: "OP-vs-RP pairing").
  */
-async function startEmulatedOp(
-	target: SuiteTargetConfig,
-	opts: ModuleRunOptions,
-): Promise<{
-	module: AbstractTestModule;
-	url: string;
-	executionManager: TestExecutionManager;
-	eventLog: TestInstanceEventLog;
-}> {
+async function startEmulatedOp(target: SuiteTargetConfig, opts: ModuleRunOptions): Promise<Instance> {
 	const moduleClass = findModule(target.module);
 	if (!moduleClass) {
 		throw new Error(`suite_target.module '${target.module}' is not a known test module`);
 	}
-	const testId = newTestId();
-	const eventLog = new TestInstanceEventLog(testId, opts.onLog);
-	const imageService = new ImageService(eventLog);
 	// suite_target.variant wins; a parameter the emulated module declares but the config leaves out is taken from
 	// the variant of the module under test when it has one (e.g. client_auth_type), so the two sides agree
 	const variant: Record<string, string> = {};
@@ -245,66 +261,26 @@ async function startEmulatedOp(
 			variant[name] = value;
 		}
 	}
-	const module = VariantService.newInstance(moduleClass, new VariantSelection(variant));
+	const config = structuredClone(target.config ?? {}) as JsonObject;
+	const alias = target.alias ?? "emulated-op";
+	const inst = createInstance(moduleClass, new VariantSelection(variant), config, alias, opts);
 	// OP test modules call the emulated OP's endpoints after its own single flow has finished (second userinfo
 	// request, a second authorization, ...)
-	module.setKeepServingAfterFinish(true);
-	const executionManager = new TestExecutionManager(testId, {
-		onError: (error, source) => module.handleException(error, source),
-		afterTask: () => module.forceReleaseLock(),
-	});
-	const config = structuredClone(target.config ?? {}) as JsonObject;
-	const browser = new BrowserControl(
+	inst.module.setKeepServingAfterFinish(true);
+	inst.eventLog.log("TEST-RUNNER", {
+		msg: "Emulated OP test instance " + inst.testId + " created",
+		result: ConditionResult.INFO,
+		baseUrl: inst.url,
 		config,
-		testId,
-		eventLog,
-		executionManager,
-		imageService,
-		async () => opts.context,
-	);
-	module.setProperties(testId, OWNER, eventLog, browser, executionManager, imageService, {});
-	const alias = target.alias ?? "emulated-op";
-	const { url, mtlsUrl } = opts.server.register(module, { alias });
-	eventLog.log(
-		"TEST-RUNNER",
-		args(
-			"msg",
-			"Emulated OP test instance " + testId + " created",
-			"result",
-			ConditionResult.INFO,
-			"baseUrl",
-			url,
-			"config",
-			config,
-			"alias",
-			alias,
-			"testName",
-			module.getName(),
-		),
-	);
-	executionManager.runInBackground(async () => {
-		await module.configure(config, url, "", mtlsUrl);
-		if (module.getStatus() === Status.CONFIGURED && module.autoStart()) {
-			await module.start();
-		}
-		return "done";
-	}, "test");
-	const status = await waitForStatus(module, [Status.WAITING, Status.FINISHED, Status.INTERRUPTED], 60_000);
+		alias,
+		testName: inst.module.getName(),
+	});
+	startInBackground(inst, config, "", false);
+	const status = await Promise.race([inst.reached(SETTLED), sleep(60_000).then(() => inst.module.getStatus())]);
 	if (status !== Status.WAITING) {
 		throw new Error(`emulated OP module '${target.module}' did not reach WAITING (status ${status}); see its log`);
 	}
-	return { module, url, executionManager, eventLog };
-}
-
-async function waitForStatus(module: AbstractTestModule, statuses: Status[], timeoutMs: number): Promise<Status> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (statuses.includes(module.getStatus())) {
-			return module.getStatus();
-		}
-		await sleep(50);
-	}
-	return module.getStatus();
+	return inst;
 }
 
 /**
@@ -319,30 +295,30 @@ async function driveClient(
 	eventLog: TestInstanceEventLog,
 ): Promise<unknown> {
 	const url = new URL(driver.startUrl);
-	url.searchParams.set("issuer", suiteUrl.endsWith("/") ? suiteUrl : suiteUrl + "/");
-	url.searchParams.set("module", testName);
-	url.searchParams.set("variant", JSON.stringify(variant));
-	url.searchParams.set(
-		"client_metadata_defaults",
-		JSON.stringify((config["client_metadata_defaults"] as JsonObject | undefined) ?? {}),
-	);
-	if (typeof config["alias"] === "string") {
-		url.searchParams.set("alias", config["alias"]);
-	}
 	const client = (config["client"] as JsonObject | undefined) ?? {};
+	const params: Record<string, string> = {
+		issuer: suiteUrl.endsWith("/") ? suiteUrl : suiteUrl + "/",
+		module: testName,
+		variant: JSON.stringify(variant),
+		client_metadata_defaults: JSON.stringify((config["client_metadata_defaults"] as JsonObject | undefined) ?? {}),
+	};
+	if (typeof config["alias"] === "string") {
+		params["alias"] = config["alias"];
+	}
 	for (const k of ["client_id", "client_secret", "jwks"]) {
 		const v = client[k];
 		if (v != null) {
-			url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+			params[k] = typeof v === "string" ? v : JSON.stringify(v);
 		}
 	}
-	for (const [k, v] of Object.entries(driver.params ?? {})) {
+	for (const [k, v] of Object.entries({ ...params, ...driver.params })) {
 		url.searchParams.set(k, v);
 	}
-	eventLog.log(
-		"TEST-RUNNER",
-		args("msg", "Starting the relying party under test", "url", url.toString(), "result", ConditionResult.INFO),
-	);
+	eventLog.log("TEST-RUNNER", {
+		msg: "Starting the relying party under test",
+		url: url.toString(),
+		result: ConditionResult.INFO,
+	});
 	try {
 		const res = await fetch(url, { signal: AbortSignal.timeout((driver.timeoutSeconds ?? 120) * 1000) });
 		const text = await res.text();
@@ -352,30 +328,18 @@ async function driveClient(
 		} catch {
 			// not json
 		}
-		eventLog.log(
-			"TEST-RUNNER",
-			args(
-				"msg",
-				"Relying party under test finished",
-				"status",
-				res.status,
-				"response",
-				body,
-				"result",
-				res.ok ? ConditionResult.INFO : ConditionResult.WARNING,
-			),
-		);
+		eventLog.log("TEST-RUNNER", {
+			msg: "Relying party under test finished",
+			status: res.status,
+			response: body,
+			result: res.ok ? ConditionResult.INFO : ConditionResult.WARNING,
+		});
 		return { status: res.status, body };
 	} catch (e) {
-		eventLog.log(
-			"TEST-RUNNER",
-			args(
-				"msg",
-				"Relying party under test could not be driven: " + (e as Error).message,
-				"result",
-				ConditionResult.WARNING,
-			),
-		);
+		eventLog.log("TEST-RUNNER", {
+			msg: "Relying party under test could not be driven: " + (e as Error).message,
+			result: ConditionResult.WARNING,
+		});
 		return { error: (e as Error).message };
 	}
 }

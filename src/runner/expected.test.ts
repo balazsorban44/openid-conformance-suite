@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { LogEntry } from "../framework/EventLog.ts";
-import { analyzeResultLogs, fnmatch } from "./expected.ts";
+import { analyzeResultLogs, describeProblems, emptyAnalysis } from "./expected.ts";
+import { fnmatch } from "./glob.ts";
 
 function entry(src: string, result: string | undefined, extra: Record<string, unknown> = {}): LogEntry {
 	return { _id: "x", testId: "t", src, time: 0, seq: 0, result, ...extra };
@@ -74,6 +75,21 @@ test("expected failure that does not happen is reported; variant subset matching
 	);
 	assert.equal(a.expected_failures_did_not_happen.length, 1);
 	assert.equal(a.ok, false);
+});
+
+test("describeProblems lists what fails the module, not expected failures", () => {
+	const a = emptyAnalysis();
+	a.unexpected_failures.push({ current_block: "Block", src: "A", msg: "boom" });
+	a.unexpected_warnings.push({ current_block: "", src: "B", msg: "hmm" });
+	a.expected_failures.push({ current_block: "", src: "C", msg: "expected" });
+	a.expected_warnings_did_not_happen.push({ current_block: "*", src: "D" });
+	a.unexpected_skip = true;
+	assert.deepEqual(describeProblems(a), [
+		"FAILURE A [Block]: boom",
+		"WARNING B: hmm",
+		"expected warning did not happen: D",
+		"module was unexpectedly SKIPPED",
+	]);
 });
 
 test("unexpected skip and expected skip", () => {

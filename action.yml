@@ -73,11 +73,9 @@ runs:
         PLAYWRIGHT_TEST_OUTPUT_DIR: ${{ github.workspace }}/test-results
       run: |
         set -uo pipefail
-        CONFIG="$(realpath "${{ inputs.config }}")"
-        set +e
-        node "${{ github.action_path }}/bin/openid-conformance.ts" run --plan "$CONFORMANCE_PLAN" --config "$CONFIG"
-        STATUS=$?
-        set -e
+        STATUS=0
+        node "${{ github.action_path }}/bin/openid-conformance.ts" run --plan "$CONFORMANCE_PLAN" \
+          --config "$(realpath "${{ inputs.config }}")" || STATUS=$?
         echo "results=${CONFORMANCE_REPORT_DIR}/results.json" >> "$GITHUB_OUTPUT"
         echo "summary=${CONFORMANCE_REPORT_DIR}/summary.md" >> "$GITHUB_OUTPUT"
         if [ "$STATUS" != "0" ] && [ "${{ inputs.fail-on-error }}" = "true" ]; then

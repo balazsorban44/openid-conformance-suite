@@ -1,6 +1,6 @@
 import type { LogEntry } from "../framework/EventLog.ts";
 import { escapeHtml } from "../framework/views.ts";
-import type { ModuleAnalysis } from "./expected.ts";
+import { findings, type Finding, type ModuleAnalysis } from "./expected.ts";
 
 /** One line of results.json / the summary table */
 export interface ModuleReport {
@@ -46,53 +46,23 @@ export function renderSummaryMarkdown(
 	reports: ModuleReport[],
 	opts: { title?: string; reportUrl?: string } = {},
 ): string {
-	const lines: string[] = [];
-	const total = reports.length;
 	const okCount = reports.filter((r) => r.ok).length;
-	lines.push(`## ${opts.title ?? "OpenID conformance results"}`);
-	lines.push("");
-	lines.push(
-		`**${okCount}/${total} modules OK** (${countBy(reports)})${opts.reportUrl ? ` · [full report](${opts.reportUrl})` : ""}`,
-	);
-	lines.push("");
-	const byPlan = new Map<string, ModuleReport[]>();
-	for (const r of reports) {
-		byPlan.set(r.plan, [...(byPlan.get(r.plan) ?? []), r]);
-	}
-	for (const [plan, rs] of byPlan) {
-		lines.push(`### ${plan}`);
-		lines.push("");
-		lines.push("| | Module | Variant | Result | Conditions (ok/warn/fail) | Notes |");
-		lines.push("|---|---|---|---|---|---|");
+	const lines = [
+		`## ${opts.title ?? "OpenID conformance results"}`,
+		"",
+		`**${okCount}/${reports.length} modules OK** (${countBy(reports)})${opts.reportUrl ? ` · [full report](${opts.reportUrl})` : ""}`,
+		"",
+	];
+	for (const [plan, rs] of Map.groupBy(reports, (r) => r.plan)) {
+		lines.push(
+			`### ${plan}`,
+			"",
+			"| | Module | Variant | Result | Conditions (ok/warn/fail) | Notes |",
+			"|---|---|---|---|---|---|",
+		);
 		for (const r of rs) {
 			const a = r.analysis;
-			const notes: string[] = [];
-			for (const f of a.unexpected_failures) {
-				notes.push(
-					`❌ \`${f.src}\`${f.current_block ? ` in "${f.current_block}"` : ""}${f.msg ? `: ${truncate(f.msg, 160)}` : ""}`,
-				);
-			}
-			for (const f of a.unexpected_warnings) {
-				notes.push(`⚠️ \`${f.src}\`${f.msg ? `: ${truncate(f.msg, 120)}` : ""}`);
-			}
-			for (const f of a.expected_failures) {
-				notes.push(`(expected failure) \`${f.src}\``);
-			}
-			for (const f of a.expected_warnings) {
-				notes.push(`(expected warning) \`${f.src}\``);
-			}
-			for (const f of a.expected_failures_did_not_happen) {
-				notes.push(`❌ expected failure did not happen: \`${f.src}\``);
-			}
-			for (const f of a.expected_warnings_did_not_happen) {
-				notes.push(`❌ expected warning did not happen: \`${f.src}\``);
-			}
-			if (a.unexpected_skip) {
-				notes.push("❌ unexpected skip");
-			}
-			if (a.expected_skip_did_not_happen) {
-				notes.push("❌ expected skip did not happen");
-			}
+			const notes = findings(a).map(note);
 			if (r.error) {
 				notes.push(`💥 ${truncate(r.error, 200)}`);
 			}
@@ -103,6 +73,24 @@ export function renderSummaryMarkdown(
 		lines.push("");
 	}
 	return lines.join("\n");
+}
+
+function note(f: Finding): string {
+	switch (f.kind) {
+		case "unexpected failure":
+			return `❌ \`${f.ref.src}\`${f.ref.current_block ? ` in "${f.ref.current_block}"` : ""}${f.ref.msg ? `: ${truncate(f.ref.msg, 160)}` : ""}`;
+		case "unexpected warning":
+			return `⚠️ \`${f.ref.src}\`${f.ref.msg ? `: ${truncate(f.ref.msg, 120)}` : ""}`;
+		case "expected failure":
+		case "expected warning":
+			return `(${f.kind}) \`${f.ref.src}\``;
+		case "expected failure did not happen":
+		case "expected warning did not happen":
+			return `❌ ${f.kind}: \`${f.ref.src}\``;
+		case "unexpected skip":
+		case "expected skip did not happen":
+			return `❌ ${f.kind}`;
+	}
 }
 
 function countBy(reports: ModuleReport[]): string {
@@ -129,17 +117,10 @@ export function renderLogHtml(
 	extra: { result: string; status: string; variant: Record<string, string> },
 ): string {
 	const rows: string[] = [];
-	const blockColours = new Map<string, string>();
 	for (const e of entries) {
-		const { _id, testId, src, time, seq, ...rest } = e;
-		void _id;
-		void testId;
-		void seq;
+		const { _id: _, testId: _testId, seq: _seq, src, time, ...rest } = e;
 		const result = typeof rest["result"] === "string" ? (rest["result"] as string) : "";
 		const blockId = typeof rest["blockId"] === "string" ? (rest["blockId"] as string) : null;
-		if (blockId && rest["startBlock"] === true) {
-			blockColours.set(blockId, "#" + blockId);
-		}
 		const msg = typeof rest["msg"] === "string" ? (rest["msg"] as string) : "";
 		delete rest["msg"];
 		delete rest["result"];

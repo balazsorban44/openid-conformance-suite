@@ -1,6 +1,7 @@
-import type { FullConfig, FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
+import type { Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { emptyAnalysis } from "./expected.ts";
 import { renderSummaryMarkdown, type ModuleReport } from "./report.ts";
 
 /**
@@ -13,18 +14,18 @@ export default class ConformanceReporter implements Reporter {
 	private reports: ModuleReport[] = [];
 	private outDir = "conformance-report";
 
-	onBegin(config: FullConfig): void {
-		void config;
+	onBegin(): void {
 		this.outDir = process.env["CONFORMANCE_REPORT_DIR"] ?? "conformance-report";
 		mkdirSync(this.outDir, { recursive: true });
 	}
 
 	onTestEnd(test: TestCase, result: TestResult): void {
+		const title = test.titlePath().slice(1).join(" › ");
 		const att = result.attachments.find((a) => a.name === "module-report.json");
 		const body = att?.body ?? (att?.path && existsSync(att.path) ? readFileSync(att.path) : undefined);
 		if (body) {
 			const r = JSON.parse(body.toString("utf8")) as ModuleReport;
-			r.title = test.titlePath().slice(1).join(" › ");
+			r.title = title;
 			if (result.status !== "passed" && result.status !== "skipped" && !r.error && result.error?.message) {
 				r.error = result.error.message;
 			}
@@ -40,36 +41,21 @@ export default class ConformanceReporter implements Reporter {
 				result: "UNKNOWN",
 				ok: false,
 				durationMs: result.duration,
-				analysis: {
-					expected_failures: [],
-					unexpected_failures: [],
-					expected_failures_did_not_happen: [],
-					expected_warnings: [],
-					unexpected_warnings: [],
-					expected_warnings_did_not_happen: [],
-					expected_skip: false,
-					unexpected_skip: false,
-					expected_skip_did_not_happen: false,
-					counts: { SUCCESS: 0, WARNING: 0, FAILURE: 0 },
-					ok: false,
-				},
-				title: test.titlePath().slice(1).join(" › "),
+				analysis: emptyAnalysis(),
+				title,
 				error: result.error?.message ?? result.status,
 			});
 		}
 	}
 
-	onEnd(result: FullResult): void {
-		void result;
+	onEnd(): void {
 		const resultsPath = join(this.outDir, "results.json");
 		// merge with results written by other shards / projects in the same directory
 		let existing: ModuleReport[] = [];
-		if (existsSync(resultsPath)) {
-			try {
-				existing = JSON.parse(readFileSync(resultsPath, "utf8")) as ModuleReport[];
-			} catch {
-				existing = [];
-			}
+		try {
+			existing = JSON.parse(readFileSync(resultsPath, "utf8")) as ModuleReport[];
+		} catch {
+			// missing or unreadable
 		}
 		const merged = [...existing.filter((e) => !this.reports.some((r) => r.title === e.title)), ...this.reports];
 		writeFileSync(resultsPath, JSON.stringify(merged, null, 2));

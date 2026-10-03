@@ -1,7 +1,8 @@
 /**
- * The CI matrix: every entry becomes a Playwright project and a GitHub Actions job. `plan` + `variant` select the
- * module instances (see VariantService.expandPlan), `config` is the test configuration file (which also names the
- * implementation under test to start).
+ * The CI matrix: every entry becomes a Playwright project and a GitHub Actions job (.github/workflows/ci.yml reads
+ * the names from `openid-conformance projects --json`). `plan` + `variant` select the module instances (see
+ * VariantService.expandPlan), `config` is the test configuration file (which also names the implementation under
+ * test to start).
  *
  * Mirrors upstream `.gitlab-ci/run-tests.sh` (makeOidccTest / makeClientTest / local provider runs).
  */
@@ -10,10 +11,20 @@ export interface ConformanceProject {
 	plan: string;
 	variant: string;
 	config: string;
-	/** Modules in the plan to skip in CI (known untestable in this setup), by testName */
 	/** modules not run in this project: testName -> why (shown as the Playwright skip reason) */
 	skipModules?: Record<string, string>;
 }
+
+const DISCOVERY_DYNAMIC = "[server_metadata=discovery][client_registration=dynamic_client]";
+/** the variant the OP logout / session management / 3rd-party-initiated login plans run with */
+const OP_CODE_BASIC =
+	"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]";
+/** the variant the RP dynamic / logout / session management / 3rd-party-initiated login plans run with */
+const RP_CODE_BASIC =
+	"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]";
+
+const ONE_FLOW = "the emulated OP serves one authorization flow; a second token request fails";
+const REQUEST_OBJECT_400 = "the emulated OP (request_type=plain_http_request) answers request objects with a 400 page";
 
 export const projects: ConformanceProject[] = [
 	// ---- OP plans against panva oidc-provider ----
@@ -26,7 +37,7 @@ export const projects: ConformanceProject[] = [
 	{
 		name: "op-basic-dynamic",
 		plan: "oidcc-basic-certification-test-plan",
-		variant: "[server_metadata=discovery][client_registration=dynamic_client]",
+		variant: DISCOVERY_DYNAMIC,
 		config: "configs/oidc-provider/oidcc-basic-dynamic.json",
 	},
 	{
@@ -44,36 +55,31 @@ export const projects: ConformanceProject[] = [
 	{
 		name: "op-rp-initiated-logout",
 		plan: "oidcc-rp-initiated-logout-certification-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]",
+		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-rp-initiated-logout.json",
 	},
 	{
 		name: "op-backchannel-logout",
 		plan: "oidcc-backchannel-rp-initiated-logout-certification-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]",
+		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-backchannel-logout.json",
 	},
 	{
 		name: "op-frontchannel-logout",
 		plan: "oidcc-frontchannel-rp-initiated-logout-certification-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]",
+		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-frontchannel-logout.json",
 	},
 	{
 		name: "op-session-management",
 		plan: "oidcc-session-management-certification-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]",
+		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-session-management.json",
 	},
 	{
 		name: "op-3rdparty-init-login",
 		plan: "oidcc-3rdparty-init-login-certification-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]",
+		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-3rdparty-init-login.json",
 	},
 	// ---- RP plans against the openid-client based RP ----
@@ -86,68 +92,60 @@ export const projects: ConformanceProject[] = [
 	{
 		name: "rp-dynamic",
 		plan: "oidcc-client-dynamic-certification-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
+		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-dynamic.json",
 	},
 	{
 		name: "rp-rp-initiated-logout",
 		plan: "oidcc-client-rp-initiated-logout-rp-basic",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
+		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-rp-initiated-logout.json",
 	},
 	{
 		name: "rp-backchannel-logout",
 		plan: "oidcc-client-back-channel-logout-rp-basic",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
+		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-back-channel-logout.json",
 	},
 	{
 		name: "rp-frontchannel-logout",
 		plan: "oidcc-client-front-channel-logout-rp-basic",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
+		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-front-channel-logout.json",
 	},
 	{
 		name: "rp-session-management",
 		plan: "oidcc-client-rp-session-management-rp-basic",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
+		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-session-management.json",
 	},
 	{
 		name: "rp-3rdparty-init-login",
 		plan: "oidcc-client-test-3rd-party-init-login-test-plan",
-		variant:
-			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
+		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-3rd-party-init-login.json",
 	},
 	// ---- suite vs suite: our OP tests against our own emulated OP (RP test module as the OP) ----
 	{
 		name: "suite-vs-suite",
 		plan: "oidcc-basic-certification-test-plan",
-		variant: "[server_metadata=discovery][client_registration=dynamic_client]",
+		variant: DISCOVERY_DYNAMIC,
 		config: "configs/suite-vs-suite/oidcc-basic.json",
 		// the emulated OP is upstream's single-flow RP test module (oidcc-client-test); what it cannot do is skipped
 		// here, what it does differently is in configs/expected-failures/suite-vs-suite.json
 		skipModules: {
-			"oidcc-prompt-login": "the emulated OP serves one authorization flow; a second token request fails",
-			"oidcc-prompt-none-logged-in": "the emulated OP serves one authorization flow; a second token request fails",
-			"oidcc-max-age-1": "the emulated OP serves one authorization flow; a second token request fails",
-			"oidcc-max-age-10000": "the emulated OP serves one authorization flow; a second token request fails",
-			"oidcc-id-token-hint": "the emulated OP serves one authorization flow; a second token request fails",
+			"oidcc-prompt-login": ONE_FLOW,
+			"oidcc-prompt-none-logged-in": ONE_FLOW,
+			"oidcc-max-age-1": ONE_FLOW,
+			"oidcc-max-age-10000": ONE_FLOW,
+			"oidcc-id-token-hint": ONE_FLOW,
 			"oidcc-refresh-token": "the emulated OP knows one registered client; this module registers a second one",
 			"oidcc-response-type-missing":
 				"the emulated OP answers an invalid request with a 400 page instead of an error redirect",
 			"oidcc-ensure-registered-redirect-uri":
 				"the emulated OP answers an invalid request with a 400 page instead of an error page",
-			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported":
-				"the emulated OP (request_type=plain_http_request) answers request objects with a 400 page",
-			"oidcc-ensure-request-object-with-redirect-uri":
-				"the emulated OP (request_type=plain_http_request) answers request objects with a 400 page",
+			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported": REQUEST_OBJECT_400,
+			"oidcc-ensure-request-object-with-redirect-uri": REQUEST_OBJECT_400,
 		},
 	},
 ];
