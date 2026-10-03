@@ -8,21 +8,17 @@
  *
  * Environment:
  *   PORT (4000)                       http listener; RP_BASE_URL (http://localhost:PORT) is how others reach it
- *   RP_HTTPS_PORT (4443)              https listener (self-signed, needs openssl) for initiate_login_uri, 0 disables
+ *   RP_HTTPS_PORT (4443)              https listener (configs/certs/localhost.{crt,key}) for initiate_login_uri, 0 disables
  *   RP_STATIC_CLIENT_ID / RP_STATIC_CLIENT_SECRET   static client defaults (openid-client-rp / rp-secret-...)
  *   RP_JWKS                           private JWKS JSON to use instead of keys generated at startup
- *   RP_USER_AGENT (browser|fetch)     how front-channel navigation is performed (default browser: Playwright chromium)
- *   RP_CHROMIUM_EXECUTABLE_PATH       chromium binary for the browser user agent (default: Playwright's)
+ *   RP_CHROMIUM_EXECUTABLE_PATH       chromium binary for the Playwright user agent (default: Playwright's)
  *   RP_LOGIN_TIMEOUT_MS (30000)       how long to wait for an authorization round trip
  *   DEBUG_RP=1                        verbose logging
  */
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as client from "openid-client";
 import * as jose from "jose";
@@ -38,14 +34,16 @@ const STATIC_CLIENT_ID = process.env["RP_STATIC_CLIENT_ID"] ?? "openid-client-rp
 const STATIC_CLIENT_SECRET = process.env["RP_STATIC_CLIENT_SECRET"] ?? "rp-secret-0123456789abcdefghij";
 const LOGIN_TIMEOUT_MS = Number(process.env["RP_LOGIN_TIMEOUT_MS"] ?? 30_000);
 const DEBUG = process.env["DEBUG_RP"] === "1";
+/** certificate of the https listener (initiate_login_uri must be https, ValidateClientInitiateLoginUri) */
+const CERTS = new URL("../../configs/certs/", import.meta.url);
 
 const REDIRECT_URI = `${BASE}/cb`;
 const POST_LOGOUT_REDIRECT_URI = `${BASE}/logged-out`;
 const BACKCHANNEL_LOGOUT_URI = `${BASE}/backchannel-logout`;
 const FRONTCHANNEL_LOGOUT_URI = `${BASE}/frontchannel-logout`;
 const INITIATE_LOGIN_URI = `${HTTPS_BASE}/initiate-login`;
-/** set once the https listener is up; request_uri values are then https (required when the request object is unsigned) */
-let httpsEnabled = false;
+/** request_uri values are https when the https listener is on (required when the request object is unsigned) */
+const REQUEST_OBJECT_BASE = `${HTTPS_PORT ? HTTPS_BASE : BASE}/request-object/`;
 const BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -62,6 +60,12 @@ interface RpKeys {
 
 let KEYS: RpKeys;
 let PUBLIC_JWKS: { keys: jose.JWK[] };
+
+async function generateKey(alg: string, use: string, options: jose.GenerateKeyPairOptions = {}): Promise<jose.JWK> {
+	const { privateKey } = await jose.generateKeyPair(alg, { ...options, extractable: true });
+	const jwk = { ...(await jose.exportJWK(privateKey)), use };
+	return { ...jwk, kid: await jose.calculateJwkThumbprint(jwk) };
+}
 
 async function initKeys(): Promise<void> {
 	if (process.env["RP_JWKS"]) {
@@ -81,40 +85,31 @@ async function initKeys(): Promise<void> {
 			ecEnc: find((k) => k.kty === "EC" && k.use === "enc", "EC enc"),
 		};
 	} else {
-		const gen = async (alg: string, use: string, options: jose.GenerateKeyPairOptions = {}) => {
-			const { privateKey } = await jose.generateKeyPair(alg, { ...options, extractable: true });
-			const jwk = await jose.exportJWK(privateKey);
-			jwk.use = use;
-			jwk.kid = await jose.calculateJwkThumbprint(jwk);
-			return jwk;
-		};
 		KEYS = {
-			rsaSig: await gen("RS256", "sig", { modulusLength: 2048 }),
-			ecSig: await gen("ES256", "sig"),
-			edSig: await gen("Ed25519", "sig"),
-			rsaEnc: await gen("RSA-OAEP", "enc", { modulusLength: 2048 }),
-			ecEnc: await gen("ECDH-ES", "enc", { crv: "P-256" }),
+			rsaSig: await generateKey("RS256", "sig", { modulusLength: 2048 }),
+			ecSig: await generateKey("ES256", "sig"),
+			edSig: await generateKey("Ed25519", "sig"),
+			rsaEnc: await generateKey("RSA-OAEP", "enc", { modulusLength: 2048 }),
+			ecEnc: await generateKey("ECDH-ES", "enc", { crv: "P-256" }),
 		};
 	}
-	PUBLIC_JWKS = { keys: Object.values(KEYS).map(publicJwk) };
+	PUBLIC_JWKS = { keys: Object.values(KEYS).map(({ d: _d, p: _p, q: _q, dp: _dp, dq: _dq, qi: _qi, ...pub }) => pub) };
 }
 
-function publicJwk(jwk: jose.JWK): jose.JWK {
-	const { d: _d, p: _p, q: _q, dp: _dp, dq: _dq, qi: _qi, ...pub } = jwk;
-	return pub;
+async function importKey(jwk: jose.JWK, alg: string): Promise<client.CryptoKey> {
+	const { use: _use, alg: _alg, key_ops: _ops, ...material } = jwk;
+	return (await jose.importJWK(material, alg)) as client.CryptoKey;
 }
 
 /** private signing key for a JWS alg (private_key_jwt assertions, request objects) */
 async function signingKey(alg: string, jwks?: { keys: jose.JWK[] }): Promise<client.PrivateKey> {
-	let jwk: jose.JWK;
+	let jwk: jose.JWK | undefined;
 	if (jwks) {
-		const candidates = jwks.keys.filter((k) => k.d && k.use !== "enc");
 		const kty = alg.startsWith("ES") ? "EC" : alg.startsWith("RS") || alg.startsWith("PS") ? "RSA" : "OKP";
-		const found = candidates.find((k) => k.kty === kty);
-		if (!found) {
+		jwk = jwks.keys.find((k) => k.d && k.use !== "enc" && k.kty === kty);
+		if (!jwk) {
 			throw new Error(`static client jwks has no private ${kty} key for ${alg}`);
 		}
-		jwk = found;
 	} else if (alg.startsWith("RS") || alg.startsWith("PS")) {
 		jwk = KEYS.rsaSig;
 	} else if (alg === "ES256") {
@@ -124,26 +119,18 @@ async function signingKey(alg: string, jwks?: { keys: jose.JWK[] }): Promise<cli
 	} else {
 		throw new Error(`no RP signing key for alg ${alg}`);
 	}
-	const { use: _use, alg: _alg, key_ops: _ops, ...material } = jwk;
-	const key = (await jose.importJWK(material, alg)) as client.CryptoKey;
-	return { key, kid: jwk.kid };
+	return { key: await importKey(jwk, alg), kid: jwk.kid };
 }
 
 /** decryption keys for the registered id_token / userinfo encryption algs */
 async function decryptionKeys(algs: string[]): Promise<client.DecryptionKey[]> {
 	const keys: client.DecryptionKey[] = [];
 	for (const alg of new Set(algs)) {
-		let jwk: jose.JWK;
-		if (alg.startsWith("RSA-OAEP")) {
-			jwk = KEYS.rsaEnc;
-		} else if (alg.startsWith("ECDH-ES")) {
-			jwk = KEYS.ecEnc;
-		} else {
-			// symmetric key management (A128KW, dir, ...) is not supported by openid-client v6
-			continue;
+		// symmetric key management (A128KW, dir, ...) is not supported by openid-client v6
+		const jwk = alg.startsWith("RSA-OAEP") ? KEYS.rsaEnc : alg.startsWith("ECDH-ES") ? KEYS.ecEnc : undefined;
+		if (jwk) {
+			keys.push({ key: await importKey(jwk, alg), alg, kid: jwk.kid });
 		}
-		const { use: _use, alg: _alg, key_ops: _ops, ...material } = jwk;
-		keys.push({ key: (await jose.importJWK(material, alg)) as client.CryptoKey, alg, kid: jwk.kid });
 	}
 	return keys;
 }
@@ -151,24 +138,11 @@ async function decryptionKeys(algs: string[]): Promise<client.DecryptionKey[]> {
 // ---------------------------------------------------------------------------------------------------------------
 // small helpers
 
-class Deferred<T> {
-	readonly promise: Promise<T>;
-	resolve!: (value: T) => void;
-	reject!: (reason: unknown) => void;
-	settled = false;
-	constructor() {
-		this.promise = new Promise<T>((resolve, reject) => {
-			this.resolve = (value) => {
-				this.settled = true;
-				resolve(value);
-			};
-			this.reject = (reason) => {
-				this.settled = true;
-				reject(reason);
-			};
-		});
-		this.promise.catch(() => {});
-	}
+/** Promise.withResolvers whose rejection never counts as unhandled (it may be awaited late, or not at all) */
+function deferred<T>(): PromiseWithResolvers<T> {
+	const d = Promise.withResolvers<T>();
+	d.promise.catch(() => {});
+	return d;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
@@ -180,30 +154,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 }
 
 function describeError(err: unknown): string {
-	if (err instanceof Error) {
-		const code = (err as { code?: string }).code;
-		const oauthError = (err as { error?: string; error_description?: string }).error;
-		const parts = [`${err.name}: ${err.message}`];
-		if (code) {
-			parts.push(`(${code})`);
-		}
-		if (oauthError) {
-			parts.push(
-				`[${oauthError}${(err as { error_description?: string }).error_description ? `: ${(err as { error_description?: string }).error_description}` : ""}]`,
-			);
-		}
-		const cause = err.cause;
-		if (cause instanceof URLSearchParams && cause.get("error")) {
-			parts.push(`[${cause.get("error")}: ${cause.get("error_description") ?? ""}]`);
-		}
-		return parts.join(" ");
+	if (!(err instanceof Error)) {
+		return String(err);
 	}
-	return String(err);
+	const { code, error, error_description } = err as { code?: string; error?: string; error_description?: string };
+	const parts = [`${err.name}: ${err.message}`];
+	if (code) {
+		parts.push(`(${code})`);
+	}
+	if (error) {
+		parts.push(`[${error}${error_description ? `: ${error_description}` : ""}]`);
+	}
+	if (err.cause instanceof URLSearchParams && err.cause.get("error")) {
+		parts.push(`[${err.cause.get("error")}: ${err.cause.get("error_description") ?? ""}]`);
+	}
+	return parts.join(" ");
 }
 
-function norm(issuer: string): string {
-	return issuer.replace(/\/$/, "");
-}
+const norm = (issuer: string) => issuer.replace(/\/$/, "");
 
 function htmlSafe(value: unknown): string {
 	return String(value)
@@ -214,19 +182,10 @@ function htmlSafe(value: unknown): string {
 		.replace(/'/g, "&#39;");
 }
 
-function jsString(value: unknown): string {
-	return JSON.stringify(value).replace(/</g, "\\u003c");
-}
+const jsString = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 function page(title: string, body: string, head = ""): string {
 	return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${htmlSafe(title)}</title>${head}</head><body>${body}</body></html>`;
-}
-
-function parseJsonParam<T>(value: string | null, fallback: T): T {
-	if (!value) {
-		return fallback;
-	}
-	return JSON.parse(value) as T;
 }
 
 function hashAlgForJws(alg: string): string {
@@ -293,127 +252,97 @@ interface ModuleSpec {
 	backchannel?: "accept" | "reject";
 }
 
-const NEGATIVE_LOGIN_MODULES = new Set([
-	"oidcc-client-test-invalid-iss",
-	"oidcc-client-test-missing-sub",
-	"oidcc-client-test-invalid-aud",
-	"oidcc-client-test-missing-aud",
-	"oidcc-client-test-missing-iat",
-	"oidcc-client-test-kid-absent-multiple-jwks",
-	"oidcc-client-test-userinfo-invalid-sub",
-	"oidcc-client-test-nonce-invalid",
-	"oidcc-client-test-missing-chash",
-	"oidcc-client-test-invalid-chash",
-	"oidcc-client-test-missing-athash",
-	"oidcc-client-test-invalid-athash",
-	"oidcc-client-test-invalid-sig-rs256",
-]);
+/** a normal login whose response the RP must reject */
+const REJECT: ModuleSpec = { kind: "login", expectFailure: true };
+const RP_LOGOUT: ModuleSpec = { kind: "rp-logout" };
 
-function moduleSpec(module: string): ModuleSpec {
-	switch (module) {
-		case "oidcc-client-test-form-post-error":
-			return { kind: "login", params: { max_age: "0", prompt: "none" }, expectFailure: true };
-		case "oidcc-client-test-scope-userinfo-claims":
-			return {
-				kind: "login",
-				params: { scope: "openid email" },
-				check: (r) => {
-					const email = r.accessToken ? r.userinfo?.["email"] : r.claims?.["email"];
-					if (!email) {
-						throw new Error("email claim missing");
-					}
-				},
-			};
-		case "oidcc-client-test-aggregated-claims":
-			return {
-				kind: "login",
-				params: { scope: "openid email" },
-				check: (r) => {
-					if (!r.userinfo?.["address"]) {
-						throw new Error("aggregated address claim missing");
-					}
-				},
-			};
-		case "oidcc-client-test-distributed-claims":
-			return {
-				kind: "login",
-				params: { scope: "openid email" },
-				check: (r) => {
-					if (r.userinfo?.["credit_score"] === undefined) {
-						throw new Error("distributed credit_score claim missing");
-					}
-				},
-			};
-		case "oidcc-client-test-client-secret-basic":
-			return { kind: "login", metadata: { token_endpoint_auth_method: "client_secret_basic" } };
-		case "oidcc-client-test-idtoken-sig-none":
-			return { kind: "login", metadata: { id_token_signed_response_alg: "none" } };
-		case "oidcc-client-test-idtoken-sig-rs256":
-			return { kind: "login", metadata: { id_token_signed_response_alg: "RS256" } };
-		case "oidcc-client-test-invalid-sig-es256":
-			return { kind: "login", metadata: { id_token_signed_response_alg: "ES256" }, expectFailure: true };
-		case "oidcc-client-test-invalid-sig-hs256":
-			return { kind: "login", metadata: { id_token_signed_response_alg: "HS256" }, expectFailure: true };
-		case "oidcc-client-test-invalid-sig-rs256":
-			return { kind: "login", metadata: { id_token_signed_response_alg: "RS256" }, expectFailure: true };
-		case "oidcc-client-test-userinfo-bearer-body":
-			return { kind: "login", userinfoVia: "body" };
-		case "oidcc-client-test-userinfo-bearer-header":
-			return { kind: "login", userinfoVia: "header" };
-		case "oidcc-client-test-request-uri-signed-none":
-			return { kind: "login", requestType: "request_uri", metadata: { request_object_signing_alg: "none" } };
-		case "oidcc-client-test-request-uri-signed-rs256":
-			return { kind: "login", requestType: "request_uri", metadata: { request_object_signing_alg: "RS256" } };
-		case "oidcc-client-test-refresh-token":
-			return { kind: "refresh", skipUserinfo: true };
-		case "oidcc-client-test-refresh-token-invalid-issuer":
-		case "oidcc-client-test-refresh-token-invalid-sub":
-			return { kind: "refresh", skipUserinfo: true, expectFailure: true };
-		case "oidcc-client-test-discovery-openid-config":
-			return { kind: "discovery" };
-		case "oidcc-client-test-discovery-jwks-uri-keys":
-			return { kind: "jwks" };
-		case "oidcc-client-test-discovery-webfinger-acct":
-			return { kind: "webfinger-acct" };
-		case "oidcc-client-test-discovery-webfinger-url":
-			return { kind: "webfinger-url" };
-		case "oidcc-client-test-discovery-issuer-mismatch":
-			return { kind: "issuer-mismatch", expectFailure: true };
-		case "oidcc-client-test-dynamic-registration":
-			return { kind: "register" };
-		case "oidcc-client-test-signing-key-rotation":
-			return { kind: "key-rotation" };
-		case "oidcc-client-test-signing-key-rotation-just-before-signing":
-			// a single login: the id_token is signed with a key the cached JWKS does not contain, openid-client refetches
-			return { kind: "login" };
-		case "oidcc-client-test-3rd-party-init-login":
-			return { kind: "3rd-party" };
-		case "oidcc-client-test-rp-init-logout":
-		case "oidcc-client-test-rp-init-logout-other-state":
-		case "oidcc-client-test-rp-init-logout-no-state":
-		case "oidcc-client-test-rp-frontchannel-rpinitlogout":
-			return { kind: "rp-logout" };
-		case "oidcc-client-test-rp-backchannel-rpinitlogout":
-			return { kind: "rp-logout", backchannel: "accept" };
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-alg-none":
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-no-event":
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-with-nonce":
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-alg":
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-aud":
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-event":
-		case "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-iss":
-			return { kind: "rp-logout", backchannel: "reject" };
-		case "oidcc-client-test-rp-frontchannel-opinitlogout":
-			return { kind: "op-frontchannel-logout" };
-		case "oidcc-client-test-session-management":
-			return { kind: "session-management" };
-		default:
-			return { kind: "login", expectFailure: NEGATIVE_LOGIN_MODULES.has(module) };
-	}
+/** a login with scope=openid email whose result must carry a claim */
+function emailScope(has: (r: LoginResult) => boolean, missing: string): ModuleSpec {
+	return {
+		kind: "login",
+		params: { scope: "openid email" },
+		check: (r) => {
+			if (!has(r)) {
+				throw new Error(missing);
+			}
+		},
+	};
 }
 
-function isLogoutKind(kind: Kind): boolean {
-	return kind === "rp-logout" || kind === "op-frontchannel-logout" || kind === "session-management";
+/** module name without the "oidcc-client-test-" prefix -> behaviour; not listed: a normal login (moduleSpec) */
+const MODULES: Record<string, ModuleSpec> = {
+	"invalid-iss": REJECT,
+	"missing-sub": REJECT,
+	"invalid-aud": REJECT,
+	"missing-aud": REJECT,
+	"missing-iat": REJECT,
+	"kid-absent-multiple-jwks": REJECT,
+	"userinfo-invalid-sub": REJECT,
+	"nonce-invalid": REJECT,
+	"missing-chash": REJECT,
+	"invalid-chash": REJECT,
+	"missing-athash": REJECT,
+	"invalid-athash": REJECT,
+	"form-post-error": { kind: "login", params: { max_age: "0", prompt: "none" }, expectFailure: true },
+	"scope-userinfo-claims": emailScope(
+		(r) => !!(r.accessToken ? r.userinfo?.["email"] : r.claims?.["email"]),
+		"email claim missing",
+	),
+	"aggregated-claims": emailScope((r) => !!r.userinfo?.["address"], "aggregated address claim missing"),
+	"distributed-claims": emailScope(
+		(r) => r.userinfo?.["credit_score"] !== undefined,
+		"distributed credit_score claim missing",
+	),
+	"client-secret-basic": { kind: "login", metadata: { token_endpoint_auth_method: "client_secret_basic" } },
+	"idtoken-sig-none": { kind: "login", metadata: { id_token_signed_response_alg: "none" } },
+	"idtoken-sig-rs256": { kind: "login", metadata: { id_token_signed_response_alg: "RS256" } },
+	"invalid-sig-es256": { kind: "login", metadata: { id_token_signed_response_alg: "ES256" }, expectFailure: true },
+	"invalid-sig-hs256": { kind: "login", metadata: { id_token_signed_response_alg: "HS256" }, expectFailure: true },
+	"invalid-sig-rs256": { kind: "login", metadata: { id_token_signed_response_alg: "RS256" }, expectFailure: true },
+	"userinfo-bearer-body": { kind: "login", userinfoVia: "body" },
+	"userinfo-bearer-header": { kind: "login", userinfoVia: "header" },
+	"request-uri-signed-none": {
+		kind: "login",
+		requestType: "request_uri",
+		metadata: { request_object_signing_alg: "none" },
+	},
+	"request-uri-signed-rs256": {
+		kind: "login",
+		requestType: "request_uri",
+		metadata: { request_object_signing_alg: "RS256" },
+	},
+	"refresh-token": { kind: "refresh", skipUserinfo: true },
+	"refresh-token-invalid-issuer": { kind: "refresh", skipUserinfo: true, expectFailure: true },
+	"refresh-token-invalid-sub": { kind: "refresh", skipUserinfo: true, expectFailure: true },
+	"discovery-openid-config": { kind: "discovery" },
+	"discovery-jwks-uri-keys": { kind: "jwks" },
+	"discovery-webfinger-acct": { kind: "webfinger-acct" },
+	"discovery-webfinger-url": { kind: "webfinger-url" },
+	"discovery-issuer-mismatch": { kind: "issuer-mismatch", expectFailure: true },
+	"dynamic-registration": { kind: "register" },
+	"signing-key-rotation": { kind: "key-rotation" },
+	// a single login: the id_token is signed with a key the cached JWKS does not contain, openid-client refetches
+	"signing-key-rotation-just-before-signing": { kind: "login" },
+	"3rd-party-init-login": { kind: "3rd-party" },
+	"rp-init-logout": RP_LOGOUT,
+	"rp-init-logout-other-state": RP_LOGOUT,
+	"rp-init-logout-no-state": RP_LOGOUT,
+	"rp-frontchannel-rpinitlogout": RP_LOGOUT,
+	"rp-backchannel-rpinitlogout": { kind: "rp-logout", backchannel: "accept" },
+	"rp-frontchannel-opinitlogout": { kind: "op-frontchannel-logout" },
+	"session-management": { kind: "session-management" },
+};
+
+function moduleSpec(module: string): ModuleSpec {
+	const name = module.replace(/^oidcc-client-test-/, "");
+	if (Object.hasOwn(MODULES, name)) {
+		return MODULES[name];
+	}
+	// alg-none, no-event, with-nonce, wrong-alg, wrong-aud, wrong-event, wrong-iss
+	if (name.startsWith("rp-backchannel-rpinitlogout-")) {
+		return { kind: "rp-logout", backchannel: "reject" };
+	}
+	return { kind: "login" };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -461,12 +390,12 @@ interface Flow {
 	nonce: string;
 	codeVerifier?: string;
 	steps: string[];
-	login: Deferred<LoginResult>;
+	login: PromiseWithResolvers<LoginResult>;
 	result?: LoginResult;
-	loggedOut: Deferred<URLSearchParams>;
-	frontchannel: Deferred<URLSearchParams>;
-	backchannel: Deferred<{ accepted: boolean; error?: string }>;
-	sessionCheck: Map<string, Deferred<string>>;
+	loggedOut: PromiseWithResolvers<URLSearchParams>;
+	frontchannel: PromiseWithResolvers<URLSearchParams>;
+	backchannel: PromiseWithResolvers<{ accepted: boolean; error?: string }>;
+	sessionCheck: Map<string, PromiseWithResolvers<string>>;
 	endSessionState?: string;
 	sid?: string;
 	idTokenAlg?: string;
@@ -479,13 +408,13 @@ const flowsByState = new Map<string, Flow>();
 const requestObjects = new Map<string, string>();
 let latestFlow: Flow | undefined;
 
-function step(flow: Flow | { steps: string[]; module: string }, message: string): void {
+function step(flow: { steps: string[]; module: string }, message: string): void {
 	flow.steps.push(message);
 	console.log(`[rp] ${flow.module}: ${message}`);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// user agents: how the RP's "browser" follows front-channel redirects
+// user agent: the RP's "browser" (Playwright chromium) follows the front-channel redirects
 
 interface UserAgent {
 	open(url: string): Promise<void>;
@@ -528,102 +457,6 @@ async function browserUserAgent(): Promise<UserAgent> {
 	};
 }
 
-/**
- * Minimal non-JS user agent: follows redirects, submits form_post auto-submit forms and delivers fragment
- * responses to /cb-fragment (what the /cb page's script does in a browser). Enough for the login modules.
- */
-function fetchUserAgent(): UserAgent {
-	// host -> cookie name -> value (enough for an OP's login/interaction cookies; attributes are ignored)
-	const jar = new Map<string, Map<string, string>>();
-	const withCookies = (target: URL, init: RequestInit): RequestInit => {
-		const cookies = jar.get(target.host);
-		if (!cookies?.size) {
-			return init;
-		}
-		const headers = new Headers(init.headers);
-		headers.set("cookie", [...cookies].map(([k, v]) => `${k}=${v}`).join("; "));
-		return { ...init, headers };
-	};
-	const storeCookies = (target: URL, res: Response) => {
-		for (const line of res.headers.getSetCookie()) {
-			const [pair] = line.split(";");
-			const eq = pair.indexOf("=");
-			if (eq > 0) {
-				const cookies = jar.get(target.host) ?? new Map<string, string>();
-				cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
-				jar.set(target.host, cookies);
-			}
-		}
-	};
-	return {
-		async open(startUrl) {
-			let url = startUrl;
-			let init: RequestInit = { redirect: "manual" };
-			for (let i = 0; i < 20; i++) {
-				const target = new URL(url);
-				if (target.hash && url.startsWith(REDIRECT_URI)) {
-					url = `${BASE}/cb-fragment`;
-					init = {
-						redirect: "manual",
-						method: "POST",
-						headers: { "content-type": "application/x-www-form-urlencoded" },
-						body: target.hash.slice(1),
-					};
-					continue;
-				}
-				target.hash = "";
-				const res = await fetch(target, withCookies(target, init));
-				storeCookies(target, res);
-				const location = res.headers.get("location");
-				if (res.status >= 300 && res.status < 400 && location) {
-					url = new URL(location, target).href;
-					init = { redirect: "manual" };
-					continue;
-				}
-				const type = res.headers.get("content-type") ?? "";
-				const body = await res.text();
-				const formTag = type.includes("html") ? /<form\b[^>]*>/i.exec(body)?.[0] : undefined;
-				const form = formTag && /method="post"/i.test(formTag) ? /action="([^"]+)"/i.exec(formTag) : null;
-				if (form) {
-					const params = new URLSearchParams();
-					for (const m of body.matchAll(/<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi)) {
-						params.append(decodeEntities(m[1]), decodeEntities(m[2]));
-					}
-					url = new URL(decodeEntities(form[1]), target).href;
-					init = {
-						redirect: "manual",
-						method: "POST",
-						headers: { "content-type": "application/x-www-form-urlencoded" },
-						body: params.toString(),
-					};
-					continue;
-				}
-				return;
-			}
-		},
-		async close() {},
-	};
-}
-
-function decodeEntities(s: string): string {
-	return s
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;|&#x27;/g, "'")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&#x2F;|&#47;/g, "/")
-		.replace(/&#x3D;|&#61;/g, "=")
-		.replace(/&amp;/g, "&");
-}
-
-async function createUserAgent(kind: Kind): Promise<UserAgent> {
-	// logout / session modules render pages that only work with JavaScript (front-channel iframes, postMessage)
-	if (process.env["RP_USER_AGENT"] === "fetch" && !isLogoutKind(kind)) {
-		return fetchUserAgent();
-	}
-	return browserUserAgent();
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // openid-client setup
 
@@ -632,18 +465,12 @@ function executeFor(issuer: string): ((config: client.Configuration) => void)[] 
 }
 
 function grantTypesFor(responseType: string, refresh: boolean): string[] {
-	const grants = new Set<string>();
-	for (const t of responseType.split(" ")) {
-		if (t === "code") {
-			grants.add("authorization_code");
-		} else if (t === "id_token" || t === "token") {
-			grants.add("implicit");
-		}
-	}
-	if (refresh) {
-		grants.add("refresh_token");
-	}
-	return [...grants];
+	const types = responseType.split(" ");
+	return [
+		...(types.includes("code") ? ["authorization_code"] : []),
+		...(types.includes("id_token") || types.includes("token") ? ["implicit"] : []),
+		...(refresh ? ["refresh_token"] : []),
+	];
 }
 
 /** same rule as sample-openid-client-nodejs/helpers/needs_jwks.js */
@@ -702,7 +529,7 @@ async function setUpClient(
 		redirect_uris: [REDIRECT_URI],
 		...spec.metadata,
 	};
-	if (isLogoutKind(spec.kind)) {
+	if (spec.kind === "rp-logout" || spec.kind === "op-frontchannel-logout" || spec.kind === "session-management") {
 		Object.assign(metadata, {
 			post_logout_redirect_uris: [POST_LOGOUT_REDIRECT_URI],
 			backchannel_logout_uri: BACKCHANNEL_LOGOUT_URI,
@@ -738,12 +565,11 @@ async function setUpClient(
 		step(flowLike, `discovered ${config.serverMetadata().issuer} and registered client ${clientId} (${authMethod})`);
 		rp = { config, clientId, requestedMetadata: metadata, clientAuth };
 	}
-	configureResponseHandling(rp.config, responseType);
-	await enableDecryption(rp.config);
+	await configureResponseHandling(rp.config, responseType);
 	return rp;
 }
 
-function configureResponseHandling(config: client.Configuration, responseType: string): void {
+async function configureResponseHandling(config: client.Configuration, responseType: string): Promise<void> {
 	const types = new Set(responseType.split(" "));
 	if (types.has("id_token") && types.has("code")) {
 		client.useCodeIdTokenResponseType(config);
@@ -752,18 +578,13 @@ function configureResponseHandling(config: client.Configuration, responseType: s
 	}
 	// validate ID Token signatures from the token endpoint too (oidcc-client-test-invalid-sig-*, kid-absent-*)
 	client.enableNonRepudiationChecks(config);
-}
-
-async function enableDecryption(config: client.Configuration): Promise<void> {
 	const md = config.clientMetadata();
 	const algs = [md.id_token_encrypted_response_alg, md.userinfo_encrypted_response_alg].filter(
 		(a): a is string => typeof a === "string",
 	);
-	if (algs.length) {
-		const keys = await decryptionKeys(algs);
-		if (keys.length) {
-			client.enableDecryptingResponses(config, undefined, ...keys);
-		}
+	const keys = algs.length ? await decryptionKeys(algs) : [];
+	if (keys.length) {
+		client.enableDecryptingResponses(config, undefined, ...keys);
 	}
 }
 
@@ -778,8 +599,7 @@ async function freshConfig(rp: RpClient, responseType: string, issuer: string): 
 	for (const ext of executeFor(issuer)) {
 		ext(config);
 	}
-	configureResponseHandling(config, responseType);
-	await enableDecryption(config);
+	await configureResponseHandling(config, responseType);
 	return config;
 }
 
@@ -802,13 +622,13 @@ function newFlow(input: StartInput, spec: ModuleSpec, rp: RpClient, steps: strin
 		state: client.randomState(),
 		nonce: client.randomNonce(),
 		steps,
-		login: new Deferred(),
-		loggedOut: new Deferred(),
-		frontchannel: new Deferred(),
-		backchannel: new Deferred(),
+		login: deferred(),
+		loggedOut: deferred(),
+		frontchannel: deferred(),
+		backchannel: deferred(),
 		sessionCheck: new Map([
-			["before", new Deferred<string>()],
-			["after", new Deferred<string>()],
+			["before", deferred<string>()],
+			["after", deferred<string>()],
 		]),
 		loggedIn: false,
 	};
@@ -869,7 +689,7 @@ async function buildAuthorizationUrl(flow: Flow, extra: Record<string, string> =
 	if (flow.requestType === "request_uri") {
 		const id = randomUUID();
 		requestObjects.set(id, requestObject);
-		const requestUri = `${httpsEnabled ? HTTPS_BASE : BASE}/request-object/${id}`;
+		const requestUri = `${REQUEST_OBJECT_BASE}${id}`;
 		url.searchParams.set("request_uri", requestUri);
 		step(flow, `request object (alg ${alg}) hosted at ${requestUri}`);
 	} else {
@@ -1016,34 +836,24 @@ async function resolveClaimSources(flow: Flow, claims: Record<string, unknown>, 
 	delete claims["_claim_sources"];
 }
 
-async function handleAuthorizationResponse(params: URLSearchParams): Promise<{ status: number; html: string }> {
+async function handleAuthorizationResponse(res: ServerResponse, params: URLSearchParams): Promise<void> {
 	const state = params.get("state");
 	const flow = (state ? flowsByState.get(state) : undefined) ?? latestFlow;
 	if (!flow) {
-		return { status: 400, html: page("Error", "<h1>No login in progress</h1>") };
+		return send(res, 400, page("Error", "<h1>No login in progress</h1>"));
 	}
 	try {
 		const result = await completeLogin(flow, params);
 		flow.result = result;
 		flow.loggedIn = true;
 		flow.login.resolve(result);
-		return {
-			status: 200,
-			html: page(
-				"Signed in",
-				`<h1 id="rp-login-complete">Signed in as ${htmlSafe(result.claims?.["sub"] ?? "?")}</h1>`,
-			),
-		};
+		const sub = htmlSafe(result.claims?.["sub"] ?? "?");
+		send(res, 200, page("Signed in", `<h1 id="rp-login-complete">Signed in as ${sub}</h1>`));
 	} catch (err) {
 		step(flow, `authorization response rejected: ${describeError(err)}`);
 		flow.login.reject(err);
-		return {
-			status: 400,
-			html: page(
-				"Login failed",
-				`<h1 id="rp-login-failed">Login failed</h1><pre>${htmlSafe(describeError(err))}</pre>`,
-			),
-		};
+		const pre = `<pre>${htmlSafe(describeError(err))}</pre>`;
+		send(res, 400, page("Login failed", `<h1 id="rp-login-failed">Login failed</h1>${pre}`));
 	}
 }
 
@@ -1060,76 +870,60 @@ interface StartResult {
 
 async function runModule(input: StartInput): Promise<StartResult> {
 	const spec = moduleSpec(input.module);
+	const { module } = input;
 	const steps: string[] = [];
-	const ctx = { steps, module: input.module };
+	const ctx = { steps, module };
 	step(
 		ctx,
 		`start (variant ${JSON.stringify(input.variant)}, metadata defaults ${JSON.stringify(input.clientMetadataDefaults)})`,
 	);
 
-	const expectRejection = async (fn: () => Promise<unknown>): Promise<StartResult> => {
+	/** runs fn; for negative modules the RP passes when fn throws (like the sample client's assert.rejects) */
+	const expect = async (fn: () => Promise<unknown>, outcome?: string): Promise<StartResult> => {
+		if (!spec.expectFailure) {
+			await fn();
+			return { ok: true, steps, module, outcome };
+		}
 		try {
 			await fn();
-			return {
-				ok: false,
-				error: "the RP did not reject the response",
-				steps,
-				module: input.module,
-				outcome: "accepted",
-			};
 		} catch (err) {
 			step(ctx, `rejected as expected: ${describeError(err)}`);
-			return { ok: true, steps, module: input.module, outcome: "rejected", error: describeError(err) };
+			return { ok: true, steps, module, outcome: "rejected", error: describeError(err) };
 		}
+		return { ok: false, error: "the RP did not reject the response", steps, module, outcome: "accepted" };
 	};
 
 	const execute = executeFor(input.issuer);
+	const discover = async (issuer: string) => {
+		const config = await client.discovery(new URL(issuer), "discovery-only", undefined, client.None(), { execute });
+		step(ctx, `discovered ${config.serverMetadata().issuer}`);
+		return config;
+	};
 	switch (spec.kind) {
-		case "discovery": {
-			const config = await client.discovery(new URL(input.issuer), "discovery-only", undefined, client.None(), {
-				execute,
+		case "discovery":
+			return expect(() => discover(input.issuer));
+		case "jwks":
+			return expect(async () => {
+				const config = await discover(input.issuer);
+				const jwks = (await (await fetch(config.serverMetadata().jwks_uri!)).json()) as jose.JSONWebKeySet;
+				jose.createLocalJWKSet(jwks);
+				step(ctx, `fetched jwks_uri with ${jwks.keys.length} keys`);
 			});
-			step(ctx, `discovered ${config.serverMetadata().issuer}`);
-			return { ok: true, steps, module: input.module };
-		}
-		case "jwks": {
-			const config = await client.discovery(new URL(input.issuer), "discovery-only", undefined, client.None(), {
-				execute,
-			});
-			step(ctx, `discovered ${config.serverMetadata().issuer}`);
-			const res = await fetch(config.serverMetadata().jwks_uri!);
-			const jwks = (await res.json()) as jose.JSONWebKeySet;
-			jose.createLocalJWKSet(jwks);
-			step(ctx, `fetched jwks_uri with ${jwks.keys.length} keys`);
-			return { ok: true, steps, module: input.module };
-		}
 		case "webfinger-acct":
 		case "webfinger-url":
 		case "issuer-mismatch": {
 			const issuerUrl = new URL(input.issuer);
-			let resource: string;
-			if (spec.kind === "webfinger-acct") {
-				const alias = input.alias ?? issuerUrl.pathname.replace(/^\/test\/a\//, "").replace(/\/$/, "");
-				resource = `acct:${alias}.${input.module}@${issuerUrl.host}`;
-			} else {
-				resource = `${input.issuer}${input.module}`;
-			}
-			const flowFn = async () => {
+			const alias = input.alias ?? issuerUrl.pathname.replace(/^\/test\/a\//, "").replace(/\/$/, "");
+			const resource =
+				spec.kind === "webfinger-acct" ? `acct:${alias}.${module}@${issuerUrl.host}` : `${input.issuer}${module}`;
+			return expect(async () => {
 				const href = await webfinger(resource, issuerUrl.protocol);
 				step(ctx, `webfinger ${resource} -> ${href}`);
-				const config = await client.discovery(new URL(href), "discovery-only", undefined, client.None(), { execute });
-				step(ctx, `discovered ${config.serverMetadata().issuer}`);
-			};
-			if (spec.expectFailure) {
-				return expectRejection(flowFn);
-			}
-			await flowFn();
-			return { ok: true, steps, module: input.module };
+				await discover(href);
+			});
 		}
-		case "register": {
-			await setUpClient(ctx, input, spec);
-			return { ok: true, steps, module: input.module };
-		}
+		case "register":
+			return expect(() => setUpClient(ctx, input, spec));
 		default:
 			break;
 	}
@@ -1142,13 +936,13 @@ async function runModule(input: StartInput): Promise<StartResult> {
 		step(flow, `waiting for the OP to send the user to ${INITIATE_LOGIN_URI}`);
 		try {
 			const result = await withTimeout(flow.login.promise, LOGIN_TIMEOUT_MS * 2, "third party initiated login");
-			return { ok: true, steps, module: input.module, outcome: `signed in as ${String(result.claims?.["sub"])}` };
+			return { ok: true, steps, module, outcome: `signed in as ${String(result.claims?.["sub"])}` };
 		} finally {
 			flow.waitingForInitiateLogin = false;
 		}
 	}
 
-	const ua = await createUserAgent(spec.kind);
+	const ua = await browserUserAgent();
 	try {
 		// the user agent starts at the RP's /login (like a login button), which redirects to the OP
 		const login = async (target = flow) => {
@@ -1157,11 +951,7 @@ async function runModule(input: StartInput): Promise<StartResult> {
 		};
 
 		if (spec.kind === "login") {
-			if (spec.expectFailure) {
-				return await expectRejection(() => login());
-			}
-			await login();
-			return { ok: true, steps, module: input.module, outcome: "signed in" };
+			return await expect(() => login(), "signed in");
 		}
 
 		if (spec.kind === "refresh") {
@@ -1169,7 +959,7 @@ async function runModule(input: StartInput): Promise<StartResult> {
 			if (!result.refreshToken) {
 				throw new Error("no refresh_token was issued");
 			}
-			const doRefresh = async () => {
+			return await expect(async () => {
 				const tokens = await client.refreshTokenGrant(rp.config, result.refreshToken!);
 				step(flow, "refresh token grant response validated");
 				const claims = tokens.claims();
@@ -1180,26 +970,17 @@ async function runModule(input: StartInput): Promise<StartResult> {
 					throw new Error(`unexpected iss value, expected ${String(result.claims["iss"])}, got: ${claims.iss}`);
 				}
 				await userinfo(flow, rp.config, tokens.access_token, String(result.claims?.["sub"]));
-			};
-			if (spec.expectFailure) {
-				return await expectRejection(doRefresh);
-			}
-			await doRefresh();
-			return { ok: true, steps, module: input.module, outcome: "refreshed" };
+			}, "refreshed");
 		}
 
 		if (spec.kind === "key-rotation") {
 			await login();
 			// second authentication with a configuration that has no cached JWKS, so the rotated key is fetched
-			const second = newFlow(
-				input,
-				spec,
-				{ ...rp, config: await freshConfig(rp, flow.responseType, input.issuer) },
-				steps,
-			);
+			const config = await freshConfig(rp, flow.responseType, input.issuer);
+			const second = newFlow(input, spec, { ...rp, config }, steps);
 			step(flow, "second authentication after OP key rotation");
 			await login(second);
-			return { ok: true, steps, module: input.module, outcome: "signed in twice" };
+			return { ok: true, steps, module, outcome: "signed in twice" };
 		}
 
 		// logout / session modules
@@ -1213,7 +994,7 @@ async function runModule(input: StartInput): Promise<StartResult> {
 			step(flow, "waiting for the OP initiated front-channel logout request");
 			await withTimeout(flow.frontchannel.promise, LOGIN_TIMEOUT_MS, "the front-channel logout request");
 			step(flow, "front-channel logout received, session cleared");
-			return { ok: true, steps, module: input.module, outcome: "logged out (front-channel)" };
+			return { ok: true, steps, module, outcome: "logged out (front-channel)" };
 		}
 
 		step(flow, "RP-initiated logout");
@@ -1230,28 +1011,24 @@ async function runModule(input: StartInput): Promise<StartResult> {
 			const accepted = outcome.accepted ? "accepted" : `rejected (${outcome.error})`;
 			step(flow, `back-channel logout_token ${accepted}`);
 			if ((spec.backchannel === "accept") !== outcome.accepted) {
-				return {
-					ok: false,
-					error: `expected the logout_token to be ${spec.backchannel}ed but it was ${accepted}`,
-					steps,
-					module: input.module,
-				};
+				const error = `expected the logout_token to be ${spec.backchannel}ed but it was ${accepted}`;
+				return { ok: false, error, steps, module };
 			}
 		}
 
 		if (spec.kind === "session-management") {
 			await sessionCheck(flow, ua, "after", "changed");
 		}
-		return { ok: true, steps, module: input.module, outcome: "logged out" };
+		return { ok: true, steps, module, outcome: "logged out" };
 	} finally {
 		await ua.close();
 	}
 }
 
 async function sessionCheck(flow: Flow, ua: UserAgent, phase: "before" | "after", expected: string): Promise<void> {
-	const deferred = flow.sessionCheck.get(phase)!;
 	await ua.open(`${BASE}/session-check?flow=${flow.id}&phase=${phase}`);
-	const result = await withTimeout(deferred.promise, 15_000, `the check_session_iframe answer (${phase} logout)`);
+	const answer = flow.sessionCheck.get(phase)!.promise;
+	const result = await withTimeout(answer, 15_000, `the check_session_iframe answer (${phase} logout)`);
 	step(flow, `check_session_iframe ${phase} logout: ${result}`);
 	if (result !== expected) {
 		throw new Error(`check_session_iframe answered "${result}" ${phase} logout, expected "${expected}"`);
@@ -1259,13 +1036,9 @@ async function sessionCheck(flow: Flow, ua: UserAgent, phase: "before" | "after"
 }
 
 async function webfinger(resource: string, protocol: string): Promise<string> {
-	let origin: string;
-	if (resource.startsWith("acct:")) {
-		const host = resource.slice(resource.lastIndexOf("@") + 1);
-		origin = `${protocol}//${host}`;
-	} else {
-		origin = new URL(resource).origin;
-	}
+	const origin = resource.startsWith("acct:")
+		? `${protocol}//${resource.slice(resource.lastIndexOf("@") + 1)}`
+		: new URL(resource).origin;
 	const url = new URL("/.well-known/webfinger", origin);
 	url.searchParams.set("resource", resource);
 	url.searchParams.set("rel", "http://openid.net/specs/connect/1.0/issuer");
@@ -1341,6 +1114,12 @@ function redirect(res: ServerResponse, location: string): void {
 	res.end();
 }
 
+async function redirectToAuthorization(res: ServerResponse, flow: Flow, extra?: Record<string, string>): Promise<void> {
+	const { href } = await buildAuthorizationUrl(flow, extra);
+	step(flow, `authorization request ${href.length > 300 ? `${href.slice(0, 300)}...` : href}`);
+	redirect(res, href);
+}
+
 /** /cb for fragment encoded responses: hand the fragment to the server like any SPA callback page would */
 const FRAGMENT_PAGE = page(
 	"Processing login",
@@ -1399,6 +1178,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		console.log(`[rp] ${req.method} ${url.pathname}${url.search}`);
 	}
 	const q = url.searchParams;
+	const flow = flows.get(q.get("flow") ?? "");
+	const error = (status: number, message: string) => send(res, status, page("Error", `<h1>${message}</h1>`));
 
 	switch (`${req.method} ${url.pathname}`) {
 		case "GET /":
@@ -1413,70 +1194,22 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		case "GET /jwks":
 			return sendJson(res, 200, PUBLIC_JWKS);
 
-		case "GET /start": {
-			let input: StartInput;
-			try {
-				const issuer = q.get("issuer");
-				const module = q.get("module");
-				if (!issuer || !module) {
-					return sendJson(res, 400, { ok: false, error: "issuer and module query parameters are required", steps: [] });
-				}
-				input = {
-					issuer,
-					module,
-					variant: parseJsonParam(q.get("variant"), {}),
-					clientMetadataDefaults: parseJsonParam(q.get("client_metadata_defaults"), {}),
-					alias: q.get("alias") ?? undefined,
-					clientId: q.get("client_id") ?? undefined,
-					clientSecret: q.get("client_secret") ?? undefined,
-					jwks: parseJsonParam<{ keys: jose.JWK[] } | undefined>(q.get("jwks"), undefined),
-				};
-			} catch (err) {
-				return sendJson(res, 400, { ok: false, error: describeError(err), steps: [] });
-			}
-			let result: StartResult;
-			try {
-				result = await runModule(input);
-			} catch (err) {
-				console.log(`[rp] ${input.module}: failed: ${describeError(err)}`);
-				result = { ok: false, error: describeError(err), steps: [], module: input.module };
-			}
-			if (!result.steps.length) {
-				result.steps = [...(latestFlow?.module === input.module ? latestFlow.steps : [])];
-			}
-			console.log(`[rp] ${input.module}: ${result.ok ? "OK" : "NOT OK"}${result.error ? ` - ${result.error}` : ""}`);
-			return sendJson(res, 200, result);
-		}
+		case "GET /start":
+			return startModule(res, q);
 
-		case "GET /login": {
-			const flow = flows.get(q.get("flow") ?? "");
-			if (!flow) {
-				return send(res, 404, page("Error", "<h1>unknown login</h1>"));
-			}
-			const target = await buildAuthorizationUrl(flow);
-			step(flow, `authorization request ${target.href.length > 300 ? `${target.href.slice(0, 300)}...` : target.href}`);
-			return redirect(res, target.href);
-		}
+		case "GET /login":
+			return flow ? redirectToAuthorization(res, flow) : error(404, "unknown login");
 
-		case "GET /cb": {
-			if (!url.search) {
-				return send(res, 200, FRAGMENT_PAGE);
-			}
-			const { status, html } = await handleAuthorizationResponse(q);
-			return send(res, status, html);
-		}
+		case "GET /cb":
+			return url.search ? handleAuthorizationResponse(res, q) : send(res, 200, FRAGMENT_PAGE);
 
 		case "POST /cb":
-		case "POST /cb-fragment": {
-			const params = new URLSearchParams(await readBody(req));
-			const { status, html } = await handleAuthorizationResponse(params);
-			return send(res, status, html);
-		}
+		case "POST /cb-fragment":
+			return handleAuthorizationResponse(res, new URLSearchParams(await readBody(req)));
 
 		case "GET /logout": {
-			const flow = flows.get(q.get("flow") ?? "");
 			if (!flow?.result?.idToken) {
-				return send(res, 400, page("Error", "<h1>not signed in</h1>"));
+				return error(400, "not signed in");
 			}
 			flow.endSessionState = client.randomState();
 			const endSession = client.buildEndSessionUrl(flow.rp.config, {
@@ -1490,99 +1223,51 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
 		case "GET /logged-out": {
 			const state = q.get("state");
-			const flow =
-				[...flows.values()].find((f) => f.endSessionState && f.endSessionState === state) ??
-				[...flows.values()].filter((f) => f.endSessionState).at(-1);
-			if (flow) {
-				flow.loggedIn = false;
-				flow.loggedOut.resolve(q);
+			const loggingOut = [...flows.values()].filter((f) => f.endSessionState);
+			const target = loggingOut.find((f) => f.endSessionState === state) ?? loggingOut.at(-1);
+			if (target) {
+				target.loggedIn = false;
+				target.loggedOut.resolve(q);
 			}
 			return send(res, 200, page("Signed out", '<h1 id="rp-logged-out">Signed out</h1>'));
 		}
 
-		case "POST /backchannel-logout": {
-			const body = new URLSearchParams(await readBody(req));
-			const logoutToken = body.get("logout_token");
-			let flow: Flow | undefined;
-			try {
-				if (!logoutToken) {
-					throw new Error("logout_token missing");
-				}
-				let aud: unknown;
-				let sid: unknown;
-				try {
-					const claims = jose.decodeJwt(logoutToken);
-					aud = claims.aud;
-					sid = claims["sid"];
-				} catch {
-					// validated below
-				}
-				flow = findFlowForLogout((f) => (sid !== undefined && f.sid === sid) || f.rp.clientId === aud);
-				if (!flow) {
-					throw new Error("no session for this logout_token");
-				}
-				await validateLogoutToken(flow, logoutToken);
-				flow.loggedIn = false;
-				step(flow, "back-channel logout_token accepted, session cleared");
-				flow.backchannel.resolve({ accepted: true });
-				return send(res, 200, "", { "content-type": "text/plain" });
-			} catch (err) {
-				const error = describeError(err);
-				if (flow) {
-					step(flow, `back-channel logout_token rejected: ${error}`);
-					flow.backchannel.resolve({ accepted: false, error });
-				} else {
-					latestFlow?.backchannel.resolve({ accepted: false, error });
-				}
-				return sendJson(res, 400, { error: "invalid_request", error_description: error });
-			}
-		}
+		case "POST /backchannel-logout":
+			return backchannelLogout(res, new URLSearchParams(await readBody(req)).get("logout_token"));
 
 		case "GET /frontchannel-logout": {
 			const iss = q.get("iss");
 			const sid = q.get("sid");
-			const flow = findFlowForLogout(
+			const target = findFlowForLogout(
 				(f) => (!sid || f.sid === sid) && (!iss || f.rp.config.serverMetadata().issuer === iss),
 			);
-			if (flow) {
-				flow.loggedIn = false;
-				step(flow, `front-channel logout received (iss ${iss ?? "-"}, sid ${sid ?? "-"}), session cleared`);
-				flow.frontchannel.resolve(q);
+			if (target) {
+				target.loggedIn = false;
+				step(target, `front-channel logout received (iss ${iss ?? "-"}, sid ${sid ?? "-"}), session cleared`);
+				target.frontchannel.resolve(q);
 			}
 			return send(res, 200, page("Signed out", "<p>Signed out</p>"));
 		}
 
-		case "GET /session-check": {
-			const flow = flows.get(q.get("flow") ?? "");
-			if (!flow) {
-				return send(res, 404, page("Error", "<h1>unknown session</h1>"));
-			}
-			return send(res, 200, sessionCheckPage(flow, q.get("phase") ?? "before"));
-		}
+		case "GET /session-check":
+			return flow ? send(res, 200, sessionCheckPage(flow, q.get("phase") ?? "before")) : error(404, "unknown session");
 
-		case "GET /session-status": {
-			const flow = flows.get(q.get("flow") ?? "");
+		case "GET /session-status":
 			flow?.sessionCheck.get(q.get("phase") ?? "")?.resolve(q.get("result") ?? "");
 			return sendJson(res, 200, { ok: !!flow });
-		}
 
 		case "GET /initiate-login": {
 			// OIDC Core 4: third party initiated login (iss, login_hint, target_link_uri)
 			const iss = q.get("iss") ?? "";
-			const flow = [...flows.values()]
+			const target = [...flows.values()]
 				.filter((f) => f.waitingForInitiateLogin && norm(f.rp.config.serverMetadata().issuer) === norm(iss))
 				.at(-1);
-			if (!flow) {
-				return send(res, 400, page("Error", `<h1>unknown issuer ${htmlSafe(iss)}</h1>`));
+			if (!target) {
+				return error(400, `unknown issuer ${htmlSafe(iss)}`);
 			}
-			step(flow, `initiate_login_uri called (iss ${iss})`);
-			const extra: Record<string, string> = {};
-			if (q.get("login_hint")) {
-				extra["login_hint"] = q.get("login_hint")!;
-			}
-			const target = await buildAuthorizationUrl(flow, extra);
-			step(flow, `authorization request ${target.href.length > 300 ? `${target.href.slice(0, 300)}...` : target.href}`);
-			return redirect(res, target.href);
+			step(target, `initiate_login_uri called (iss ${iss})`);
+			const loginHint = q.get("login_hint");
+			return redirectToAuthorization(res, target, loginHint ? { login_hint: loginHint } : {});
 		}
 
 		default:
@@ -1591,13 +1276,85 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
 	if (req.method === "GET" && url.pathname.startsWith("/request-object/")) {
 		const jwt = requestObjects.get(url.pathname.slice("/request-object/".length));
-		if (!jwt) {
-			return send(res, 404, "not found", { "content-type": "text/plain" });
-		}
-		return send(res, 200, jwt, { "content-type": "application/oauth-authz-req+jwt" });
+		return jwt
+			? send(res, 200, jwt, { "content-type": "application/oauth-authz-req+jwt" })
+			: send(res, 404, "not found", { "content-type": "text/plain" });
 	}
 
 	return send(res, 404, page("Not found", "<h1>not found</h1>"));
+}
+
+/** GET /start: the driver entry point (README.md "Driver contract") */
+async function startModule(res: ServerResponse, q: URLSearchParams): Promise<void> {
+	const issuer = q.get("issuer");
+	const module = q.get("module");
+	if (!issuer || !module) {
+		return sendJson(res, 400, { ok: false, error: "issuer and module query parameters are required", steps: [] });
+	}
+	const json = (name: string) => {
+		const value = q.get(name);
+		return value ? JSON.parse(value) : undefined;
+	};
+	let input: StartInput;
+	try {
+		input = {
+			issuer,
+			module,
+			variant: json("variant") ?? {},
+			clientMetadataDefaults: json("client_metadata_defaults") ?? {},
+			alias: q.get("alias") ?? undefined,
+			clientId: q.get("client_id") ?? undefined,
+			clientSecret: q.get("client_secret") ?? undefined,
+			jwks: json("jwks"),
+		};
+	} catch (err) {
+		return sendJson(res, 400, { ok: false, error: describeError(err), steps: [] });
+	}
+	let result: StartResult;
+	try {
+		result = await runModule(input);
+	} catch (err) {
+		console.log(`[rp] ${module}: failed: ${describeError(err)}`);
+		result = { ok: false, error: describeError(err), steps: [], module };
+	}
+	if (!result.steps.length) {
+		result.steps = [...(latestFlow?.module === module ? latestFlow.steps : [])];
+	}
+	console.log(`[rp] ${module}: ${result.ok ? "OK" : "NOT OK"}${result.error ? ` - ${result.error}` : ""}`);
+	sendJson(res, 200, result);
+}
+
+/** POST /backchannel-logout: 200 when the logout_token is valid for a signed in flow, 400 otherwise */
+async function backchannelLogout(res: ServerResponse, logoutToken: string | null): Promise<void> {
+	let flow: Flow | undefined;
+	try {
+		if (!logoutToken) {
+			throw new Error("logout_token missing");
+		}
+		let claims: jose.JWTPayload = {};
+		try {
+			claims = jose.decodeJwt(logoutToken);
+		} catch {
+			// validated below
+		}
+		const sid = claims["sid"];
+		flow = findFlowForLogout((f) => (sid !== undefined && f.sid === sid) || f.rp.clientId === claims.aud);
+		if (!flow) {
+			throw new Error("no session for this logout_token");
+		}
+		await validateLogoutToken(flow, logoutToken);
+		flow.loggedIn = false;
+		step(flow, "back-channel logout_token accepted, session cleared");
+		flow.backchannel.resolve({ accepted: true });
+		send(res, 200, "", { "content-type": "text/plain" });
+	} catch (err) {
+		const error = describeError(err);
+		if (flow) {
+			step(flow, `back-channel logout_token rejected: ${error}`);
+		}
+		(flow ?? latestFlow)?.backchannel.resolve({ accepted: false, error });
+		sendJson(res, 400, { error: "invalid_request", error_description: error });
+	}
 }
 
 function handler(req: IncomingMessage, res: ServerResponse): void {
@@ -1611,40 +1368,10 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
 	});
 }
 
-/** self-signed certificate for the https listener (initiate_login_uri must be https, ValidateClientInitiateLoginUri) */
-function selfSignedCertificate(): { key: string; cert: string } | undefined {
-	const dir = mkdtempSync(join(tmpdir(), "rp-tls-"));
-	try {
-		execFileSync(
-			"openssl",
-			[
-				"req",
-				"-x509",
-				"-newkey",
-				"rsa:2048",
-				"-nodes",
-				"-days",
-				"2",
-				"-subj",
-				"/CN=localhost",
-				"-addext",
-				"subjectAltName=DNS:localhost,IP:127.0.0.1",
-				"-keyout",
-				join(dir, "key.pem"),
-				"-out",
-				join(dir, "cert.pem"),
-			],
-			{ stdio: "ignore" },
-		);
-		return { key: readFileSync(join(dir, "key.pem"), "utf8"), cert: readFileSync(join(dir, "cert.pem"), "utf8") };
-	} catch (err) {
-		console.warn(
-			`[rp] could not create a self-signed certificate with openssl (${describeError(err)}), https disabled`,
-		);
-		return undefined;
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+function listen(server: Server, port: number): Promise<Server> {
+	return new Promise((resolve, reject) => {
+		server.once("error", reject).listen(port, "localhost", () => resolve(server));
+	});
 }
 
 export interface RunningRp {
@@ -1654,24 +1381,13 @@ export interface RunningRp {
 
 export async function start(): Promise<RunningRp> {
 	await initKeys();
-	const servers: Server[] = [];
-	const http = createServer(handler);
-	await new Promise<void>((resolve, reject) => {
-		http.once("error", reject);
-		http.listen(PORT, "localhost", () => resolve());
-	});
-	servers.push(http);
+	const servers = [await listen(createServer(handler), PORT)];
 	if (HTTPS_PORT) {
-		const tls = selfSignedCertificate();
-		if (tls) {
-			const https = createHttpsServer(tls, handler);
-			await new Promise<void>((resolve, reject) => {
-				https.once("error", reject);
-				https.listen(HTTPS_PORT, "localhost", () => resolve());
-			});
-			servers.push(https);
-			httpsEnabled = true;
-		}
+		const tls = {
+			cert: readFileSync(new URL("localhost.crt", CERTS)),
+			key: readFileSync(new URL("localhost.key", CERTS)),
+		};
+		servers.push(await listen(createHttpsServer(tls, handler), HTTPS_PORT));
 	}
 	return {
 		base: BASE,
@@ -1693,9 +1409,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 		`openid-client RP listening on ${BASE} (redirect_uri ${REDIRECT_URI}, initiate_login_uri ${INITIATE_LOGIN_URI})`,
 	);
 	console.log("ready");
-	const shutdown = () => {
-		void running.close().then(() => process.exit(0));
-	};
+	const shutdown = () => void running.close().then(() => process.exit(0));
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
 }

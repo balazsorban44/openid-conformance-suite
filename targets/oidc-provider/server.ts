@@ -12,14 +12,15 @@
  *   OIDC_PROVIDER_CLIENTS             JSON array of static client metadata (overrides clients.json)
  *   OIDC_PROVIDER_CLIENTS_FILE        path to a JSON file with static clients (default targets/oidc-provider/clients.json)
  *   OIDC_PROVIDER_JWKS                private JWKS JSON to use instead of keys generated at startup
+ *   OIDC_PROVIDER_TLS_CERT / _KEY     PEM file paths: serve https (the suite requires https for registration_client_uri,
+ *                                     initiate_login_uri, sector_identifier_uri ...); the default ISSUER is then https
  *   OIDC_PROVIDER_AUTO_APPROVE=1      self-test mode for the RP target: no login/consent/logout user interaction
  *   DEBUG_OIDC_PROVIDER=1             log every request and provider error
  */
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import * as querystring from "node:querystring";
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, type JWK } from "jose";
@@ -31,41 +32,22 @@ import * as jwa from "oidc-provider/lib/consts/jwa.js";
 // oxlint-disable-next-line typescript/no-explicit-any
 type Any = any;
 
-export interface StartOptions {
-	/** listen port, default PORT env or 3000; 0 picks a free port */
-	port?: number;
-	/** listen host, default "localhost" */
-	host?: string;
-	/** issuer identifier, default ISSUER env or http://localhost:<port> */
-	issuer?: string;
-	/** static clients, default OIDC_PROVIDER_CLIENTS env / clients.json */
-	clients?: Record<string, unknown>[];
-	/** private JWKS, default OIDC_PROVIDER_JWKS env / generated */
-	jwks?: { keys: JWK[] };
-	/** log requests and errors */
-	debug?: boolean;
-	/**
-	 * Self-test mode for the RP target (OIDC_PROVIDER_AUTO_APPROVE=1): login (as "foo"), consent and the logout
-	 * confirmation complete without user interaction. Never used for the OP plans.
-	 */
-	autoApprove?: boolean;
-}
-
-export interface RunningProvider {
-	issuer: string;
-	readyUrl: string;
-	provider: Any;
-	server: Server;
-	close(): Promise<void>;
-}
-
-const HERE = fileURLToPath(new URL(".", import.meta.url));
-const DEFAULT_PORT = 3000;
-
-/** The URL the CI runner polls before starting a plan: issuer + /.well-known/openid-configuration */
-export function readyUrl(issuer = `http://localhost:${process.env["PORT"] ?? DEFAULT_PORT}`): string {
-	return `${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
-}
+const env = process.env;
+const PORT = Number(env["PORT"] ?? 3000);
+const DEBUG = env["DEBUG_OIDC_PROVIDER"] === "1";
+/**
+ * Self-test mode for the RP target (OIDC_PROVIDER_AUTO_APPROVE=1): login (as "foo"), consent and the logout
+ * confirmation complete without user interaction. Never used for the OP plans.
+ */
+const AUTO_APPROVE = env["OIDC_PROVIDER_AUTO_APPROVE"] === "1";
+const TLS =
+	env["OIDC_PROVIDER_TLS_CERT"] && env["OIDC_PROVIDER_TLS_KEY"]
+		? {
+				cert: readFileSync(env["OIDC_PROVIDER_TLS_CERT"], "utf8"),
+				key: readFileSync(env["OIDC_PROVIDER_TLS_KEY"], "utf8"),
+			}
+		: null;
+const ISSUER = (env["ISSUER"] ?? `${TLS ? "https" : "http"}://localhost:${PORT}`).replace(/\/$/, "");
 
 /** Test account (any login/password is accepted at the login form, the login value becomes the sub). */
 const ACCOUNT_CLAIMS = {
@@ -104,17 +86,12 @@ const ACR = "urn:mace:incommon:iap:bronze";
 const OPBS_COOKIE = "op_browser_state";
 
 /** static clients may use any suite redirect URI on the loopback host (the suite port is dynamic) */
-const STATIC_REDIRECT_URI = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/test\/(a\/[^/?#]+|[^/?#]+)\/callback$/;
-const STATIC_POST_LOGOUT_REDIRECT_URI =
-	/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/test\/(a\/[^/?#]+|[^/?#]+)\/post_logout_redirect$/;
-
-function loadStaticClients(): Record<string, unknown>[] {
-	if (process.env["OIDC_PROVIDER_CLIENTS"]) {
-		return JSON.parse(process.env["OIDC_PROVIDER_CLIENTS"]);
-	}
-	const file = process.env["OIDC_PROVIDER_CLIENTS_FILE"] ?? `${HERE}clients.json`;
-	return JSON.parse(readFileSync(file, "utf8"));
-}
+const suiteUri = (endpoint: string) =>
+	new RegExp(String.raw`^https?://(localhost|127\.0\.0\.1)(:\d+)?/test/(a/[^/?#]+|[^/?#]+)/${endpoint}$`);
+const STATIC_CLIENT_URIS = {
+	redirectUriAllowed: suiteUri("callback"),
+	postLogoutRedirectUriAllowed: suiteUri("post_logout_redirect"),
+};
 
 async function generateJwks(): Promise<{ keys: JWK[] }> {
 	const specs: [string, { use: string; crv?: string; modulusLength?: number }][] = [
@@ -130,39 +107,27 @@ async function generateJwks(): Promise<{ keys: JWK[] }> {
 	const keys: JWK[] = [];
 	for (const [alg, { use, ...options }] of specs) {
 		const { privateKey } = await generateKeyPair(alg, { ...options, extractable: true });
-		const jwk = await exportJWK(privateKey);
-		jwk.use = use;
-		jwk.kid = await calculateJwkThumbprint(jwk);
-		keys.push(jwk);
+		const jwk = { ...(await exportJWK(privateKey)), use };
+		keys.push({ ...jwk, kid: await calculateJwkThumbprint(jwk) });
 	}
 	return { keys };
 }
 
-function noPq(algs: string[]): string[] {
-	return algs.filter((alg) => !alg.startsWith("ML-DSA"));
-}
+const sha256url = (input: string) => createHash("sha256").update(input).digest("base64url");
 
-function sha256url(input: string): string {
-	return createHash("sha256").update(input).digest("base64url");
-}
-
-/** OIDC Session Management 1.0 section 3: session_state = hash(client_id origin opbs salt) + "." + salt */
-function sessionState(clientId: string, origin: string, opbs: string, salt: string): string {
-	return `${sha256url(`${clientId} ${origin} ${opbs} ${salt}`)}.${salt}`;
-}
-
-function htmlSafe(value: unknown): string {
-	return String(value)
+const htmlSafe = (value: unknown) =>
+	String(value)
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
 		.replace(/"/g, "&quot;")
 		.replace(/'/g, "&#39;");
-}
+
+const setOpbs = (ctx: Any, value: string) =>
+	ctx.cookies.set(OPBS_COOKIE, value, { httpOnly: false, sameSite: "lax", path: "/", overwrite: true, signed: false });
 
 /** check_session_iframe page (OIDC Session Management 1.0 section 3.3), recomputes session_state from the cookie */
-function checkSessionIframeHtml(): string {
-	return `<!DOCTYPE html>
+const CHECK_SESSION_IFRAME_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>check_session_iframe</title></head>
 <body>
 <script>
@@ -198,7 +163,6 @@ window.addEventListener("message", function (e) {
 }, false);
 </script>
 </body></html>`;
-}
 
 /** page rendered after end_session confirmation that loads every frontchannel_logout_uri, then continues */
 function frontchannelLogoutHtml(frames: string[], continueTo: string): string {
@@ -225,67 +189,34 @@ ${frames.map((src) => `<iframe src="${htmlSafe(src)}" onload="loaded()" hidden><
 </body></html>`;
 }
 
-export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
-	let port = opts.port ?? Number(process.env["PORT"] ?? DEFAULT_PORT);
-	if (port === 0) {
-		port = await freePort();
-	}
-	const host = opts.host ?? "localhost";
-	const debug = opts.debug ?? process.env["DEBUG_OIDC_PROVIDER"] === "1";
-	const autoApprove = opts.autoApprove ?? process.env["OIDC_PROVIDER_AUTO_APPROVE"] === "1";
-	const staticClients = opts.clients ?? loadStaticClients();
-	const staticClientIds = new Set(staticClients.map((c) => String(c["client_id"])));
-	const jwks =
-		opts.jwks ??
-		(process.env["OIDC_PROVIDER_JWKS"] ? JSON.parse(process.env["OIDC_PROVIDER_JWKS"]) : null) ??
-		(await generateJwks());
-
-	// OIDC_PROVIDER_TLS_CERT / OIDC_PROVIDER_TLS_KEY (PEM file paths) serve https (the suite requires https for
-	// registration_client_uri, initiate_login_uri, sector_identifier_uri ...)
-	const tls =
-		process.env["OIDC_PROVIDER_TLS_CERT"] && process.env["OIDC_PROVIDER_TLS_KEY"]
-			? {
-					cert: readFileSync(process.env["OIDC_PROVIDER_TLS_CERT"], "utf8"),
-					key: readFileSync(process.env["OIDC_PROVIDER_TLS_KEY"], "utf8"),
-				}
-			: null;
-	const issuer = (opts.issuer ?? process.env["ISSUER"] ?? `${tls ? "https" : "http"}://localhost:${port}`).replace(
-		/\/$/,
-		"",
+export async function start(): Promise<{ issuer: string; close(): Promise<void> }> {
+	const staticClients: Record<string, unknown>[] = JSON.parse(
+		env["OIDC_PROVIDER_CLIENTS"] ||
+			readFileSync(env["OIDC_PROVIDER_CLIENTS_FILE"] ?? new URL("clients.json", import.meta.url), "utf8"),
 	);
+	const staticClientIds = new Set(staticClients.map((c) => String(c["client_id"])));
 
 	// ML-DSA is filtered out like upstream's CI (conformance-suite#1598); everything else oidc-provider implements is
 	// enabled so the suite can register clients with any id_token/userinfo/request object alg it wants to test
-	const enabledJWA = {
-		clientAuthSigningAlgValues: noPq(jwa.clientAuthSigningAlgValues),
-		idTokenSigningAlgValues: noPq(jwa.idTokenSigningAlgValues),
-		requestObjectSigningAlgValues: noPq(jwa.requestObjectSigningAlgValues),
-		userinfoSigningAlgValues: noPq(jwa.userinfoSigningAlgValues),
-		introspectionSigningAlgValues: noPq(jwa.introspectionSigningAlgValues),
-		authorizationSigningAlgValues: noPq(jwa.authorizationSigningAlgValues),
-		idTokenEncryptionAlgValues: jwa.idTokenEncryptionAlgValues,
-		requestObjectEncryptionAlgValues: jwa.requestObjectEncryptionAlgValues,
-		userinfoEncryptionAlgValues: jwa.userinfoEncryptionAlgValues,
-		introspectionEncryptionAlgValues: jwa.introspectionEncryptionAlgValues,
-		authorizationEncryptionAlgValues: jwa.authorizationEncryptionAlgValues,
-		idTokenEncryptionEncValues: jwa.idTokenEncryptionEncValues,
-		requestObjectEncryptionEncValues: jwa.requestObjectEncryptionEncValues,
-		userinfoEncryptionEncValues: jwa.userinfoEncryptionEncValues,
-		introspectionEncryptionEncValues: jwa.introspectionEncryptionEncValues,
-		authorizationEncryptionEncValues: jwa.authorizationEncryptionEncValues,
-	};
+	// (DPoP and attestation algs keep their defaults, those features are off)
+	const enabledJWA = Object.fromEntries(
+		Object.keys(defaults.enabledJWA)
+			.filter((key) => !/^(dPoP|attest)/.test(key))
+			.map((key) => [
+				key,
+				(jwa as unknown as Record<string, string[]>)[key].filter((alg) => !alg.startsWith("ML-DSA")),
+			]),
+	);
 
 	// front-channel logout iframes pending per logout confirmation (keyed by the end_session xsrf secret)
 	const pendingFrontchannel = new Map<string, { clientId?: string; frames: { clientId: string; url: string }[] }>();
 
-	const defaultLogoutSource = defaults.features.rpInitiatedLogout.logoutSource;
-
-	const configuration = {
+	const provider = new Provider(ISSUER, {
 		// OIDC Core 3.1.2.1: the authorization endpoint MUST support POST (oidcc-ensure-post-request-succeeds);
 		// oidc-provider then requires SameSite=None on its long-lived (session) cookies
 		enableHttpPostMethods: true,
 		clients: staticClients,
-		jwks,
+		jwks: env["OIDC_PROVIDER_JWKS"] ? JSON.parse(env["OIDC_PROVIDER_JWKS"]) : await generateJwks(),
 		cookies: {
 			keys: [randomBytes(32).toString("base64url")],
 			long: { sameSite: "none", signed: true },
@@ -323,19 +254,18 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 					for (const clientId of Object.keys(session.authorizations ?? {})) {
 						const client = await ctx.oidc.provider.Client.find(clientId).catch(() => undefined);
 						const uri = client?.metadata()["frontchannel_logout_uri"];
-						if (!uri) {
-							continue;
+						if (uri) {
+							const url = new URL(uri);
+							url.searchParams.set("iss", ISSUER);
+							url.searchParams.set("sid", session.sidFor(clientId));
+							frames.push({ clientId, url: url.href });
 						}
-						const url = new URL(uri);
-						url.searchParams.set("iss", issuer);
-						url.searchParams.set("sid", session.sidFor(clientId));
-						frames.push({ clientId, url: url.href });
 					}
 					if (frames.length) {
 						pendingFrontchannel.set(session.state.secret, { clientId: session.state.clientId, frames });
 					}
-					await defaultLogoutSource(ctx, form);
-					if (autoApprove) {
+					await defaults.features.rpInitiatedLogout.logoutSource(ctx, form);
+					if (AUTO_APPROVE) {
 						ctx.body = String(ctx.body).replace(
 							"</body>",
 							'<script>document.querySelector("button[autofocus]").click()</script></body>',
@@ -401,61 +331,40 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 		// oidcc-refresh-token / oidcc-refresh-token-rp-key-rotation: refresh tokens for offline_access (same rule as
 		// upstream's certification config)
 		async issueRefreshToken(_ctx: Any, client: Any, code: Any) {
-			if (!client.grantTypeAllowed("refresh_token")) {
-				return false;
-			}
 			return (
-				code.scopes.has("offline_access") || (client.applicationType === "web" && client.clientAuthMethod === "none")
+				client.grantTypeAllowed("refresh_token") &&
+				(code.scopes.has("offline_access") || (client.applicationType === "web" && client.clientAuthMethod === "none"))
 			);
 		},
 		async findAccount(_ctx: Any, sub: string) {
-			return {
-				accountId: sub,
-				async claims() {
-					return { sub, ...structuredClone(ACCOUNT_CLAIMS) };
-				},
-			};
+			return { accountId: sub, claims: async () => ({ sub, ...structuredClone(ACCOUNT_CLAIMS) }) };
 		},
-		ttl: {
-			RegistrationAccessToken: 24 * 60 * 60,
-		},
-		renderError: defaults.renderError,
+		ttl: { RegistrationAccessToken: 24 * 60 * 60 },
 		// outgoing requests (backchannel_logout_uri, jwks_uri, sector_identifier_uri, request_uri) go to the suite on
 		// localhost; oidc-provider's default dispatcher refuses loopback/private addresses, so use plain fetch like
 		// upstream's certification config does for oidcc-dynamic-* and oidcc-backchannel-rp-initiated-logout
-		fetch(url: URL | string, options: RequestInit & { dispatcher?: unknown }) {
-			delete options.dispatcher;
+		fetch(url: URL | string, { dispatcher: _, ...options }: RequestInit & { dispatcher?: unknown }) {
 			return globalThis.fetch(url, options);
 		},
-	};
-
-	const provider = new Provider(issuer, configuration);
+	});
 
 	// the suite runs on http://localhost: allow implicit/hybrid clients to register http and localhost redirect_uris
 	// (oidcc-implicit-*, oidcc-hybrid-* plans and every logout plan with response_type including id_token)
 	const { invalidate } = provider.Client.Schema.prototype;
 	provider.Client.Schema.prototype.invalidate = function (message: string, code?: string) {
-		if (code === "implicit-force-https" || code === "implicit-forbid-localhost") {
-			return;
+		if (code !== "implicit-force-https" && code !== "implicit-forbid-localhost") {
+			return invalidate.call(this, message, code);
 		}
-		return invalidate.call(this, message, code);
 	};
 
 	// static_client variants: the suite's redirect_uri contains its dynamic port, accept any suite callback URL on
 	// the loopback host for the static clients (still exact-path, so oidcc-ensure-registered-redirect-uri fails)
-	const { redirectUriAllowed, postLogoutRedirectUriAllowed } = provider.Client.prototype;
-	provider.Client.prototype.redirectUriAllowed = function (value: string) {
-		if (staticClientIds.has(this.clientId) && STATIC_REDIRECT_URI.test(value)) {
-			return true;
-		}
-		return redirectUriAllowed.call(this, value);
-	};
-	provider.Client.prototype.postLogoutRedirectUriAllowed = function (value: string) {
-		if (staticClientIds.has(this.clientId) && STATIC_POST_LOGOUT_REDIRECT_URI.test(value)) {
-			return true;
-		}
-		return postLogoutRedirectUriAllowed.call(this, value);
-	};
+	for (const [method, pattern] of Object.entries(STATIC_CLIENT_URIS)) {
+		const original = provider.Client.prototype[method];
+		provider.Client.prototype[method] = function (value: string) {
+			return (staticClientIds.has(this.clientId) && pattern.test(value)) || original.call(this, value);
+		};
+	}
 
 	// oidcc-frontchannel-rp-initiated-logout (CheckIdTokenSidMatchesFrontChannelLogoutRequest) and the back-channel
 	// logout plan compare the sid of the ID Token with the logout request: always include sid in ID Tokens
@@ -464,8 +373,7 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	// oidcc-ensure-request-with-acr-values-succeeds etc.: like upstream, assert a static acr/amr on every login
 	const { interactionFinished } = provider;
 	provider.interactionFinished = (...args: Any[]) => {
-		const { login } = args[2];
-		if (login) {
+		if (args[2].login) {
 			Object.assign(args[2].login, { acr: ACR, amr: ["pwd"] });
 		}
 		return interactionFinished.call(provider, ...args);
@@ -474,40 +382,39 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	// OIDC Session Management 1.0: add session_state to every successful authorization response and keep the OP
 	// browser state cookie in sync (oidcc-session-management-certification-test-plan)
 	provider.on("authorization.success", (ctx: Any, out: Record<string, unknown>) => {
-		const session = ctx.oidc.session;
-		const client = ctx.oidc.client;
+		const { session, client } = ctx.oidc;
 		const redirectUri = ctx.oidc.params?.redirect_uri;
 		if (!session?.accountId || !client || !redirectUri || !URL.canParse(redirectUri)) {
 			return;
 		}
 		const opbs = sha256url(`${session.uid}:${session.loginTs ?? ""}`);
-		ctx.cookies.set(OPBS_COOKIE, opbs, { httpOnly: false, sameSite: "lax", path: "/", overwrite: true, signed: false });
+		setOpbs(ctx, opbs);
+		// section 3: session_state = hash(client_id origin opbs salt) + "." + salt
 		const salt = randomBytes(8).toString("base64url");
-		out["session_state"] = sessionState(client.clientId, new URL(redirectUri).origin, opbs, salt);
+		out["session_state"] = `${sha256url(`${client.clientId} ${new URL(redirectUri).origin} ${opbs} ${salt}`)}.${salt}`;
 	});
 
-	if (debug) {
+	if (DEBUG) {
 		provider.on("server_error", (_ctx: Any, err: Error) => console.error("server_error", err));
-		provider.on("authorization.error", (_ctx: Any, err: Error) => console.error("authorization.error", err.message));
-		provider.on("grant.error", (_ctx: Any, err: Error) => console.error("grant.error", err.message));
-		provider.on("backchannel.error", (_ctx: Any, err: Error) => console.error("backchannel.error", err.message));
+		for (const event of ["authorization.error", "grant.error", "backchannel.error"]) {
+			provider.on(event, (_ctx: Any, err: Error) => console.error(event, err.message));
+		}
 	}
 
 	provider.use(async (ctx: Any, next: () => Promise<void>) => {
-		if (debug) {
+		if (DEBUG) {
 			console.log(ctx.method, ctx.url);
 		}
 
-		if (autoApprove && ctx.method === "GET" && ctx.path.startsWith("/interaction/")) {
-			await autoApproveInteraction(provider, ctx);
-			return;
+		if (AUTO_APPROVE && ctx.method === "GET" && ctx.path.startsWith("/interaction/")) {
+			return autoApproveInteraction(provider, ctx);
 		}
 
 		// check_session_iframe (oidcc-session-management-*)
 		if (ctx.method === "GET" && ctx.path === "/session/check") {
 			ctx.type = "html";
 			ctx.set("cache-control", "no-store");
-			ctx.body = checkSessionIframeHtml();
+			ctx.body = CHECK_SESSION_IFRAME_HTML;
 			return;
 		}
 
@@ -526,7 +433,7 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 				require_request_uri_registration: false,
 				frontchannel_logout_supported: true,
 				frontchannel_logout_session_supported: true,
-				check_session_iframe: `${issuer}/session/check`,
+				check_session_iframe: `${ISSUER}/session/check`,
 			});
 		}
 
@@ -535,13 +442,7 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 		// browser state so check_session_iframe answers "changed" (oidcc-session-management-rp-initiated-logout)
 		if (ctx.method === "POST" && ctx.path === "/session/end/confirm" && ctx.status === 303) {
 			const params = ctx.oidc?.params ?? {};
-			ctx.cookies.set(OPBS_COOKIE, randomBytes(16).toString("base64url"), {
-				httpOnly: false,
-				sameSite: "lax",
-				path: "/",
-				overwrite: true,
-				signed: false,
-			});
+			setOpbs(ctx, randomBytes(16).toString("base64url"));
 			const pending = params.xsrf ? pendingFrontchannel.get(params.xsrf) : undefined;
 			if (pending) {
 				pendingFrontchannel.delete(params.xsrf);
@@ -558,16 +459,11 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	});
 
 	const server: Server = await new Promise((resolve, reject) => {
-		const s = tls
-			? createHttpsServer(tls, provider.callback()).listen(port, host, () => resolve(s))
-			: provider.listen(port, host, () => resolve(s));
-		s.once("error", reject);
+		const s = TLS ? createHttpsServer(TLS, provider.callback()) : createServer(provider.callback());
+		s.once("error", reject).listen(PORT, "localhost", () => resolve(s));
 	});
 	return {
-		issuer,
-		readyUrl: readyUrl(issuer),
-		provider,
-		server,
+		issuer: ISSUER,
 		close: () =>
 			new Promise<void>((resolve) => {
 				server.closeAllConnections();
@@ -604,17 +500,6 @@ async function autoApproveInteraction(provider: Any, ctx: Any): Promise<void> {
 	await provider.interactionFinished(ctx.req, ctx.res, result, { mergeWithLastSubmission: prompt.name !== "login" });
 }
 
-function freePort(): Promise<number> {
-	return new Promise((resolve, reject) => {
-		const srv = createNetServer();
-		srv.once("error", reject);
-		srv.listen(0, "127.0.0.1", () => {
-			const { port } = srv.address() as AddressInfo;
-			srv.close(() => resolve(port));
-		});
-	});
-}
-
 async function dereferenceRequestUri(ctx: Any): Promise<void> {
 	let params: Record<string, unknown>;
 	if (ctx.method === "GET") {
@@ -636,7 +521,6 @@ async function dereferenceRequestUri(ctx: Any): Promise<void> {
 	if (typeof requestUri !== "string" || !/^https?:\/\//.test(requestUri) || params["request"] !== undefined) {
 		return;
 	}
-	let requestObject: string;
 	try {
 		const res = await fetch(requestUri, {
 			signal: AbortSignal.timeout(5000),
@@ -645,12 +529,11 @@ async function dereferenceRequestUri(ctx: Any): Promise<void> {
 		if (!res.ok) {
 			return;
 		}
-		requestObject = (await res.text()).trim();
+		params["request"] = (await res.text()).trim();
 	} catch {
 		return;
 	}
 	delete params["request_uri"];
-	params["request"] = requestObject;
 	const encoded = querystring.stringify(params as querystring.ParsedUrlQueryInput);
 	if (ctx.method === "GET") {
 		ctx.querystring = encoded;
@@ -661,11 +544,11 @@ async function dereferenceRequestUri(ctx: Any): Promise<void> {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 	const running = await start();
-	console.log(`oidc-provider listening, issuer ${running.issuer}, discovery ${running.readyUrl}`);
+	console.log(
+		`oidc-provider listening, issuer ${running.issuer}, discovery ${running.issuer}/.well-known/openid-configuration`,
+	);
 	console.log("ready");
-	const shutdown = () => {
-		void running.close().then(() => process.exit(0));
-	};
+	const shutdown = () => void running.close().then(() => process.exit(0));
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
 }

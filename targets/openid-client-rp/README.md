@@ -26,8 +26,8 @@ authorization endpoint, read the `Location`/form_post response, token, userinfo)
 waits for the module to be `FINISHED`.
 
 This target keeps exactly those inputs but is a long running HTTP server driven with one request per module, and it
-receives the authorization responses on real callback endpoints through a real user agent (Playwright chromium by
-default), so logout, session management and third party initiated login modules work too.
+receives the authorization responses on real callback endpoints through a real user agent (Playwright chromium), so
+logout, session management and third party initiated login modules work too.
 
 ## Driver contract
 
@@ -91,7 +91,7 @@ Static RP configs must register the RP's endpoints at the suite: `client.redirec
 | `GET /frontchannel-logout`                  | `frontchannel_logout_uri` (`iss`, `sid`): clears the session, 200 HTML                                                                                                                                                                |
 | `GET /session-check?flow=&phase=`           | session management: loads the OP's `check_session_iframe` and posts `client_id session_state` to it                                                                                                                                   |
 | `GET /session-status`                       | where the session check page reports the iframe's answer                                                                                                                                                                              |
-| `GET https://localhost:4443/initiate-login` | `initiate_login_uri` (`iss`, `login_hint`, `target_link_uri`), https because the suite requires it (ValidateClientInitiateLoginUri); self-signed certificate made with `openssl` at startup                                           |
+| `GET https://localhost:4443/initiate-login` | `initiate_login_uri` (`iss`, `login_hint`, `target_link_uri`), https because the suite requires it (ValidateClientInitiateLoginUri); certificate `configs/certs/localhost.crt` (`RP_HTTPS_PORT=0` disables)                           |
 
 ## What the RP does per module
 
@@ -130,11 +130,9 @@ logout modules need the authorization request plus the end_session request, and 
 / the front-channel iframe callback was received; session management needs `get_session_state` calls before and
 after logout).
 
-## User agents
+## User agent
 
-`RP_USER_AGENT=browser` (default) uses Playwright's chromium (`RP_CHROMIUM_EXECUTABLE_PATH` to pick a binary).
-`RP_USER_AGENT=fetch` uses a tiny non-JS user agent (redirects, cookies, form_post forms, fragment delivery) for the
-login modules; logout and session modules always use the browser because the pages involved need JavaScript.
+The RP's front-channel navigation runs in Playwright's chromium (`RP_CHROMIUM_EXECUTABLE_PATH` to pick a binary).
 
 ## Known openid-client v6 limitations (candidates for `configs/expected-failures/openid-client-rp.json`)
 
