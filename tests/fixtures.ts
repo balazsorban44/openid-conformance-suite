@@ -10,8 +10,9 @@
  *   scripted browser and event log for this test. One per test.
  * - `client` / `client2`: the client(s), dynamically registered or taken from the configuration (per the
  *   client_registration variant); a registered client is unregistered after the test.
- * - `configureClient(customizeRegistration?)`: the same client set up by the test, for modules that add to the
- *   registration request or run conditions before the client is configured (logout, 3rd-party-initiated login).
+ * - `configureClient(setup?)`: the same client set up where the test calls it, with what the module changes about it
+ *   (registration request, static client key, scope, the second client); `client` / `client2` are
+ *   `configureClient()` / `configureClient({ configKey: "client2" })`.
  * - `rp`: for RP tests, the emulated OP (`rp.start(options)`, on the test's own server; its issuer is the server's
  *   base url) and the client driver that makes the RP under test log in against it (`rp.driveClient()`).
  * - `variant`: the variant (the plan's fixed values + the selection from CONFORMANCE_VARIANT / the project).
@@ -31,7 +32,7 @@ import * as discovery from "../src/op/discovery.ts";
 import { loadServerKeys } from "../src/op/jwks.ts";
 import type { Op, OpVariant } from "../src/op/op.ts";
 import * as registration from "../src/op/registration.ts";
-import type { RegisteredClient } from "../src/op/registration.ts";
+import type { ClientSetup, RegisteredClient } from "../src/op/registration.ts";
 import { projects } from "../src/runner/projects.ts";
 import { createBrowser } from "../src/suite/browser.ts";
 import { block, condition, soft } from "../src/suite/conditions.ts";
@@ -82,15 +83,13 @@ interface Fixtures {
 }
 
 /**
- * Sets up the client as the `client` fixture does, called by the test where the module configures its client:
- * `customizeRegistration` adds the module's parameters to the dynamic registration request (upstream
- * createDynamicClientRegistrationRequest overrides; not called for a static client). Conditions the module runs before
- * the client is configured (upstream configureClient overrides) are simply called before it. A registered client is
- * unregistered after the test.
+ * Sets up a client, called by the test where the module configures it (the `client` / `client2` fixtures call it
+ * before the test): registers it (or takes it from the configuration), applies the module's `setup` (ClientSetup: the
+ * registration request additions, the static client key, completeClientConfiguration, the second client). Conditions
+ * the module runs before the client is configured (upstream configureClient overrides) are simply called before it.
+ * Registered clients are unregistered after the test, in the order they were set up.
  */
-export type ConfigureClient = (
-	customizeRegistration?: (registrationRequest: Record<string, unknown>) => void,
-) => Promise<RegisteredClient>;
+export type ConfigureClient = (setup?: ClientSetup) => Promise<RegisteredClient>;
 
 /** "[k=v][k2=v2]" -> { k: v, k2: v2 } */
 export function parseVariant(s: string): Record<string, string> {
@@ -227,25 +226,17 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 		});
 	},
 
-	client: async ({ op }, use) => {
-		await useClient(op, "client", use);
-	},
-
-	client2: async ({ op }, use) => {
-		await useClient(op, "client2", use);
-	},
-
 	configureClient: async ({ op }, use) => {
-		const configured: RegisteredClient[] = [];
+		const configured: { registered: RegisteredClient; setup: ClientSetup }[] = [];
 		try {
-			await use(async (customizeRegistration) => {
-				const registered = await setUpClient(op, "client", customizeRegistration);
-				configured.push(registered);
+			await use(async (setup = {}) => {
+				const registered = await setUpClient(op, setup);
+				configured.push({ registered, setup });
 				return registered;
 			});
 		} finally {
-			for (const registered of configured) {
-				await tearDownClient(registered);
+			for (const { registered, setup } of configured) {
+				await tearDownClient(registered, setup);
 			}
 		}
 	},
@@ -270,36 +261,28 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 			await rp.close();
 		}
 	},
+
+	client: async ({ configureClient }, use) => {
+		await use(await configureClient());
+	},
+
+	client2: async ({ configureClient }, use) => {
+		await use(await configureClient({ configKey: "client2" }));
+	},
 });
 
 /**
- * Registers (or takes from the configuration) the client, makes sure the OP supports the variant's client
- * authentication, and unregisters a registered client after the test.
+ * Registers (or takes from the configuration) the client and makes sure the OP supports the variant's client
+ * authentication.
  *
- * upstream: AbstractOIDCCServerTest.configureClient / completeClientConfiguration / unregisterClient
+ * upstream: AbstractOIDCCServerTest.configureClient / completeClientConfiguration (AbstractOIDCCMultipleClient for
+ * client2)
  */
-async function useClient(
-	op: Op,
-	configKey: "client" | "client2",
-	use: (c: RegisteredClient) => Promise<void>,
-): Promise<void> {
-	const registered = await setUpClient(op, configKey);
-	try {
-		await use(registered);
-	} finally {
-		await tearDownClient(registered);
-	}
-}
-
-/** upstream: AbstractOIDCCServerTest.configureClient / completeClientConfiguration */
-async function setUpClient(
-	op: Op,
-	configKey: "client" | "client2",
-	customizeRegistration?: (registrationRequest: Record<string, unknown>) => void,
-): Promise<RegisteredClient> {
+async function setUpClient(op: Op, setup: ClientSetup): Promise<RegisteredClient> {
+	const configKey = setup.configKey ?? "client";
 	let registered: RegisteredClient;
 	if (op.variant.client_registration === "static_client") {
-		const client = registration.getStaticClientConfiguration(op.config, configKey);
+		const client = registration.getStaticClientConfiguration(op.config, setup.staticConfigKey ?? configKey);
 		registered = { client, keys: registration.configureStaticClientKeys(client), dynamic: false };
 	} else {
 		registered = await registration.registerClient({
@@ -310,20 +293,23 @@ async function setUpClient(
 			responseType: op.variant.response_type,
 			clientAuthType: op.variant.client_auth_type,
 			redirectUri: op.redirectUri,
-			customize: customizeRegistration,
+			customize: setup.customize,
 		});
 	}
 	registration.setScopeInClientConfigurationToOpenId(registered.client);
+	setup.completeClientConfiguration?.(op, registered.client);
 	if (op.variant.server_metadata === "discovery") {
 		soft(() => discovery.ensureServerConfigurationSupportsClientAuth(op.metadata, op.variant.client_auth_type));
 	}
 	return registered;
 }
 
-/** upstream: AbstractOIDCCServerTest.unregisterClient */
-async function tearDownClient(registered: RegisteredClient): Promise<void> {
+/** upstream: AbstractOIDCCServerTest.unregisterClient (AbstractOIDCCMultipleClient.cleanup for client2) */
+async function tearDownClient(registered: RegisteredClient, setup: ClientSetup): Promise<void> {
 	if (registered.dynamic) {
-		await block("Unregister dynamically registered client", () =>
+		// upstream's multiple client modules prefix the blocks of the second client
+		const prefix = setup.configKey === "client2" ? "Second client: " : "";
+		await block(prefix + "Unregister dynamically registered client", () =>
 			soft(() => registration.unregisterDynamicallyRegisteredClient(registered.client), "warning"),
 		);
 	}

@@ -21,6 +21,7 @@ src/suite/            the engine (no OIDC knowledge)
   jose.ts             keys, JWK sets (Nimbus member order), verifyJwsSignature(), signJwt(), parseJwt()
   expected.ts         expected-failures / expected-skips analysis (upstream run-test-plan.py)
   report.ts           ModuleReport, summary.md, the Playwright reporter (results.json, $GITHUB_STEP_SUMMARY)
+  wait.ts             upstream's WaitFor* conditions (the only sleeps: the spec's timing is what is tested)
   random.ts, testing.ts (Vitest helpers: useTestLog(), useMswServer())
 src/op/               helpers for testing an OpenID Provider, one file per concern
   op.ts               the Op / OpVariant types the `op` fixture provides
@@ -32,6 +33,8 @@ src/op/               helpers for testing an OpenID Provider, one file per conce
   id-token.ts         PerformStandardIdTokenChecks and the per-module id_token checks
   userinfo.ts         callProtectedResource()
   endpoint.ts         checks shared by every endpoint response (status, content type, error fields)
+  refresh-token.ts    the refresh_token grant (RefreshTokenRequestSteps, RefreshTokenRequestExpectingErrorSteps)
+  request-object.ts   unsigned request objects by value / by reference (request, request_uri)
   logout.ts           RP-initiated / back-channel / front-channel logout: end_session request, post logout redirect,
                       logout token and front-channel request checks, the first login of the logout modules
   session.ts          session management: session_state, the suite's session check pages (check_session_iframe)
@@ -206,9 +209,9 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   credentials; logged under TEST-RUNNER. The call blocks until the RP has run its flow, so its return tells the OP
   that no further requests will come.
 - Not supported yet by the emulated OP (they throw a TODO(port) error): client_secret_jwt / private_key_jwt /
-  mTLS client authentication, encrypted userinfo responses, encrypted id_tokens, refresh tokens, logout / session
-  management endpoints. Add them to the concern file (new endpoints: `serve(...)` in op.ts, a handler in a new concern file
-  such as `src/rp/logout.ts`).
+  mTLS client authentication, encrypted userinfo responses, encrypted id_tokens and logout tokens, refresh tokens,
+  the OP-initiated front-channel logout page. Add them to the concern file (a new endpoint: `serve(...)` in op.ts,
+  its handler in the concern file, e.g. `src/rp/logout.ts` serves end_session_endpoint and the session pages).
 
 ## Fixtures (tests/fixtures.ts)
 
@@ -217,15 +220,24 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   Setup logs what upstream's `AbstractOIDCCServerTest.configure` logs up to the client: CreateRedirectUri,
   Get{Dynamic,Static}ServerConfiguration, CheckServerConfiguration, ExtractTLSTestValuesFromServerConfiguration,
   `loadServerKeys()`.
-- `client` / `client2: RegisteredClient` = `{ client: Client (upstream env "client"), keys: { jwks, publicJwks } |
-null (client_jwks), dynamic }`: registered (`registerClient`) or from the config, SetScopeInClientConfiguration,
-  EnsureServerConfigurationSupports<auth type> (discovery only); a registered client is unregistered after the
-  test in the block "Unregister dynamically registered client".
-- `configureClient(customizeRegistration?)`: the same client set up where the test calls it, for modules that add
-  to the dynamic registration request (upstream createDynamicClientRegistrationRequest overrides: the callback gets
-  the request after the OIDCC defaults, before it is sent) or run conditions before the client is configured
-  (upstream configureClient overrides, e.g. CreatePostLogoutRedirectUri: call them before it). Unregistered after the
-  test like `client`.
+- `configureClient(setup?: ClientSetup): Promise<RegisteredClient>`: the one way a client is set up (upstream
+  configureClient / completeClientConfiguration), called in the test body where upstream configures the client.
+  It registers the client (`registerClient`) or takes it from the config, runs SetScopeInClientConfigurationToOpenId
+  and EnsureServerConfigurationSupports<auth type> (discovery only), and after the test unregisters every registered
+  client, in the order they were set up (block "Unregister dynamically registered client"). Conditions upstream runs
+  before the client is configured (configureClient overrides, e.g. CreatePostLogoutRedirectUri, or a precondition
+  that skips the module) are simply called before it. `ClientSetup` (src/op/registration.ts) is what a module
+  changes about its client; a setup shared by several clients is a `const` of that type:
+  - `customize(registrationRequest)`: additions to the dynamic registration request (upstream
+    createDynamicClientRegistrationRequest overrides: called after the OIDCC defaults, before it is sent; not for a
+    static client);
+  - `staticConfigKey`: the config key of a static client (e.g. `"client_secret_post"`; default `configKey`);
+  - `completeClientConfiguration(op, client)`: runs after SetScopeInClientConfigurationToOpenId (e.g. the scope);
+  - `configKey: "client2"`: the second client of the multiple client modules (config `client2`; its unregistration
+    block is prefixed "Second client: ").
+- `client` / `client2`: `configureClient()` / `configureClient({ configKey: "client2" })` run before the test body,
+  for modules that use the default client(s). A `RegisteredClient` has `client` (upstream env "client"), `keys`
+  (client_jwks: `{ jwks, publicJwks }` or null), `dynamic` and `registrationRequest` (the request sent, if dynamic).
 - `conformance` (testName, log, config, server, browser) without discovery or keys, for modules whose own flow
   fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`).
 - `rp: Rp` (src/rp/rp.ts): `testName`, `variant` (RpVariant), `config`, `waitTimeoutSeconds` (config

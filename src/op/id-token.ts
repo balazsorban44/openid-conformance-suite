@@ -715,3 +715,245 @@ export function checkIdTokenSubConsistentForSecondAuthorization(
 	}
 	c.success("sub is the same in the second id_token", fields);
 }
+
+/** upstream: condition/client/CheckSecondIdTokenAuthTimeIsLaterIfPresent.java (prompt=login / max_age=1 must log in again) */
+export function checkSecondIdTokenAuthTimeIsLaterIfPresent(
+	firstIdToken: ParsedJwt,
+	secondIdToken: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckSecondIdTokenAuthTimeIsLaterIfPresent", ...requirements);
+	const first = firstIdToken.claims;
+	const second = secondIdToken.claims;
+	const logged = { first_id_token: first, second_id_token: second };
+	if (Object.hasOwn(first, "auth_time") && Object.hasOwn(second, "auth_time")) {
+		const firstAuthTime = Math.trunc(Number(first["auth_time"]));
+		const secondAuthTime = Math.trunc(Number(second["auth_time"]));
+		if (firstAuthTime === secondAuthTime) {
+			c.failure(
+				"prompt=login means the server was required to reauthenticate the user, the id_token from the second authorization incorrectly has the same auth_time as the id_token from the first authorization",
+				logged,
+			);
+		}
+		if (firstAuthTime > secondAuthTime) {
+			c.failure(
+				"The id_token from the second authorization incorrectly has an earlier auth_time than the id_token from the first authorization",
+				logged,
+			);
+		}
+		c.success("auth_time is later in the second id_token", logged);
+	} else {
+		c.log(
+			"auth_time cannot be checked as it is missing from the id_tokens for at least one of the authorizations",
+			logged,
+		);
+	}
+}
+
+/** upstream: condition/client/CheckIdTokenAuthTimeClaimPresentDueToMaxAge.java */
+export function checkIdTokenAuthTimeClaimPresentDueToMaxAge(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("CheckIdTokenAuthTimeClaimPresentDueToMaxAge", ...requirements);
+	if (!Object.hasOwn(idToken.claims, "auth_time")) {
+		c.failure(
+			"auth_time claim is missing from the id_token, but it is required for a authentication where the max_age parameter was used",
+			{ id_token: idToken.claims },
+		);
+	}
+	// no need to check type as ValidateIdToken did so
+	c.success(
+		"auth_time is present in the id_token, as required for a authentication where the max_age parameter was used",
+		{ id_token: idToken.claims },
+	);
+}
+
+/** upstream: condition/client/CheckIdTokenAuthTimeIsRecentIfPresent.java */
+export function checkIdTokenAuthTimeIsRecentIfPresent(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("CheckIdTokenAuthTimeIsRecentIfPresent", ...requirements);
+	if (!Object.hasOwn(idToken.claims, "auth_time")) {
+		c.log("auth_time cannot be checked as it is missing from the id_token", { id_token: idToken.claims });
+		return;
+	}
+	const authTime = Math.trunc(Number(idToken.claims["auth_time"]));
+	// 5 minute allowable skew for testing
+	if (Date.now() - TIME_SKEW_MILLIS - 1000 > authTime * 1000) {
+		c.failure("id_token auth_time is older than 1 second (allowing 5 minutes skews)", {
+			auth_time: new Date(authTime * 1000),
+			now: new Date(),
+		});
+	}
+	// ValidateIdToken already checked if auth_time is in the future
+	c.success("auth_time in id_token is recent", { auth_time: new Date(authTime * 1000), now: new Date() });
+}
+
+/** upstream: condition/client/ValidateIdTokenACRClaimAgainstAcrValuesRequest.java */
+export function validateIdTokenACRClaimAgainstAcrValuesRequest(
+	idToken: ParsedJwt,
+	request: Pick<AuthorizationRequest, "params">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateIdTokenACRClaimAgainstAcrValuesRequest", ...requirements);
+	const idTokenAcr = claim(idToken, "acr");
+	const requestedAcrValues = request.params["acr_values"];
+	if (requestedAcrValues == null) {
+		c.failure(
+			"authorization endpoint request did not contain acr_values; this is a problem with the conformance suite",
+		);
+	}
+	if (idTokenAcr == null) {
+		c.failure(
+			"An acr value was requested using acr_values, so the server 'SHOULD' return an acr claim, but it did not.",
+			{
+				request: request.params,
+				id_token: idToken,
+			},
+		);
+	}
+	if (typeof idTokenAcr !== "string") {
+		c.failure("acr value in id_token must be a string", { id_token: idToken });
+	}
+	const requestedValues = String(requestedAcrValues).split(" ");
+	if (requestedValues.includes(idTokenAcr)) {
+		c.success("id_token acr claim contains one of the requested values", {
+			requested_values: requestedValues,
+			id_token_acr: idTokenAcr,
+		});
+		return;
+	}
+	c.failure("acr value in id_token is not (one of the) requested values", {
+		requested_values: requestedValues,
+		id_token_acr: idTokenAcr,
+	});
+}
+
+/**
+ * The id_token was signed with the algorithm the client registered for (id_token_signed_response_alg).
+ *
+ * upstream: condition/client/CheckIdTokenSignatureAlgorithm.java (AbstractCheckIdTokenSignatureAlgorithm)
+ */
+export function checkIdTokenSignatureAlgorithm(
+	idToken: ParsedJwt,
+	registrationRequest: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckIdTokenSignatureAlgorithm", ...requirements);
+	const requestedAlg = registrationRequest["id_token_signed_response_alg"];
+	if (typeof requestedAlg !== "string" || requestedAlg === "") {
+		c.failure("id_token_signed_response_alg not found in dynamic registration request", {
+			dynamic_registration_request: registrationRequest,
+		});
+	}
+	const alg = idToken.header["alg"];
+	if (typeof alg !== "string" || alg === "") {
+		c.failure("alg not present in ID token header", { header: idToken.header });
+	}
+	if (alg !== requestedAlg) {
+		c.failure('ID token signature algorithm is not "' + requestedAlg + '"', { alg });
+	}
+	c.success('ID token was signed with "' + requestedAlg + '" as expected');
+}
+
+/**
+ * The claims of an id_token from a refresh token response against the original id_token (OIDCC-12.2): iss, sub, aud
+ * and azp the same, auth_time (when present) the original, iat different.
+ *
+ * upstream: condition/client/CompareIdTokenClaims.java
+ */
+export function compareIdTokenClaims(
+	firstIdToken: ParsedJwt,
+	secondIdToken: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CompareIdTokenClaims", ...requirements);
+	const first = firstIdToken.claims;
+	const second = secondIdToken.claims;
+	const valuesForLog: Record<string, unknown> = {};
+
+	for (const claimName of ["iss", "sub"]) {
+		if (!hasClaim(first, claimName)) {
+			c.failure("Initial id token does not contain a " + claimName + " claim", { claimName });
+		}
+		if (!hasClaim(second, claimName)) {
+			c.failure("Second id token does not contain a " + claimName + " claim", { claimName });
+		}
+		if (first[claimName] !== second[claimName]) {
+			c.failure("Claim values are not the same", { claim1: first[claimName], claim2: second[claimName] });
+		}
+		valuesForLog[claimName] = {
+			first: first[claimName],
+			second: second[claimName],
+			note: "Values are expected to be equal",
+		};
+	}
+
+	// its iat Claim MUST represent the time that the new ID Token is issued
+	if (!hasClaim(first, "iat")) {
+		c.failure("Initial id token does not contain an iat claim", { claimName: "iat" });
+	}
+	if (!hasClaim(second, "iat")) {
+		c.failure("Second id token does not contain an iat claim", { claimName: "iat" });
+	}
+	if (first["iat"] === second["iat"]) {
+		c.failure(
+			"iat for the second id token MUST represent the time that the new ID Token is issued, cannot be the same as the initial id token",
+			{ "First iat": first["iat"], "Second iat": second["iat"] },
+		);
+	}
+	valuesForLog["iat"] = { first: first["iat"], second: second["iat"], note: "Values are expected to be different" };
+
+	if (!hasClaim(first, "aud")) {
+		c.failure("Initial id token does not contain an aud claim", { claimName: "aud" });
+	}
+	if (!hasClaim(second, "aud")) {
+		c.failure("Second id token does not contain an aud claim", { claimName: "aud" });
+	}
+	const audMismatch =
+		"aud Claim Value MUST be the same as in the ID Token issued when the original authentication occurred";
+	if (Array.isArray(first["aud"])) {
+		const claim1 = first["aud"] as string[];
+		const claim2 = second["aud"] as string[];
+		const set1 = new Set(claim1);
+		const set2 = new Set(claim2);
+		if (set1.size !== set2.size || [...set1].some((a) => !set2.has(a))) {
+			c.failure(audMismatch, { "First aud": claim1, "Second aud": claim2 });
+		}
+		valuesForLog["aud"] = { first: claim1, second: claim2, note: "Values are expected to be equal" };
+	} else {
+		if (first["aud"] !== second["aud"]) {
+			c.failure(audMismatch, { "First aud": first["aud"], "Second aud": second["aud"] });
+		}
+		valuesForLog["aud"] = { first: first["aud"], second: second["aud"], note: "Values are expected to be equal" };
+	}
+
+	// if the ID Token contains an auth_time Claim, its value MUST represent the time of the original authentication
+	// UPSTREAM: nothing is checked when only the first id token has an auth_time
+	if (hasClaim(second, "auth_time")) {
+		const claim1 = first["auth_time"] ?? null;
+		const claim2 = second["auth_time"] ?? null;
+		if (claim2 !== claim1) {
+			c.failure("auth_time claims are not the same", { claim1, claim2 });
+		}
+		valuesForLog["auth_time"] = { first: claim1, second: claim2, note: "Values are expected to be equal" };
+	}
+
+	// its azp Claim Value MUST be the same as in the ID Token issued when the original authentication occurred;
+	// if no azp Claim was present in the original ID Token, one MUST NOT be present in the new ID Token
+	if (!hasClaim(first, "azp") && hasClaim(second, "azp")) {
+		c.failure("Second id token cannot contain an azp claim because the initial id token does not have an azp claim");
+	}
+	if (!hasClaim(first, "azp") && !hasClaim(second, "azp")) {
+		valuesForLog["azp"] = "Id tokens do not contain azp claims";
+	} else {
+		const claim1 = first["azp"] ?? null;
+		const claim2 = second["azp"] ?? null;
+		if (claim1 !== claim2) {
+			c.failure("azp claims are not the same", { claim1, claim2 });
+		}
+		valuesForLog["azp"] = { first: claim1, second: claim2, note: "Values are expected to be equal" };
+	}
+
+	c.success("Validated id token claims successfully", valuesForLog);
+}
+
+function hasClaim(claims: Record<string, unknown>, name: string): boolean {
+	return Object.hasOwn(claims, name);
+}

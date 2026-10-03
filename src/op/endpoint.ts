@@ -148,3 +148,19 @@ export function validateErrorUri(
 export function ensureHttpStatusCodeIs400(res: EndpointResponse, ...requirements: string[]): void {
 	ensureHttpStatusCode("EnsureHttpStatusCodeIs400", res, 400, ...requirements);
 }
+
+/** upstream: condition/client/EnsureHttpStatusCodeIs4xx.java */
+export function ensureHttpStatusCodeIs4xx(res: EndpointResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureHttpStatusCodeIs4xx", ...requirements);
+	if (res.status == null) {
+		c.failure("Http status can not be null.");
+	}
+	if (res.status >= 400 && res.status <= 499) {
+		c.success(res.endpoint_name + " endpoint http status code was " + res.status);
+		return;
+	}
+	c.failure(res.endpoint_name + " endpoint returned a different http status than expected", {
+		actual: res.status,
+		expected: "400 to 499",
+	});
+}

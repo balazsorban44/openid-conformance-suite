@@ -499,3 +499,126 @@ export function checkDiscEndpointFrontchannelLogoutSessionSupported(
 		true,
 	);
 }
+
+/**
+ * 'none' is a signing algorithm the OP supports for id_tokens (OIDCC-3.1.3.7 / OP-IDToken-none); a failure means the
+ * module is skipped. Returns true when it is.
+ *
+ * upstream: condition/client/OIDCCCheckIdTokenSigningAlgValuesSupportedAlgNone.java
+ */
+export function oidccCheckIdTokenSigningAlgValuesSupportedAlgNone(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): true {
+	const c: Condition = condition("OIDCCCheckIdTokenSigningAlgValuesSupportedAlgNone", ...requirements);
+	const supported = metadata["id_token_signing_alg_values_supported"];
+	let errorMessage: string | null = null;
+	if (supported == null) {
+		errorMessage = "'id_token_signing_alg_values_supported' is null";
+	} else if (!Array.isArray(supported)) {
+		errorMessage = "'id_token_signing_alg_values_supported' is not a json array";
+	} else if (!(supported as string[]).includes("none")) {
+		errorMessage = "'id_token_signing_alg_values_supported' doesn't contain 'none' algorithm'";
+	}
+	if (errorMessage != null) {
+		c.failure(errorMessage, { id_token_signing_alg_values_supported: supported ?? null });
+	}
+	c.success("'id_token_signing_alg_values_supported' contain 'none' algorithm", {
+		id_token_signing_alg_values_supported: supported,
+	});
+	return true;
+}
+
+/** upstream: condition/client/CheckDiscEndpointRequestParameterSupported.java */
+export function checkDiscEndpointRequestParameterSupported(metadata: ServerMetadata, ...requirements: string[]): void {
+	validateJsonBoolean(
+		condition("CheckDiscEndpointRequestParameterSupported", ...requirements),
+		metadata,
+		"request_parameter_supported",
+		false,
+		true,
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointRequestUriParameterSupported.java */
+export function checkDiscEndpointRequestUriParameterSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonBoolean(
+		condition("CheckDiscEndpointRequestUriParameterSupported", ...requirements),
+		metadata,
+		"request_uri_parameter_supported",
+		true,
+		true,
+	);
+}
+
+/**
+ * Why a module that sends an unsigned (alg=none) request object is skipped: the OP lists
+ * request_object_signing_alg_values_supported without "none". Null when it should run.
+ *
+ * upstream: AbstractOIDCCServerTest.skipTestIfNoneUnsupported
+ */
+export function noneRequestObjectSigningAlgUnsupported(metadata: ServerMetadata): string | null {
+	const supported = metadata["request_object_signing_alg_values_supported"];
+	if (Array.isArray(supported) && !supported.includes("none")) {
+		return "'none' is not listed in request_object_signing_alg_values_supported - assuming it is not supported.";
+	}
+	return null;
+}
+
+/** upstream: condition/client/EnsureServerConfigurationSupportsRefreshToken.java */
+export function ensureServerConfigurationSupportsRefreshToken(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureServerConfigurationSupportsRefreshToken", ...requirements);
+	const supportedGrantTypes = metadata["grant_types_supported"];
+	if (supportedGrantTypes == null) {
+		// Null implies default ["authorization_code", "implicit"]
+		c.failure(
+			"The server issued a refresh token but does not claim to support this grant type (grant_types_supported in not present in the discovery document)",
+		);
+	}
+	if (!Array.isArray(supportedGrantTypes)) {
+		c.failure("supported_grant_types is present in the discovery document but is not an array");
+	}
+	if (supportedGrantTypes.includes("refresh_token")) {
+		c.success("The server configuration indicates support for refresh tokens", {
+			supported_grant_types: supportedGrantTypes,
+		});
+		return;
+	}
+	c.failure("The server issued a refresh token but does not claim to support this grant type", {
+		supported_grant_types: supportedGrantTypes,
+	});
+}
+
+/** upstream: condition/client/EnsureServerConfigurationDoesNotSupportRefreshToken.java */
+export function ensureServerConfigurationDoesNotSupportRefreshToken(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureServerConfigurationDoesNotSupportRefreshToken", ...requirements);
+	const supportedGrantTypes = metadata["grant_types_supported"];
+	if (supportedGrantTypes == null) {
+		// Null implies default ["authorization_code", "implicit"]
+		c.success(
+			"The server did not issue a refresh token and does not claim to support this grant type (grant_types_supported in not present in the discovery document)",
+		);
+		return;
+	}
+	if (!Array.isArray(supportedGrantTypes)) {
+		c.failure("supported_grant_types is present in the discovery document but is not an array");
+	}
+	if (supportedGrantTypes.includes("refresh_token")) {
+		c.failure(
+			"The server supports refresh tokens, but did not issue one. This is acceptable if the server has a policy of issuing refresh tokens to some clients, but not to openid clients.",
+			{ supported_grant_types: supportedGrantTypes },
+		);
+	}
+	c.success("The server did not issue a refresh token, and does not claim to support this grant type", {
+		supported_grant_types: supportedGrantTypes,
+	});
+}

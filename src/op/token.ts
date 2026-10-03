@@ -597,3 +597,17 @@ export function serverAllowedReusingAuthorizationCode(): never {
 		"Server has incorrectly allowed a second use of an authorization code; an authorization code is expected to be single use.",
 	);
 }
+
+/** upstream: condition/client/AddCodeVerifierToTokenEndpointRequest.java */
+export function addCodeVerifierToTokenEndpointRequest(
+	req: TokenRequest,
+	codeVerifier: string,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddCodeVerifierToTokenEndpointRequest", ...requirements);
+	if (!codeVerifier) {
+		c.failure("Couldn't find code_verifier value");
+	}
+	req.form["code_verifier"] = codeVerifier;
+	c.log({ ...req.form });
+}

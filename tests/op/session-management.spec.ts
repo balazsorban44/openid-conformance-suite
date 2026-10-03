@@ -47,9 +47,10 @@ test.describe(PLAN, () => {
 			configureClient,
 		}) => {
 			const postLogoutRedirectUri = logout.createPostLogoutRedirectUri(op.baseUrl, "OIDCRIL-2", "OIDCRIL-3");
-			const client = await configureClient((request) =>
-				logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1"),
-			);
+			const client = await configureClient({
+				customize: (request) =>
+					logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1"),
+			});
 			const userinfoUrl = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
 			discovery.checkDiscCheckSessionIframe(op.metadata, "OIDCSM-3.3");
 			const { response, tokens } = await logout.performAuthorizationFlow(op, client, userinfoUrl);

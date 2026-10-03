@@ -8,12 +8,18 @@
  */
 import * as authz from "../../src/op/authorization.ts";
 import * as discovery from "../../src/op/discovery.ts";
-import { ensureContentTypeJson, ensureHttpStatusCodeIs200 } from "../../src/op/endpoint.ts";
+import { ensureContentTypeJson, ensureHttpStatusCodeIs200, ensureHttpStatusCodeIs4xx } from "../../src/op/endpoint.ts";
 import * as idToken from "../../src/op/id-token.ts";
+import type { Op } from "../../src/op/op.ts";
+import * as refresh from "../../src/op/refresh-token.ts";
 import * as registration from "../../src/op/registration.ts";
+import type { ClientSetup, RegisteredClient } from "../../src/op/registration.ts";
+import * as requestObject from "../../src/op/request-object.ts";
 import * as token from "../../src/op/token.ts";
 import * as userinfo from "../../src/op/userinfo.ts";
-import { block, soft } from "../../src/suite/conditions.ts";
+import { block, logTestSkipped, soft } from "../../src/suite/conditions.ts";
+import type { ParsedJwt } from "../../src/suite/jose.ts";
+import { waitFor2Seconds, waitFor30Seconds, waitForOneSecond } from "../../src/suite/wait.ts";
 import { test } from "../fixtures.ts";
 
 test.describe("oidcc-basic-certification-test-plan", () => {
@@ -752,4 +758,677 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 		soft(() => idToken.checkIdTokenAuthTimeClaimsSameIfPresent(first.idToken, second.idToken, "OIDCC-2"));
 		soft(() => idToken.checkIdTokenSubConsistentForSecondAuthorization(first.idToken, second.idToken, "OIDCC-2"));
 	});
+
+	// upstream: openid/OIDCCPromptLogin.java (OP-prompt-login)
+	test("oidcc-prompt-login: a second request with prompt=login makes the OP ask the user to log in again, with a later auth_time", async ({
+		op,
+		client,
+	}) => {
+		const firstRequest = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client),
+		);
+		const firstResponse = await authz.authorize(op, firstRequest);
+		const first = await completeCodeFlow(op, client, firstRequest, firstResponse);
+
+		const { request, placeholder } = await block(
+			"Second authorization: Make request to authorization endpoint",
+			async () => {
+				// make sure the auth definitely happens at least 1 second after the original one, so auth_time will be different
+				await waitForOneSecond();
+				return {
+					request: authz.createAuthorizationRequest(op, client.client, {
+						steps: (params) =>
+							authz.addPromptLoginToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+					}),
+					// asking the user for a screenshot of the second login seems a little pointless as there's no way anyone
+					// can verify it's from the second login, not the first
+					placeholder: authz.expectSecondLoginPage("OIDCC-3.1.2.1"),
+				};
+			},
+		);
+		const response = await authz.authorizeWithPlaceholder(op, request, placeholder);
+		const second = await completeCodeFlow(op, client, request, response, { prefix: "Second authorization: " });
+
+		soft(() => idToken.checkSecondIdTokenAuthTimeIsLaterIfPresent(first.idToken, second.idToken, "OIDCC-2"));
+	});
+
+	// upstream: openid/OIDCCPromptNoneNotLoggedIn.java (OP-prompt-none-NotLoggedIn)
+	test("oidcc-prompt-none-not-logged-in: prompt=none without a session is rejected with an error that required a user interface", async ({
+		op,
+		client,
+	}) => {
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				// use a longer state value to check OP doesn't corrupt it in the error response
+				stateLength: 128,
+				steps: (params) => authz.addPromptNoneToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+			}),
+		);
+		const response = await authz.authorize(op, request);
+
+		await block("Verify authorization endpoint response", () => {
+			authz.checkCallbackLocation(request, response);
+			authz.checkAuthorizationErrorResponse(op, request, response);
+			soft(() => authz.checkErrorFromAuthorizationEndpointIsOneThatRequiredAUserInterface(response, "OIDCC-3.1.2.6"));
+		});
+	});
+
+	// upstream: openid/OIDCCPromptNoneLoggedIn.java (OP-prompt-none-LoggedIn)
+	test("oidcc-prompt-none-logged-in: a second request with prompt=none succeeds without a login, with the same sub and auth_time", async ({
+		op,
+		client,
+	}) => {
+		const firstRequest = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client),
+		);
+		const firstResponse = await authz.authorize(op, firstRequest);
+		const first = await completeCodeFlow(op, client, firstRequest, firstResponse);
+
+		const request = await block("Second authorization: Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				steps: (params) => authz.addPromptNoneToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+			}),
+		);
+		const response = await authz.authorize(op, request);
+		const second = await completeCodeFlow(op, client, request, response, { prefix: "Second authorization: " });
+
+		// these two checks are equivalent to same-authn in the python suite
+		soft(() => idToken.checkIdTokenAuthTimeClaimsSameIfPresent(first.idToken, second.idToken, "OIDCC-2"));
+		soft(() => idToken.checkIdTokenSubConsistentForSecondAuthorization(first.idToken, second.idToken, "OIDCC-2"));
+	});
+
+	// upstream: openid/OIDCCMaxAge1.java (OP-Req-max_age=1)
+	test("oidcc-max-age-1: a second request with max_age=1 after 2 seconds makes the OP ask for a login again and return a later auth_time", async ({
+		op,
+		client,
+	}) => {
+		const firstRequest = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client),
+		);
+		const firstResponse = await authz.authorize(op, firstRequest);
+		const first = await completeCodeFlow(op, client, firstRequest, firstResponse);
+
+		const { request, placeholder } = await block(
+			"Second authorization: Make request to authorization endpoint",
+			async () => {
+				// we're sending max_age=1, so after 1 second the previous authentication is just still valid - so wait for
+				// 2 seconds
+				await waitFor2Seconds();
+				return {
+					request: authz.createAuthorizationRequest(op, client.client, {
+						steps: (params) => authz.addMaxAge1ToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+					}),
+					placeholder: authz.expectSecondLoginPage("OIDCC-3.1.2.1"),
+				};
+			},
+		);
+		const response = await authz.authorizeWithPlaceholder(op, request, placeholder);
+		await completeCodeFlow(op, client, request, response, {
+			prefix: "Second authorization: ",
+			idTokenChecks: (second) => {
+				soft(() => idToken.checkIdTokenAuthTimeClaimPresentDueToMaxAge(second, "OIDCC-2", "OIDCC-3.1.2.1"));
+				soft(() => idToken.checkSecondIdTokenAuthTimeIsLaterIfPresent(first.idToken, second, "OIDCC-2"));
+				soft(() => idToken.checkIdTokenAuthTimeIsRecentIfPresent(second, "OIDCC-2"));
+			},
+		});
+	});
+
+	// upstream: openid/OIDCCMaxAge10000.java (OP-Req-max_age=10000)
+	test("oidcc-max-age-10000: a second request with max_age=10000 succeeds without a login, with the same sub and auth_time", async ({
+		op,
+		client,
+	}) => {
+		// This differs from the python test, where max_age was not included and hence the test could not check that
+		// auth_time was consistent as many OPs (correctly) won't return auth_time unless max_age or an essential
+		// claim for auth_time is present, so max_age is the only choice to force auth_time to be returned.
+		const firstRequest = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				steps: (params) => authz.addMaxAge15000ToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+			}),
+		);
+		const firstResponse = await authz.authorize(op, firstRequest);
+		const first = await completeCodeFlow(op, client, firstRequest, firstResponse);
+		soft(() =>
+			idToken.checkIdTokenAuthTimeClaimPresentDueToMaxAge(first.idToken, "OIDCC-2", "OIDCC-3.1.2.1", "OIDCC-15.1"),
+		);
+
+		const request = await block("Second authorization: Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				steps: (params) => authz.addMaxAge10000ToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+			}),
+		);
+		const response = await authz.authorize(op, request);
+		const second = await completeCodeFlow(op, client, request, response, { prefix: "Second authorization: " });
+
+		// max_age is requested second time, so auth_time must be present
+		soft(() =>
+			idToken.checkIdTokenAuthTimeClaimPresentDueToMaxAge(second.idToken, "OIDCC-2", "OIDCC-3.1.2.1", "OIDCC-15.1"),
+		);
+		soft(() => idToken.checkIdTokenAuthTimeClaimsSameIfPresent(first.idToken, second.idToken, "OIDCC-2"));
+		soft(() => idToken.checkIdTokenSubConsistentForSecondAuthorization(first.idToken, second.idToken, "OIDCC-2"));
+	});
+
+	// upstream: openid/OIDCCEnsurePostRequestSucceeds.java
+	test("oidcc-ensure-post-request-succeeds: an authorization request sent as POST completes with a redirect within 30 seconds", async ({
+		op,
+		client,
+	}) => {
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client),
+		);
+		const response = await authz.authorizeWithinSeconds(op, request, 30, { method: "POST" });
+		if (response == null) {
+			// the OP did not call the redirect_uri: a warning, and the test is over
+			soft(() => authz.expectRedirectUriHasBeenCalled(response, "OIDCC-3.1.2.1"), "warning");
+			return;
+		}
+		await completeCodeFlow(op, client, request, response);
+	});
+
+	// upstream: openid/OIDCCEnsureRegisteredRedirectUri.java (OP-redirect_uri-NotReg)
+	test("oidcc-ensure-registered-redirect-uri: a redirect_uri that is not registered shows an error page and never redirects", async ({
+		op,
+		client,
+	}) => {
+		// a random redirect URI below the suite's callback, which cannot have been registered
+		const { redirectUri, badRedirectPath } = authz.createBadRedirectUriByAppending(op.baseUrl);
+		let redirectedToBadUri = false;
+		op.server.on("callback/" + badRedirectPath, () => {
+			redirectedToBadUri = true;
+			return new Response(null, { status: 204 });
+		});
+
+		const { request, placeholder } = await block("Make request to authorization endpoint", () => ({
+			request: authz.createAuthorizationRequest({ ...op, redirectUri }, client.client),
+			placeholder: authz.expectRedirectUriErrorPage("OIDCC-3.1.2.1"),
+		}));
+		const response = await authz.authorizeExpectingErrorPageOrRedirect(op, request, placeholder);
+
+		if (redirectedToBadUri) {
+			throw new Error(
+				"The authorization server redirected the user to the requested but randomised/unregistered redirect uri. This must not happen as the provided redirect uri could not have been registered.",
+			);
+		}
+		if (response != null) {
+			throw new Error(
+				"The authorization server called the registered redirect uri. This should not have happened as the client provided a bad redirect_uri in the request.",
+			);
+		}
+		// the OP showed an error page: the screenshot in the log is for review (result REVIEW), as upstream
+	});
+
+	// upstream: openid/OIDCCEnsureRequestWithAcrValuesSucceeds.java (OP-Req-acr_values)
+	test("oidcc-ensure-request-with-acr-values-succeeds: a request with acr_values succeeds, and the id_token should carry one of them", async ({
+		op,
+		client,
+	}) => {
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				steps: (params) =>
+					authz.oidccAddAcrValuesToAuthorizationEndpointRequest(op, params, "OIDCC-3.1.2.1", "OIDCC-15.1"),
+			}),
+		);
+		const response = await authz.authorize(op, request);
+		await completeCodeFlow(op, client, request, response, {
+			// just a warning; the minimum required behaviour in the spec is not to fail: "OPs MUST support requests for
+			// specific Authentication Context Class Reference values via the acr_values parameter. (Note that the minimum
+			// level of support required for this parameter is simply to have its use not result in an error.)"
+			idTokenChecks: (tokenIdToken) =>
+				soft(
+					() =>
+						idToken.validateIdTokenACRClaimAgainstAcrValuesRequest(
+							tokenIdToken,
+							request,
+							"OIDCC-3.1.2.1",
+							"OIDCC-15.1",
+						),
+					"warning",
+				),
+		});
+	});
+
+	// upstream: openid/OIDCCEnsureRequestWithUnknownParameterSucceeds.java (OP-Req-NotUnderstood)
+	test("oidcc-ensure-request-with-unknown-parameter-succeeds: a request with an unknown parameter succeeds, the parameter ignored", async ({
+		op,
+		client,
+	}) => {
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				steps: (params) => authz.addExtraFoobarToAuthorizationEndpointRequest(params, "RFC6749-3.1"),
+			}),
+		);
+		const response = await authz.authorize(op, request);
+		await completeCodeFlow(op, client, request, response);
+	});
+
+	// upstream: openid/OIDCCEnsureRequestWithValidPkceSucceeds.java
+	test("oidcc-ensure-request-with-valid-pkce-succeeds: a request with a valid PKCE challenge succeeds, whether or not the OP supports PKCE", async ({
+		op,
+		client,
+	}) => {
+		let codeVerifier = "";
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				steps: (params) => {
+					codeVerifier = authz.setupPkceAndAddToAuthorizationRequest(params);
+				},
+			}),
+		);
+		const response = await authz.authorize(op, request);
+		await completeCodeFlow(op, client, request, response, {
+			tokenRequest: (tokenRequest) =>
+				token.addCodeVerifierToTokenEndpointRequest(tokenRequest, codeVerifier, "RFC7636-4.5"),
+		});
+	});
+
+	// upstream: openid/OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow.java (OP-nonce-NoReq-code)
+	test("oidcc-ensure-request-without-nonce-succeeds-for-code-flow: a code flow request without nonce returns an authorization code", async ({
+		op,
+		client,
+	}) => {
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, { omit: { nonce: "NOT adding nonce to request object" } }),
+		);
+		const response = await authz.authorize(op, request);
+
+		await block("Verify authorization endpoint response", () => {
+			authz.checkAuthorizationResponse(op, request, response);
+			authz.extractAuthorizationCodeFromAuthorizationResponse(response);
+		});
+	});
+
+	// upstream: openid/OIDCCAuthCodeReuseAfter30Seconds.java (OP-OAuth-2nd-30s)
+	test("oidcc-codereuse-30seconds: a second token request with the same code 30 seconds later is rejected with invalid_grant, and the access token is revoked", async ({
+		op,
+		client,
+	}) => {
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client),
+		);
+		const response = await authz.authorize(op, request);
+
+		const { tokenRequest, tokens } = await block("Verify authorization endpoint response", async () => {
+			authz.checkAuthorizationResponse(op, request, response);
+			const code = authz.extractAuthorizationCodeFromAuthorizationResponse(response);
+			const codeRequest = await token.createAuthorizationCodeRequest(op, client, code);
+			const result = await token.requestAuthorizationCode(op, client, codeRequest);
+			await idToken.performStandardIdTokenChecks(op, client.client, request, result.idToken);
+			return { tokenRequest: codeRequest, tokens: result };
+		});
+
+		await block("Userinfo endpoint tests", async () => {
+			const url = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
+			const res = await userinfo.callProtectedResource(url, tokens.accessToken);
+			soft(() => ensureHttpStatusCodeIs200(res));
+		});
+
+		// the real 30 second wait, as upstream
+		await waitFor30Seconds();
+		await block("Attempting reuse of authorization code", async () => {
+			const second = await token.callTokenEndpoint(op, tokenRequest);
+			// UPSTREAM: unlike oidcc-codereuse, a 200 response is not accepted with a warning here
+			token.checkInvalidGrantErrorResponse(second);
+		});
+
+		await block(
+			"Testing if access token was revoked after authorization code reuse (the AS 'should' have revoked the access token)",
+			async () => {
+				const url = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
+				const res = await userinfo.callProtectedResource(url, tokens.accessToken, { requirements: ["RFC6749-4.1.2"] });
+				soft(() => ensureHttpStatusCodeIs4xx(res, "RFC6749-4.1.2", "RFC6750-3.1"), "warning");
+			},
+		);
+	});
+
+	test.describe(() => {
+		// upstream: the module runs with the client_secret_post variant and, for static clients, the `client_secret_post`
+		// client of the configuration
+		test.use({
+			plan: {
+				name: "oidcc-basic-certification-test-plan",
+				variant: { response_type: "code", client_auth_type: "client_secret_post", response_mode: "default" },
+			},
+		});
+
+		// upstream: openid/OIDCCServerTestClientSecretPost.java (OP-ClientAuth-SecretPost-Dynamic)
+		test("oidcc-server-client-secret-post: the code flow works with client_secret_post client authentication", async ({
+			op,
+			configureClient,
+		}) => {
+			const client = await configureClient({ staticConfigKey: "client_secret_post" });
+			const request = await block("Make request to authorization endpoint", () =>
+				authz.createAuthorizationRequest(op, client.client),
+			);
+			const response = await authz.authorize(op, request);
+			await completeCodeFlow(op, client, request, response);
+		});
+	});
+
+	test.describe(() => {
+		// upstream @VariantNotApplicable: the module registers a client with id_token_signed_response_alg=none
+		test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients");
+
+		// upstream: openid/OIDCCIdTokenUnsigned.java (OP-IDToken-none)
+		test("oidcc-idtoken-unsigned: an id_token requested without a signature (alg=none) is returned with alg none", async ({
+			op,
+			configureClient,
+		}) => {
+			if (op.variant.server_metadata === "discovery") {
+				const supported = soft(() => discovery.oidccCheckIdTokenSigningAlgValuesSupportedAlgNone(op.metadata), "info");
+				if (supported === undefined) {
+					// skipped before any client is registered
+					skipTest(
+						"The discovery endpoint 'id_token_signing_alg_values_supported' doesn't support 'none' algorithm; this cannot be tested (which is acceptable for certification, servers are not required to support 'none'",
+					);
+				}
+			}
+			const client = await configureClient({
+				customize: registration.addIdTokenSigningAlgNoneToDynamicRegistrationRequest,
+			});
+			const request = await block("Make request to authorization endpoint", () =>
+				authz.createAuthorizationRequest(op, client.client),
+			);
+			const response = await authz.authorize(op, request);
+
+			const tokens = await block("Verify authorization endpoint response", async () => {
+				authz.checkAuthorizationResponse(op, request, response);
+				const code = authz.extractAuthorizationCodeFromAuthorizationResponse(response);
+				const result = await token.requestAuthorizationCode(
+					op,
+					client,
+					await token.createAuthorizationCodeRequest(op, client, code),
+				);
+				// the standard id_token checks (which verify the signature) do not apply to an unsigned id_token
+				soft(() =>
+					idToken.checkIdTokenSignatureAlgorithm(result.idToken, client.registrationRequest ?? {}, "OIDCC-3.1.3.7"),
+				);
+				return result;
+			});
+
+			await block("Userinfo endpoint tests", async () => {
+				const url = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
+				const res = await userinfo.callProtectedResource(url, tokens.accessToken);
+				soft(() => ensureHttpStatusCodeIs200(res));
+			});
+		});
+
+		// upstream: openid/OIDCCRequestUriUnsignedSupportedCorrectlyOrRejectedAsUnsupported.java (OP-request_uri-Unsigned)
+		test("oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported: an unsigned request object by request_uri is processed or rejected with request_uri_not_supported", async ({
+			op,
+			configureClient,
+		}) => {
+			// the request_uri is registered with the client, so it exists before the registration
+			const requestUri = requestObject.createRandomRequestUriWithFragment(op.baseUrl, "OIDCC-6.2");
+			const client = await configureClient({
+				customize: (registrationRequest) =>
+					registration.addRequestUriToDynamicRegistrationRequest(registrationRequest, requestUri.fullUrl),
+			});
+			// We deliberately skip the hard check for request_uri_parameter_supported here, as we check for a
+			// request_uri_not_supported error later.
+			skipIfNoneUnsupported(op);
+
+			const request = await block("Make request to authorization endpoint", () =>
+				authz.createAuthorizationRequest(op, client.client, {
+					buildRedirect: (_, params) => {
+						const claims = requestObject.convertAuthorizationEndpointRequestToRequestObject(params);
+						const requestObjectJwt = requestObject.serializeRequestObjectWithNullAlgorithm(claims);
+						// the OP fetches the request object from the suite
+						op.server.on(
+							requestUri.path,
+							() => new Response(requestObjectJwt, { status: 200, headers: { "content-type": "application/jwt" } }),
+						);
+						return requestObject.buildRequestObjectByReferenceRedirectToAuthorizationEndpoint(
+							op,
+							params,
+							claims,
+							requestUri,
+						);
+					},
+				}),
+			);
+			const response = await authz.authorize(op, request);
+
+			await completeCodeFlow(op, client, request, response, {
+				afterCallbackLocation: () => {
+					if (response.params["error"] === "request_uri_not_supported") {
+						// we don't check if state is correct here, as state was only passed inside the request object
+						// and hence we can't expect the OP to return it
+						skipTest(
+							"The 'request_uri_not_supported' error from the authorization endpoint indicates that it does not support request_uri (which is permitted behaviour), so request_uri cannot be tested.",
+						);
+					}
+					if (op.variant.server_metadata === "discovery") {
+						soft(() => discovery.checkDiscEndpointRequestUriParameterSupported(op.metadata), "warning");
+					}
+				},
+			});
+		});
+	});
+
+	// upstream: openid/OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported.java (OP-request-Unsigned)
+	test("oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported: an unsigned request object by value is processed or rejected with request_not_supported", async ({
+		op,
+		client,
+	}) => {
+		skipIfNoneUnsupported(op);
+
+		const request = await block("Make request to authorization endpoint", () =>
+			authz.createAuthorizationRequest(op, client.client, {
+				buildRedirect: (_, params) => {
+					const claims = requestObject.convertAuthorizationEndpointRequestToRequestObject(params);
+					const requestObjectJwt = requestObject.serializeRequestObjectWithNullAlgorithm(claims);
+					return requestObject.buildRequestObjectByValueRedirectToAuthorizationEndpoint(
+						op,
+						params,
+						claims,
+						requestObjectJwt,
+					);
+				},
+			}),
+		);
+		const response = await authz.authorize(op, request);
+
+		await completeCodeFlow(op, client, request, response, {
+			afterCallbackLocation: () => {
+				if (response.params["error"] === "request_not_supported") {
+					// we don't check if state is correct here, as state was only passed inside the request object and hence
+					// we can't expect the OP to return it
+					skipTest(
+						"The 'request_not_supported' error from the authorization endpoint indicates that it does not support request objects (which is permitted behaviour), so request objects cannot be tested.",
+					);
+				}
+				if (op.variant.server_metadata === "discovery") {
+					soft(() => discovery.checkDiscEndpointRequestParameterSupported(op.metadata), "warning");
+				}
+			},
+		});
+	});
+
+	// upstream: openid/OIDCCEnsureRequestObjectWithRedirectUri.java
+	test("oidcc-ensure-request-object-with-redirect-uri: the redirect_uri in the request object takes precedence over the invalid one in the request, or an error page is shown", async ({
+		op,
+		client,
+	}) => {
+		skipIfNoneUnsupported(op);
+
+		const { request, placeholder } = await block("Make request to authorization endpoint", () => {
+			const withInvalidRedirectUri = authz.createAuthorizationRequest(op, client.client, {
+				buildRedirect: (_, params) => {
+					const claims = requestObject.convertAuthorizationEndpointRequestToRequestObject(params);
+					// the request parameter now has an invalid redirect_uri, the request object keeps the valid one
+					authz.addInvalidRedirectUriToAuthorizationRequest(params, op.redirectUri, "OIDCC-6.1");
+					const requestObjectJwt = requestObject.serializeRequestObjectWithNullAlgorithm(claims);
+					return requestObject.buildRequestObjectByValueRedirectToAuthorizationEndpoint(
+						op,
+						params,
+						claims,
+						requestObjectJwt,
+					);
+				},
+			});
+			return { request: withInvalidRedirectUri, placeholder: authz.expectRedirectUriErrorPage("RFC6749-3.1.2") };
+		});
+		const response = await authz.authorizeExpectingErrorPageOrRedirect(op, request, placeholder);
+		if (response == null) {
+			// the OP showed an error page: the screenshot in the log is for review (result REVIEW), as upstream
+			return;
+		}
+
+		await completeCodeFlow(op, client, request, response, {
+			afterCallbackLocation: () => {
+				if (response.params["error"] === "request_not_supported") {
+					// this is unexpected as the redirect_uri outside the request object was invalid but we received a
+					// redirect to the correct redirect_uri
+					authz.ensureOPDoesNotUseDefaultRedirectUriInCaseOfInvalidRedirectUri();
+				}
+				if (op.variant.server_metadata === "discovery") {
+					soft(() => discovery.checkDiscEndpointRequestParameterSupported(op.metadata), "warning");
+				}
+			},
+		});
+	});
+
+	// upstream: openid/OIDCCRefreshToken.java
+	test("oidcc-refresh-token: a refresh token gives a new access token (and id_token) and is bound to the client it was issued to", async ({
+		op,
+		configureClient,
+	}) => {
+		const client = await configureClient(refreshTokenClientSetup);
+		const client2 = await configureClient({ ...refreshTokenClientSetup, configKey: "client2" });
+		await refreshTokenFlow(op, client, false);
+		const refreshToken = await refreshTokenFlow(op, client2, true);
+
+		// try client 2's refresh_token with client 1
+		await block("Attempting to use refresh_token issued to client 2 with client 1", () =>
+			refresh.refreshTokenRequestExpectingErrorSteps(op, client, refreshToken, { secondClient: false }),
+		);
+	});
 });
+
+/**
+ * The clients of oidcc-refresh-token: registered with the refresh_token grant, asking for offline_access.
+ *
+ * upstream: OIDCCRefreshToken.createDynamicClientRegistrationRequest / completeClientConfiguration
+ */
+const refreshTokenClientSetup: ClientSetup = {
+	customize: registration.addRefreshTokenGrantTypeToDynamicRegistrationRequest,
+	completeClientConfiguration: (op, client) => {
+		if (op.variant.server_metadata === "discovery") {
+			registration.setScopeInClientConfigurationToOpenIdOfflineAccessIfServerSupportsOfflineAccess(op.metadata, client);
+		} else {
+			// no discovery, so no idea if server supports offline_access scope or not - request it anyway, servers
+			// 'should' ignore unknown scope values
+			registration.setScopeInClientConfigurationToOpenIdOfflineAccess(client);
+		}
+	},
+};
+
+/** Upstream's fireTestSkipped(reason): the SKIPPED entry in the log, and the test is skipped. */
+function skipTest(reason: string): void {
+	logTestSkipped(reason);
+	test.skip(true, reason);
+}
+
+/** upstream: AbstractOIDCCServerTest.skipTestIfNoneUnsupported (modules that send an unsigned request object) */
+function skipIfNoneUnsupported(op: Op): void {
+	const reason = discovery.noneRequestObjectSigningAlgUnsupported(op.metadata);
+	if (reason != null) {
+		skipTest(reason);
+	}
+}
+
+interface CodeFlowOptions {
+	/** The prefix of the block names ("Second authorization: "), upstream's currentClientString() */
+	prefix?: string;
+	/** What the module does between the callback location checks and the rest (onAuthorizationCallbackResponse) */
+	afterCallbackLocation?: () => void;
+	/** What the module adds to the token request (after the client authentication) */
+	tokenRequest?: (tokenRequest: token.TokenRequest) => void;
+	/** The module's own checks on the id_token, after the standard ones */
+	idTokenChecks?: (idToken: ParsedJwt) => void;
+}
+
+/**
+ * The code flow after the browser came back, as upstream's AbstractOIDCCServerTest runs it: the checks on the
+ * authorization response, the code exchange with the standard id_token checks, and the userinfo request.
+ *
+ * upstream: AbstractOIDCCServerTest.processCallback / performPostAuthorizationFlow / requestProtectedResource
+ */
+async function completeCodeFlow(
+	op: Op,
+	client: RegisteredClient,
+	request: authz.AuthorizationRequest,
+	response: authz.AuthorizationResponse,
+	opts: CodeFlowOptions = {},
+): Promise<token.Tokens> {
+	const prefix = opts.prefix ?? "";
+	const tokens = await block(prefix + "Verify authorization endpoint response", async () => {
+		authz.checkAuthorizationResponse(op, request, response, { afterCallbackLocation: opts.afterCallbackLocation });
+		const code = authz.extractAuthorizationCodeFromAuthorizationResponse(response);
+		const tokenRequest = await token.createAuthorizationCodeRequest(op, client, code);
+		opts.tokenRequest?.(tokenRequest);
+		const result = await token.requestAuthorizationCode(op, client, tokenRequest);
+		await idToken.performStandardIdTokenChecks(op, client.client, request, result.idToken);
+		opts.idTokenChecks?.(result.idToken);
+		return result;
+	});
+
+	await block(prefix + "Userinfo endpoint tests", async () => {
+		const url = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
+		const res = await userinfo.callProtectedResource(url, tokens.accessToken);
+		soft(() => ensureHttpStatusCodeIs200(res));
+	});
+	return tokens;
+}
+
+/**
+ * One client's pass through the refresh token module: authorize with offline_access (and prompt=consent), exchange
+ * the code, check the refresh token, use it, and call userinfo with the refreshed access token. Returns the
+ * client's latest refresh token.
+ *
+ * upstream: OIDCCRefreshToken (AbstractOIDCCMultipleClient.performAuthorizationFlow / performPostAuthorizationFlow)
+ */
+async function refreshTokenFlow(op: Op, client: RegisteredClient, secondClient: boolean): Promise<string> {
+	const prefix = secondClient ? "Second client: " : "";
+	const request = await block(prefix + "Make request to authorization endpoint", () =>
+		authz.createAuthorizationRequest(op, client.client, {
+			nonceLength: secondClient ? 43 : undefined,
+			steps: (params) =>
+				authz.addPromptConsentToAuthorizationEndpointRequestIfScopeContainsOfflineAccess(params, "OIDCC-11"),
+		}),
+	);
+	const response = await authz.authorize(op, request);
+
+	const { tokens, refreshToken } = await block(prefix + "Verify authorization endpoint response", async () => {
+		authz.checkAuthorizationResponse(op, request, response);
+		const code = authz.extractAuthorizationCodeFromAuthorizationResponse(response);
+		const result = await token.requestAuthorizationCode(
+			op,
+			client,
+			await token.createAuthorizationCodeRequest(op, client, code),
+		);
+		await idToken.performStandardIdTokenChecks(op, client.client, request, result.idToken);
+
+		const issued = soft(() => refresh.extractRefreshTokenFromTokenResponse(result.response), "info");
+		if (!issued) {
+			soft(() => discovery.ensureServerConfigurationDoesNotSupportRefreshToken(op.metadata, "OIDCD-3"), "warning");
+			skipTest("Refresh tokens cannot be tested. No refresh token was issued.");
+		}
+		if (op.variant.server_metadata === "discovery") {
+			soft(() => discovery.ensureServerConfigurationSupportsRefreshToken(op.metadata, "OIDCD-3"), "warning");
+		}
+		soft(() => refresh.ensureRefreshTokenContainsAllowedCharactersOnly(result.response, "RFC6749-A.17"));
+		return { tokens: result, refreshToken: issued as string };
+	});
+
+	const refreshed = await block(prefix + "Refresh Token Request", () =>
+		refresh.refreshTokenRequestSteps(op, client, refreshToken, tokens, { secondClient }),
+	);
+
+	await block(prefix + "Userinfo endpoint tests", async () => {
+		const url = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
+		const res = await userinfo.callProtectedResource(url, refreshed.accessToken);
+		soft(() => ensureHttpStatusCodeIs200(res));
+	});
+	return refreshed.refreshToken;
+}

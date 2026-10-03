@@ -30,9 +30,15 @@ import type { AccessToken } from "./token.ts";
 export async function callProtectedResource(
 	url: string,
 	accessToken: AccessToken,
-	opts: { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string | URLSearchParams } = {},
+	opts: {
+		method?: "GET" | "POST";
+		headers?: Record<string, string>;
+		body?: string | URLSearchParams;
+		/** the requirements the call site cites (upstream callAndStopOnFailure(CallProtectedResource, FAILURE, ...)) */
+		requirements?: string[];
+	} = {},
 ): Promise<EndpointResponse> {
-	const c: Condition = condition("CallProtectedResource");
+	const c: Condition = condition("CallProtectedResource", ...(opts.requirements ?? []));
 	if (!accessToken.value) {
 		c.failure("Access token not found");
 	}

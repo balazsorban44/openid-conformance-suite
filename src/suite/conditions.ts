@@ -181,3 +181,11 @@ export function logModule(fields: LogFields | string): void {
 	const ctx = currentContext();
 	ctx.log.log(ctx.testName, fields);
 }
+
+/**
+ * Upstream's fireTestSkipped(msg): logs the SKIPPED entry under the module's name. The test then calls
+ * `test.skip(true, reason)` (Playwright's own skip, which ends the test).
+ */
+export function logTestSkipped(reason: string): void {
+	logModule({ result: "SKIPPED", msg: "The test was skipped: " + reason });
+}

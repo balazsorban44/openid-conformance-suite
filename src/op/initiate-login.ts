@@ -2,9 +2,11 @@
  * Third-party-initiated login (OpenID Connect Core 4, Dynamic Client Registration 2): the client registers an
  * `initiate_login_uri`, which the OP must keep in the registration and the client configuration.
  *
- *   const client = await configureClient((request) => {
- *     initiateLoginUri = initiateLogin.createInitiateLoginUri(op.baseUrl, "OIDCC-4", "OIDCR-2");
- *     initiateLogin.addInitiateLoginUriToDynamicRegistrationRequest(request, initiateLoginUri, "OIDCC-4", "OIDCR-2");
+ *   const client = await configureClient({
+ *     customize: (request) => {
+ *       initiateLoginUri = initiateLogin.createInitiateLoginUri(op.baseUrl, "OIDCC-4", "OIDCR-2");
+ *       initiateLogin.addInitiateLoginUriToDynamicRegistrationRequest(request, initiateLoginUri, "OIDCC-4", "OIDCR-2");
+ *     },
  *   });
  *   soft(() => initiateLogin.validateInitiateLoginUriInRegistrationResponse(client.client, initiateLoginUri, "OIDCR-3.2"));
  */

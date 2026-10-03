@@ -9,6 +9,7 @@ import { generateRsaJwk, privateJwks, publicJwks, type Jwks } from "../suite/jos
 import { JWKUtil } from "../util/JWKUtil.ts";
 import { ParseException } from "../util/nimbus/errors.ts";
 import type { ServerMetadata } from "./discovery.ts";
+import type { Op } from "./op.ts";
 import { ensureContentTypeJson, ensureHttpStatusCodeIs201 } from "./endpoint.ts";
 import { checkDistinctKeyIdValueInClientJWKs } from "./jwks.ts";
 
@@ -41,11 +42,15 @@ export interface RegisteredClient {
 	keys: ClientKeys | null;
 	/** True when the suite registered the client (and must unregister it) */
 	dynamic: boolean;
+	/** The registration request the suite sent (upstream env "dynamic_registration_request"), for a dynamic client */
+	registrationRequest?: Record<string, unknown>;
 }
 
 /** upstream: condition/client/StoreOriginalClientConfiguration.java */
 export function storeOriginalClientConfiguration(config: TestConfig, key = "client"): Record<string, unknown> {
-	const c: Condition = condition("StoreOriginalClientConfiguration");
+	const c: Condition = condition(
+		key === "client2" ? "StoreOriginalClient2Configuration" : "StoreOriginalClientConfiguration",
+	);
 	const template = config[key];
 	if (template == null || typeof template !== "object" || Array.isArray(template)) {
 		c.log("No client details on configuration, created an empty original_client_config object.");
@@ -336,7 +341,7 @@ export async function registerClient(opts: {
 	const client = extractDynamicRegistrationResponse(response, "OIDCR-3.2");
 	soft(() => verifyClientManagementCredentials(client, "OIDCR-3.2"));
 	soft(() => verifyDynamicRegistrationResponseClientCredentials(client, "OIDCR-3.2"));
-	return { client, keys, dynamic: true };
+	return { client, keys, dynamic: true, registrationRequest };
 }
 
 /** upstream: condition/client/GetStaticClientConfiguration.java (GetStaticClient2Configuration for "client2") */
@@ -344,6 +349,14 @@ export function getStaticClientConfiguration(config: TestConfig, key = "client")
 	const name = key === "client2" ? "GetStaticClient2Configuration" : "GetStaticClientConfiguration";
 	const c: Condition = condition(name);
 	const client = config[key];
+	if (key === "client2") {
+		// upstream: condition/client/GetStaticClient2Configuration.java has its own messages
+		if (client == null || typeof client !== "object" || Array.isArray(client)) {
+			c.failure("Definition for client2 not present in supplied configuration");
+		}
+		c.success("Found a static second client object", client as Record<string, unknown>);
+		return structuredClone(client) as Client;
+	}
 	if (client == null || typeof client !== "object" || Array.isArray(client)) {
 		c.failure("As static client was selected, the test configuration must contain a client configuration");
 	}
@@ -500,20 +513,20 @@ export async function unregisterDynamicallyRegisteredClient(client: Client): Pro
 }
 
 /** upstream: condition/client/AbstractSetScopeInClientConfiguration.java */
-function setScopeInClientConfiguration(name: string, client: Client, scope: string): void {
+function setScopeInClientConfiguration(c: Condition, client: Client, scope: string, additionalLogMsg = ""): void {
 	client.scope = scope;
-	condition(name).log(`Set scope in client configuration to "${scope}"`, { scope });
+	c.log(`Set scope in client configuration to "${scope}"` + additionalLogMsg, { scope });
 }
 
 /** upstream: condition/client/SetScopeInClientConfigurationToOpenIdAddress.java */
 export function setScopeInClientConfigurationToOpenIdAddress(client: Client): void {
-	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdAddress", client, "openid address");
+	setScopeInClientConfiguration(condition("SetScopeInClientConfigurationToOpenIdAddress"), client, "openid address");
 }
 
 /** upstream: condition/client/SetScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile.java */
 export function setScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile(client: Client): void {
 	setScopeInClientConfiguration(
-		"SetScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile",
+		condition("SetScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile"),
 		client,
 		"openid email phone address profile",
 	);
@@ -521,17 +534,17 @@ export function setScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile(cl
 
 /** upstream: condition/client/SetScopeInClientConfigurationToOpenIdEmail.java */
 export function setScopeInClientConfigurationToOpenIdEmail(client: Client): void {
-	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdEmail", client, "openid email");
+	setScopeInClientConfiguration(condition("SetScopeInClientConfigurationToOpenIdEmail"), client, "openid email");
 }
 
 /** upstream: condition/client/SetScopeInClientConfigurationToOpenIdPhone.java */
 export function setScopeInClientConfigurationToOpenIdPhone(client: Client): void {
-	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdPhone", client, "openid phone");
+	setScopeInClientConfiguration(condition("SetScopeInClientConfigurationToOpenIdPhone"), client, "openid phone");
 }
 
 /** upstream: condition/client/SetScopeInClientConfigurationToOpenIdProfile.java */
 export function setScopeInClientConfigurationToOpenIdProfile(client: Client): void {
-	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdProfile", client, "openid profile");
+	setScopeInClientConfiguration(condition("SetScopeInClientConfigurationToOpenIdProfile"), client, "openid profile");
 }
 
 /**
@@ -677,4 +690,98 @@ export function generateJWKsFromClientSecret(client: Client): Jwks {
 	const jwks = privateJwks({ keys: [{ kty: "oct", use: "sig", alg, k: bytes.toString("base64url") }] });
 	c.success("Generated JWK Set from symmetric key", { client_jwks: jwks });
 	return jwks;
+}
+
+/**
+ * How a test module sets up its client (the `configureClient(setup)` fixture; the `client` / `client2` fixtures use the
+ * defaults). upstream: the overrides of AbstractOIDCCServerTest.configureClient / createDynamicClientRegistrationRequest /
+ * completeClientConfiguration, and AbstractOIDCCMultipleClient's second client.
+ */
+export interface ClientSetup {
+	/**
+	 * Which client of the configuration: "client2" is the second client of the multiple client modules (its
+	 * unregistration block is prefixed "Second client: "). Default "client".
+	 */
+	configKey?: "client" | "client2";
+	/** The configuration key of a static client (default `configKey`, e.g. "client_secret_post") */
+	staticConfigKey?: string;
+	/**
+	 * What the module adds to the dynamic registration request, after the OIDCC defaults and before it is sent
+	 * (upstream createDynamicClientRegistrationRequest overrides; not called for a static client)
+	 */
+	customize?: (registrationRequest: Record<string, unknown>) => void;
+	/** Runs after SetScopeInClientConfigurationToOpenId (upstream completeClientConfiguration, e.g. the scope) */
+	completeClientConfiguration?: (op: Pick<Op, "metadata" | "variant">, client: Client) => void;
+}
+
+/** upstream: condition/client/AddIdTokenSigningAlgNoneToDynamicRegistrationRequest.java */
+export function addIdTokenSigningAlgNoneToDynamicRegistrationRequest(
+	registrationRequest: Record<string, unknown>,
+): void {
+	registrationRequest["id_token_signed_response_alg"] = "none";
+	condition("AddIdTokenSigningAlgNoneToDynamicRegistrationRequest").log(
+		"Added id_token_signed_response_alg to dynamic registration request",
+		{ dynamic_registration_request: registrationRequest },
+	);
+}
+
+/** upstream: condition/client/AddRefreshTokenGrantTypeToDynamicRegistrationRequest.java (AbstractAddGrantTypeToDynamicRegistrationRequest) */
+export function addRefreshTokenGrantTypeToDynamicRegistrationRequest(
+	registrationRequest: Record<string, unknown>,
+): void {
+	const grantTypes = [...((registrationRequest["grant_types"] as string[] | undefined) ?? []), "refresh_token"];
+	registrationRequest["grant_types"] = grantTypes;
+	condition("AddRefreshTokenGrantTypeToDynamicRegistrationRequest").log("Added 'refresh_token' to 'grant_types'", {
+		grant_types: grantTypes,
+	});
+}
+
+/** upstream: condition/client/AddRequestUriToDynamicRegistrationRequest.java */
+export function addRequestUriToDynamicRegistrationRequest(
+	registrationRequest: Record<string, unknown>,
+	requestUri: string,
+): void {
+	const c: Condition = condition("AddRequestUriToDynamicRegistrationRequest");
+	if (!requestUri) {
+		c.failure("No request_uri found in environment; this is likely a bug in the test module");
+	}
+	registrationRequest["request_uris"] = [requestUri];
+	c.log("Added request_uris array to dynamic registration request", {
+		dynamic_registration_request: registrationRequest,
+	});
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdOfflineAccess.java */
+export function setScopeInClientConfigurationToOpenIdOfflineAccess(client: Client): void {
+	setScopeInClientConfiguration(
+		condition("SetScopeInClientConfigurationToOpenIdOfflineAccess"),
+		client,
+		"openid offline_access",
+		" so that a refresh token is issued",
+	);
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdOfflineAccessIfServerSupportsOfflineAccess.java */
+export function setScopeInClientConfigurationToOpenIdOfflineAccessIfServerSupportsOfflineAccess(
+	metadata: ServerMetadata,
+	client: Client,
+): void {
+	const c: Condition = condition("SetScopeInClientConfigurationToOpenIdOfflineAccessIfServerSupportsOfflineAccess");
+	const scopesSupported = metadata["scopes_supported"];
+	if (scopesSupported === undefined) {
+		c.log(
+			"scopes_supported is not present in the discovery document, so assuming server does not support 'offline_access' scope and hence not adding it to the list of scopes to be requested",
+		);
+		return;
+	}
+	if (!Array.isArray(scopesSupported)) {
+		c.failure("'scopes_supported' is not a array");
+	}
+	if (!(scopesSupported as string[]).includes("offline_access")) {
+		c.log("scopes supported does not contain 'offline_access' so not adding it to the list of scopes to be requested", {
+			scopes_supported: scopesSupported,
+		});
+		return;
+	}
+	setScopeInClientConfiguration(c, client, "openid offline_access", "as 'scope_supported' contains 'offline_access'");
 }

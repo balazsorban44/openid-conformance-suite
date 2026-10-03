@@ -44,6 +44,11 @@ export interface IncomingRequest {
 
 export type Handler = (req: IncomingRequest) => Response | Promise<Response>;
 
+/** `waitFor` ran out of time (a test that treats "no request in time" as a result catches this) */
+export class WaitTimeoutError extends Error {
+	override name = "WaitTimeoutError";
+}
+
 export interface TestServer {
 	/** The URL other parties use for this test (upstream base_url): <origin>/test/a/<alias> */
 	readonly baseUrl: string;
@@ -196,7 +201,9 @@ export async function startServer(opts: ServerOptions): Promise<TestServer> {
 			};
 			const timer = setTimeout(() => {
 				remove();
-				reject(new Error(`Timed out after ${timeoutSeconds} seconds waiting for a request to ${prefix}/${path}`));
+				reject(
+					new WaitTimeoutError(`Timed out after ${timeoutSeconds} seconds waiting for a request to ${prefix}/${path}`),
+				);
 			}, timeoutSeconds * 1000);
 			const onAbort = () => {
 				remove();

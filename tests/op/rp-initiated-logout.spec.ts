@@ -29,9 +29,10 @@ async function configureLogoutClient(
 	configureClient: ConfigureClient,
 ): Promise<{ client: RegisteredClient; postLogoutRedirectUri: string; userinfoUrl: string }> {
 	const postLogoutRedirectUri = logout.createPostLogoutRedirectUri(op.baseUrl, "OIDCRIL-2", "OIDCRIL-3");
-	const client = await configureClient((request) =>
-		logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1"),
-	);
+	const client = await configureClient({
+		customize: (request) =>
+			logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1"),
+	});
 	const userinfoUrl = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
 	return { client, postLogoutRedirectUri, userinfoUrl };
 }

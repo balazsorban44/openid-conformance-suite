@@ -4,8 +4,10 @@
  * post logout redirect, the back-channel logout token and the front-channel logout request, and the checks on them.
  *
  *   const postLogoutRedirectUri = logout.createPostLogoutRedirectUri(op.baseUrl, "OIDCRIL-2", "OIDCRIL-3");
- *   const client = await configureClient((request) =>
- *     logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1"));
+ *   const client = await configureClient({
+ *     customize: (request) =>
+ *       logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1"),
+ *   });
  *   const { tokens } = await logout.performAuthorizationFlow(op, client, userinfoUrl);
  *   const { state, url } = ... createRandomEndSessionState / createEndSessionEndpointRequest / buildRedirectToEndSessionEndpoint
  *   const redirect = await logout.redirectToEndSessionEndpoint(op, url);

@@ -51,10 +51,12 @@ test.describe(PLAN, () => {
 		}) => {
 			const frontchannelLogoutUri = logout.createFrontchannelLogoutUri(op.baseUrl, "OIDCFCL-2");
 			const postLogoutRedirectUri = logout.createPostLogoutRedirectUri(op.baseUrl, "OIDCRIL-2", "OIDCRIL-3");
-			const client = await configureClient((request) => {
-				logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1");
-				logout.addFrontchannelLogoutSessionRequiredTrueToDynamicRegistrationRequest(request, "OIDCFCL-2");
-				logout.addFrontchannelLogoutUriToDynamicRegistrationRequest(request, frontchannelLogoutUri, "OIDCFCL-2");
+			const client = await configureClient({
+				customize: (request) => {
+					logout.addPostLogoutRedirectUriToDynamicRegistrationRequest(request, postLogoutRedirectUri, "OIDCRIL-3.1");
+					logout.addFrontchannelLogoutSessionRequiredTrueToDynamicRegistrationRequest(request, "OIDCFCL-2");
+					logout.addFrontchannelLogoutUriToDynamicRegistrationRequest(request, frontchannelLogoutUri, "OIDCFCL-2");
+				},
 			});
 			const userinfoUrl = discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
 			const { tokens } = await logout.performAuthorizationFlow(op, client, userinfoUrl);

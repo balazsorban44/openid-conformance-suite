@@ -12,9 +12,10 @@
  *     ...
  *   });
  */
+import { createHash, randomInt } from "node:crypto";
 import { condition, logModule, soft, type Condition } from "../suite/conditions.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
-import { htmlResponse, type IncomingRequest } from "../suite/server.ts";
+import { htmlResponse, WaitTimeoutError, type IncomingRequest } from "../suite/server.ts";
 import { toUriString } from "../util/UriComponentsBuilder.ts";
 import { checkErrorDescriptionContainsCRLFTAB, validateErrorDescription, validateErrorUri } from "./endpoint.ts";
 import type { ParsedJwt } from "../suite/jose.ts";
@@ -174,12 +175,20 @@ export interface AuthorizationRequestOptions {
 	 * (upstream `sequence.skip(Condition, reason)`), e.g. `{ response_type: "Miss out the response_type" }`
 	 */
 	omit?: { state?: string; nonce?: string; response_type?: string };
+	/** CreateRandomStateValue's `requested_state_length` (default 10) */
+	stateLength?: number;
+	/** CreateRandomNonceValue's `requested_nonce_length` (default 10) */
+	nonceLength?: number;
 	/**
 	 * Steps the module adds to the request after the standard ones, before the redirect URL is built (upstream
-	 * `createAuthorizationRequestSequence().then(condition)`), e.g. `(params) => addDisplayPage(params)`
+	 * `createAuthorizationRequestSequence().then(condition)`), e.g.
+	 * `(params) => addPromptLoginToAuthorizationEndpointRequest(params, "OIDCC-3.1.2.1", "OIDCC-15.1")`
 	 */
 	steps?: (params: Record<string, unknown>) => void;
-	/** The module's `createAuthorizationRedirect` (default: buildPlainRedirectToAuthorizationEndpoint) */
+	/**
+	 * The module's `createAuthorizationRedirect` (default: buildPlainRedirectToAuthorizationEndpoint), e.g. the
+	 * request object modules' BuildRequestObjectBy{Value,Reference}RedirectToAuthorizationEndpoint
+	 */
 	buildRedirect?: (op: Pick<Op, "metadata">, params: Record<string, unknown>) => string;
 }
 
@@ -201,7 +210,7 @@ export function createAuthorizationRequest(
 	const params = createAuthorizationEndpointRequestFromClientInformation(client, op.redirectUri);
 	let state: string | null = null;
 	if (opts.omit?.state === undefined) {
-		state = createRandomStateValue();
+		state = createRandomStateValue(opts.stateLength);
 		addStateToAuthorizationEndpointRequest(params, state);
 	} else {
 		skip("CreateRandomStateValue", opts.omit.state);
@@ -209,10 +218,11 @@ export function createAuthorizationRequest(
 	}
 	let nonce: string | null = null;
 	if (opts.omit?.nonce === undefined) {
-		nonce = createRandomNonceValue();
+		nonce = createRandomNonceValue(opts.nonceLength);
 		addNonceToAuthorizationEndpointRequest(params, nonce);
 	} else {
-		skip("CreateRandomNonceValue", opts.omit.nonce);
+		// upstream's `.skip(AddNonceToAuthorizationEndpointRequest, reason)` leaves CreateRandomNonceValue in place
+		createRandomNonceValue(opts.nonceLength);
 		skip("AddNonceToAuthorizationEndpointRequest", opts.omit.nonce);
 	}
 	if (opts.omit?.response_type === undefined) {
@@ -294,7 +304,7 @@ export async function authorizeExpectingErrorPageOrRedirect(
 async function redirect(
 	op: Pick<Op, "server" | "browser" | "baseUrl" | "log">,
 	request: AuthorizationRequest,
-	opts: { method?: "GET" | "POST"; timeoutSeconds?: number; placeholder: string | null },
+	opts: { method?: "GET" | "POST"; timeoutSeconds?: number; placeholder: string | null; keepPlaceholder?: boolean },
 ): Promise<AuthorizationResponse | null> {
 	const method = opts.method ?? "GET";
 	logModule({ msg: "Redirecting to authorization endpoint", redirect_to: request.url, method, http: "redirect" });
@@ -320,13 +330,16 @@ async function redirect(
 	try {
 		// the browser automation usually ends after the callback page ran, so the callback is awaited either way (a
 		// failing automation ends the wait); with a placeholder, a filled placeholder and no redirect is a result too
-		const received = await Promise.race([callback, visit.then(() => (placeholderFilled() ? null : callback))]);
+		const received = await Promise.race([
+			callback,
+			visit.then(() => (!opts.keepPlaceholder && placeholderFilled() ? null : callback)),
+		]);
 		if (received == null) {
 			return null;
 		}
 		const submission = await (implicitSubmission as Promise<IncomingRequest> | null);
 		await visit;
-		if (opts.placeholder != null) {
+		if (opts.placeholder != null && !opts.keepPlaceholder) {
 			// the OP redirected back instead of showing an error page: the screenshot is not needed
 			op.log.fillPlaceholder(opts.placeholder, { image_no_longer_required: true });
 		}
@@ -596,8 +609,11 @@ export function checkAuthorizationResponse(
 	op: Pick<Op, "metadata">,
 	request: AuthorizationRequest,
 	response: AuthorizationResponse,
+	/** afterCallbackLocation: what a module's onAuthorizationCallbackResponse override does before calling super */
+	opts: { afterCallbackLocation?: () => void } = {},
 ): void {
 	checkCallbackLocation(request, response);
+	opts.afterCallbackLocation?.();
 	soft(() => checkMatchingCallbackParameters(request, response));
 	soft(() => validateIssIfPresentInAuthorizationResponse(op, response, "OAuth2-iss-2"));
 	checkIfAuthorizationEndpointError(response);
@@ -1040,4 +1056,307 @@ export function checkErrorFromAuthorizationEndpointIsOneThatRequiredAUserInterfa
 		c.failure("'error' field has an unexpected value", { permitted, actual: error });
 	}
 	c.success("Authorization endpoint returned one of the permitted errors", { permitted, actual: error });
+}
+
+/** upstream: condition/client/AddPromptLoginToAuthorizationEndpointRequest.java */
+export function addPromptLoginToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["prompt"] = "login";
+	condition("AddPromptLoginToAuthorizationEndpointRequest", ...requirements).success(
+		"Added prompt=login to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+/** upstream: condition/client/AddPromptConsentToAuthorizationEndpointRequestIfScopeContainsOfflineAccess.java */
+export function addPromptConsentToAuthorizationEndpointRequestIfScopeContainsOfflineAccess(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition(
+		"AddPromptConsentToAuthorizationEndpointRequestIfScopeContainsOfflineAccess",
+		...requirements,
+	);
+	if (params["scope"] == null) {
+		c.success("Not adding prompt=consent as the authorization endpoint request does not contain a scope");
+		return;
+	}
+	if (!String(params["scope"]).includes("offline_access")) {
+		c.success("Not adding prompt=consent as the scope in the configuration does not contain offline_access");
+		return;
+	}
+	params["prompt"] = "consent";
+	c.success("Added prompt=consent to authorization endpoint request", { ...params });
+}
+
+/** The shared body of the AddMaxAge1/10000/15000ToAuthorizationEndpointRequest conditions below */
+function addMaxAgeToAuthorizationEndpointRequest(
+	name: string,
+	params: Record<string, unknown>,
+	maxAge: number,
+	requirements: string[],
+): void {
+	params["max_age"] = maxAge;
+	condition(name, ...requirements).success("Added max_age=" + maxAge + " to authorization endpoint request", {
+		...params,
+	});
+}
+
+/** upstream: condition/client/AddMaxAge1ToAuthorizationEndpointRequest.java */
+export function addMaxAge1ToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	addMaxAgeToAuthorizationEndpointRequest("AddMaxAge1ToAuthorizationEndpointRequest", params, 1, requirements);
+}
+
+/** upstream: condition/client/AddMaxAge10000ToAuthorizationEndpointRequest.java */
+export function addMaxAge10000ToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	addMaxAgeToAuthorizationEndpointRequest("AddMaxAge10000ToAuthorizationEndpointRequest", params, 10000, requirements);
+}
+
+/** upstream: condition/client/AddMaxAge15000ToAuthorizationEndpointRequest.java */
+export function addMaxAge15000ToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	addMaxAgeToAuthorizationEndpointRequest("AddMaxAge15000ToAuthorizationEndpointRequest", params, 15000, requirements);
+}
+
+/** upstream: condition/client/AddExtraFoobarToAuthorizationEndpointRequest.java */
+export function addExtraFoobarToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["extra"] = "foobar";
+	condition("AddExtraFoobarToAuthorizationEndpointRequest", ...requirements).log(
+		"Added extra=foobar to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+/**
+ * acr_values: every value of the OP's acr_values_supported, else the `acr_values` of a static server configuration,
+ * else "1 2".
+ *
+ * upstream: condition/client/OIDCCAddAcrValuesToAuthorizationEndpointRequest.java
+ */
+export function oidccAddAcrValuesToAuthorizationEndpointRequest(
+	op: Pick<Op, "metadata">,
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("OIDCCAddAcrValuesToAuthorizationEndpointRequest", ...requirements);
+	const acrValuesSupported = op.metadata["acr_values_supported"];
+	const acrValues = op.metadata["acr_values"];
+	let acrValuesRequest: string;
+	let msg: string;
+	if (acrValuesSupported != null) {
+		// include all values server supports
+		acrValuesRequest = (acrValuesSupported as string[]).join(" ");
+		msg =
+			"Added all acr values from server discovery document's acr_values_supportedto acr_values in authorization endpoint request.";
+	} else if (typeof acrValues === "string" && acrValues !== "") {
+		// server doesn't support discovery; use user supplied value from test config
+		acrValuesRequest = acrValues;
+		msg = "Added acr_values from test configuration";
+	} else {
+		// include just '1' and '2' as per the python suite (oidctest op/func.py)
+		acrValuesRequest = "1 2";
+		msg =
+			"server discovery document does not contain acr_values_supported (or, for static server config, test configuration does not contain acr_values) so setting acr_values in authorization endpoint request to '1 2'.";
+	}
+	params["acr_values"] = acrValuesRequest;
+	c.success(msg, { request: { ...params }, acr_values: acrValuesRequest });
+}
+
+/**
+ * A REVIEW entry asking for a screenshot of the second login page; the browser automation fills it
+ * ("update-image-placeholder"). Returns the placeholder to pass to authorizeWithPlaceholder().
+ *
+ * upstream: condition/client/ExpectSecondLoginPage.java
+ */
+export function expectSecondLoginPage(...requirements: string[]): string {
+	const placeholder = randomAlphanumeric(10);
+	condition("ExpectSecondLoginPage", ...requirements).review(
+		"The server must ask the user to login for a second time; a screenshot of this must be uploaded.",
+		{ upload: placeholder },
+	);
+	return placeholder;
+}
+
+/**
+ * A REVIEW entry asking for a screenshot of the redirect URI error page; see expectSecondLoginPage().
+ *
+ * upstream: condition/common/ExpectRedirectUriErrorPage.java
+ */
+export function expectRedirectUriErrorPage(...requirements: string[]): string {
+	const placeholder = randomAlphanumeric(10);
+	condition("ExpectRedirectUriErrorPage", ...requirements).review("Show redirect URI error page", {
+		upload: placeholder,
+	});
+	return placeholder;
+}
+
+/**
+ * A redirect_uri below the suite's callback that cannot have been registered: `<base url>/callback/<random>`.
+ *
+ * upstream: condition/client/CreateBadRedirectUriByAppending.java
+ */
+export function createBadRedirectUriByAppending(baseUrl: string): { redirectUri: string; badRedirectPath: string } {
+	const c: Condition = condition("CreateBadRedirectUriByAppending");
+	if (baseUrl === "") {
+		c.failure("Base URL is empty");
+	}
+	// create a random redirect URI, by appending a random path, which shouldn't be registered with the server
+	const badRedirectPath = randomAlphanumeric(10);
+	const redirectUri = baseUrl + "/callback/" + badRedirectPath;
+	c.success("Created a randomised (and hence unregistered) redirect URI", { redirect_uri: redirectUri });
+	return { redirectUri, badRedirectPath };
+}
+
+/**
+ * The OP answered the POST to the authorization endpoint by calling the redirect_uri (`response` is null when it did
+ * not within the test's 30 seconds).
+ *
+ * upstream: condition/client/ExpectRedirectUriHasBeenCalled.java
+ */
+export function expectRedirectUriHasBeenCalled(
+	response: AuthorizationResponse | null,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ExpectRedirectUriHasBeenCalled", ...requirements);
+	if (response == null) {
+		c.failure(
+			"The OpenID Connect core specification states that 'Authorization Servers MUST support the use of the HTTP GET and POST methods defined in RFC 7231 at the Authorization Endpoint'. In the conformance suite, failure to correctly respond to an HTTP POST request to the authorization endpoint within 30 seconds is considered a WARNING.",
+		);
+	}
+}
+
+/** upstream: condition/client/EnsureOPDoesNotUseDefaultRedirectUriInCaseOfInvalidRedirectUri.java */
+export function ensureOPDoesNotUseDefaultRedirectUriInCaseOfInvalidRedirectUri(): never {
+	return condition("EnsureOPDoesNotUseDefaultRedirectUriInCaseOfInvalidRedirectUri").failure(
+		"An invalid redirect_uri was included in the authorization request but the OP redirected to a default redirect_uri instead of displaying an error page",
+	);
+}
+
+/** upstream: condition/client/AddInvalidRedirectUriToAuthorizationRequest.java */
+export function addInvalidRedirectUriToAuthorizationRequest(
+	params: Record<string, unknown>,
+	redirectUri: string,
+	...requirements: string[]
+): void {
+	const url = new URL(redirectUri);
+	url.pathname += "_invalid";
+	const invalidUri = url.toString();
+	delete params["redirect_uri"];
+	params["redirect_uri"] = invalidUri;
+	condition("AddInvalidRedirectUriToAuthorizationRequest", ...requirements).success(
+		"Added invalid redirect_uri to authorization endpoint request",
+		{ redirect_uri: invalidUri },
+	);
+}
+
+/** upstream: condition/client/CreateRandomCodeVerifier.java */
+export function createRandomCodeVerifier(...requirements: string[]): string {
+	// RFC7636-4.1: [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~", 43 to 128 characters. Not base64url of random
+	// bytes, to test the full range of permitted characters (including . and ~).
+	const allowedChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+	// test maximum permitted length
+	let verifier = "";
+	for (let i = 0; i < 128; i++) {
+		verifier += allowedChars[randomInt(allowedChars.length)];
+	}
+	condition("CreateRandomCodeVerifier", ...requirements).log("Created code_verifier value", {
+		code_verifier: verifier,
+	});
+	return verifier;
+}
+
+/** upstream: condition/client/CreateS256CodeChallenge.java */
+export function createS256CodeChallenge(
+	verifier: string,
+	...requirements: string[]
+): { codeChallenge: string; codeChallengeMethod: "S256" } {
+	const c: Condition = condition("CreateS256CodeChallenge", ...requirements);
+	if (!verifier) {
+		c.failure("code_verifier was null or empty");
+	}
+	const codeChallenge = createHash("sha256").update(Buffer.from(verifier, "ascii")).digest().toString("base64url");
+	c.log("Created code_challenge value", { code_challenge: codeChallenge });
+	return { codeChallenge, codeChallengeMethod: "S256" };
+}
+
+/** upstream: condition/client/AddCodeChallengeToAuthorizationEndpointRequest.java */
+export function addCodeChallengeToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	codeChallenge: string,
+	codeChallengeMethod: string,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddCodeChallengeToAuthorizationEndpointRequest", ...requirements);
+	if (!codeChallenge) {
+		c.failure("Couldn't find code_challenge value");
+	}
+	// UPSTREAM: checks code_challenge again instead of code_challenge_method
+	if (!codeChallenge) {
+		c.failure("Couldn't find code_challenge_method value");
+	}
+	params["code_challenge"] = codeChallenge;
+	params["code_challenge_method"] = codeChallengeMethod;
+	c.success("Added code_challenge and code_challenge_method parameters to request", { ...params });
+}
+
+/**
+ * A random code_verifier (RFC7636-4.1) and its S256 challenge in the authorization request (RFC7636-4.2, 4.3);
+ * returns the code_verifier for the token request.
+ *
+ * upstream: sequence/client/SetupPkceAndAddToAuthorizationRequest.java
+ */
+export function setupPkceAndAddToAuthorizationRequest(params: Record<string, unknown>): string {
+	const codeVerifier = createRandomCodeVerifier("RFC7636-4.1");
+	const { codeChallenge, codeChallengeMethod } = createS256CodeChallenge(codeVerifier, "RFC7636-4.2");
+	addCodeChallengeToAuthorizationEndpointRequest(params, codeChallenge, codeChallengeMethod, "RFC7636-4.3");
+	return codeVerifier;
+}
+
+/**
+ * authorize() for a request whose test created a placeholder (a screenshot to upload, e.g. of the second login page)
+ * for a flow that still redirects back: the placeholder stays pending (result REVIEW) unless the browser automation
+ * fills it.
+ *
+ * upstream: AbstractRedirectServerTestModule.performRedirectWithPlaceholder
+ */
+export async function authorizeWithPlaceholder(
+	op: Pick<Op, "server" | "browser" | "baseUrl" | "log">,
+	request: AuthorizationRequest,
+	placeholder: string,
+	opts: { method?: "GET" | "POST"; timeoutSeconds?: number } = {},
+): Promise<AuthorizationResponse> {
+	return (await redirect(op, request, { ...opts, placeholder, keepPlaceholder: true })) as AuthorizationResponse;
+}
+
+/**
+ * authorize() that resolves with null when the OP did not call the redirect_uri within `timeoutSeconds` (the
+ * test's own timer, upstream OIDCCEnsurePostRequestSucceeds.startWaitingForTimeout).
+ */
+export async function authorizeWithinSeconds(
+	op: Pick<Op, "server" | "browser" | "baseUrl" | "log">,
+	request: AuthorizationRequest,
+	timeoutSeconds: number,
+	opts: { method?: "GET" | "POST" } = {},
+): Promise<AuthorizationResponse | null> {
+	try {
+		return await authorize(op, request, { ...opts, timeoutSeconds });
+	} catch (e) {
+		if (e instanceof WaitTimeoutError) {
+			return null;
+		}
+		throw e;
+	}
 }

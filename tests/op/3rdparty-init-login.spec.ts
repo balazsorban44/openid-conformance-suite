@@ -37,9 +37,11 @@ test.describe(PLAN, () => {
 		configureClient,
 	}) => {
 		let initiateLoginUri = "";
-		const client = await configureClient((request) => {
-			initiateLoginUri = initiateLogin.createInitiateLoginUri(op.baseUrl, "OIDCC-4", "OIDCR-2");
-			initiateLogin.addInitiateLoginUriToDynamicRegistrationRequest(request, initiateLoginUri, "OIDCC-4", "OIDCR-2");
+		const client = await configureClient({
+			customize: (request) => {
+				initiateLoginUri = initiateLogin.createInitiateLoginUri(op.baseUrl, "OIDCC-4", "OIDCR-2");
+				initiateLogin.addInitiateLoginUriToDynamicRegistrationRequest(request, initiateLoginUri, "OIDCC-4", "OIDCR-2");
+			},
 		});
 		// UPSTREAM: configured by AbstractOIDCCServerTest, though this module calls no protected resource
 		discovery.setProtectedResourceUrlToUserInfoEndpoint(op.metadata);
