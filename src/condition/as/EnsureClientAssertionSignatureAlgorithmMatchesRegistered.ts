@@ -1,22 +1,7 @@
 import { args, type Environment, type EnvironmentRequirements } from "../../framework/index.ts";
 import { ParseException } from "../../util/JWKUtil.ts";
-import { JWTUtil, type JWT } from "../../util/JWTUtil.ts";
+import { parseSignedJWT } from "../../util/nimbus/jwt.ts";
 import { AbstractVerifyJwsSignature } from "../client/AbstractVerifyJwsSignature.ts";
-
-/**
- * Nimbus SignedJWT.parse(s): like JWTParser.parse, but only accepts a JWS.
- * @throws ParseException
- */
-function parseSignedJWT(s: string): JWT {
-	const jwt = JWTUtil.parseJWT(s);
-	if (jwt.type !== "signed") {
-		if (jwt.parts.length !== 3) {
-			throw new ParseException("Unexpected number of Base64URL parts, must be three");
-		}
-		throw new ParseException("Invalid JWS header: Not a JWS header");
-	}
-	return jwt;
-}
 
 /**
  * token_endpoint_auth_signing_alg

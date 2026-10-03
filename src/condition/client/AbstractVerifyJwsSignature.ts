@@ -1,170 +1,18 @@
-import { compactVerify, errors } from "jose";
 import { args, type JsonObject } from "../../framework/index.ts";
 import { AbstractLenientJwksCondition } from "../AbstractLenientJwksCondition.ts";
 import { JWAUtil } from "../../util/JWAUtil.ts";
 import { JOSEException, KeyLengthException } from "../../util/JWEUtil.ts";
-import {
-	JWKUtil,
-	JWS_FAMILY_EC,
-	JWS_FAMILY_ED,
-	JWS_FAMILY_HMAC_SHA,
-	JWS_FAMILY_RSA,
-	ParseException,
-	type JWK,
-	type JWKSet,
-} from "../../util/JWKUtil.ts";
-import { JWTUtil, type JWT } from "../../util/JWTUtil.ts";
+import { JWKUtil, JWS_FAMILY_HMAC_SHA, ParseException, type JWK, type JWKSet } from "../../util/JWKUtil.ts";
+import type { JWT } from "../../util/JWTUtil.ts";
+import { EC_CURVE_ALGORITHM, keyTypeForAlgorithm } from "../../util/nimbus/algorithms.ts";
+import { selectJWSJwks, unsupportedJWSAlgorithm, verifySignedJWT } from "../../util/nimbus/jws.ts";
+import { parseSignedJWT } from "../../util/nimbus/jwt.ts";
 
 /** A parsed JWS (replaces Nimbus SignedJWT): `jwt.header` is the protected header, `jwt.serialized` the compact JWS. */
 export type SignedJWT = JWT;
 
-/**
- * Nimbus `SignedJWT.parse(String)`.
- *
- * TS: JWTUtil has no SignedJWT.parse equivalent, so the JWTParser port is used and anything that is not a JWS is
- * rejected with the message SignedJWT.parse would give. (JWTUtil.parseJWT additionally rejects characters outside
- * base64url and '.', which SignedJWT.parse rejects with a different message.)
- *
- * @throws ParseException
- */
-function parseSignedJWT(token: string): SignedJWT {
-	const jwt = JWTUtil.parseJWT(token);
-	if (jwt.type === "encrypted") {
-		throw new ParseException("Unexpected number of Base64URL parts, must be three");
-	}
-	if (jwt.type !== "signed") {
-		throw new ParseException("Invalid JWS header: Not a JWS header");
-	}
-	return jwt;
-}
-
-/** Nimbus `KeyType.forAlgorithm(JWSAlgorithm)` */
-function keyTypeForJWSAlgorithm(alg: string): string | null {
-	if (JWS_FAMILY_RSA.includes(alg)) {
-		return "RSA";
-	} else if (JWS_FAMILY_EC.includes(alg)) {
-		return "EC";
-	} else if (JWS_FAMILY_HMAC_SHA.includes(alg)) {
-		return "oct";
-	} else if (JWS_FAMILY_ED.includes(alg)) {
-		return "OKP";
-	}
-	return null;
-}
-
-/** Nimbus `Curve.forJWSAlgorithm` for the ED family */
-function curvesForEdAlgorithm(alg: string): string[] {
-	if (alg === "Ed25519") {
-		return ["Ed25519"];
-	} else if (alg === "Ed448") {
-		return ["Ed448"];
-	}
-	return ["Ed25519", "Ed448"];
-}
-
-/** Nimbus `ECDSA.resolveAlgorithm(Curve)`: the only JWS algorithm an ECDSAVerifier for a key on this curve supports */
-const EC_CURVE_ALGORITHM: Record<string, string> = {
-	"P-256": "ES256",
-	secp256k1: "ES256K",
-	"P-384": "ES384",
-	"P-521": "ES512",
-};
-
-/** Nimbus `AlgorithmSupportMessage.itemize` */
-function itemize(items: readonly string[]): string {
-	let out = "";
-	for (let i = 0; i < items.length; i++) {
-		if (i > 0) {
-			out += i === items.length - 1 ? " or " : ", ";
-		}
-		out += items[i];
-	}
-	return out;
-}
-
-/** Nimbus `AlgorithmSupportMessage.unsupportedJWSAlgorithm` */
-function unsupportedJWSAlgorithm(alg: string, supported: readonly string[]): string {
-	return "Unsupported JWS algorithm " + alg + ", must be " + itemize(supported);
-}
-
-/**
- * Port of extensions/AlternateJWSVerificationKeySelector.selectJWSJwks: Nimbus `JWKMatcher.forJWSHeader(header)`
- * applied to the keys of `jwkSet`, then the asymmetric keys are returned as their public key (plus the key itself if
- * it is private) and the secret keys as is. Returns an empty list for an unsupported algorithm.
- */
-function selectJWSJwks(header: JsonObject, jwkSet: JWKSet): JWK[] {
-	const alg = header["alg"] as string;
-	const kid = typeof header["kid"] === "string" ? header["kid"] : null;
-	const x5tS256 = typeof header["x5t#S256"] === "string" ? header["x5t#S256"] : null;
-	const kty = keyTypeForJWSAlgorithm(alg);
-	if (kty == null) {
-		return [];
-	}
-	const jwkMatches: JWK[] = [];
-	for (const jwk of jwkSet.keys) {
-		if (jwk["kty"] !== kty) {
-			continue;
-		}
-		if (kid != null && jwk["kid"] !== kid) {
-			continue;
-		}
-		if (jwk["alg"] != null && jwk["alg"] !== alg) {
-			continue;
-		}
-		if (kty === "oct") {
-			// privateOnly(true) - symmetric keys are always private; no 'use' restriction for HMAC
-		} else {
-			if (jwk["use"] != null && jwk["use"] !== "sig") {
-				continue;
-			}
-			if ((kty === "RSA" || kty === "EC") && x5tS256 != null && jwk["x5t#S256"] !== x5tS256) {
-				continue;
-			}
-			if (kty === "OKP" && !curvesForEdAlgorithm(alg).includes(jwk["crv"] as string)) {
-				continue;
-			}
-		}
-		jwkMatches.push(jwk);
-	}
-	// Get non-EdDSA keys from original function
-	const sanitizedJWKs: JWK[] = [];
-	for (const jwk of jwkMatches) {
-		if (jwk["kty"] !== "oct") {
-			sanitizedJWKs.push(JWKUtil.toPublicJWK(jwk) as JWK);
-			if (JWKUtil.isPrivate(jwk)) {
-				sanitizedJWKs.push(jwk);
-			}
-		} else {
-			sanitizedJWKs.push(jwk);
-		}
-	}
-	return sanitizedJWKs;
-}
-
 /** A jose verification key (replaces Nimbus JWSVerifier) */
 type JWSVerifier = Awaited<ReturnType<typeof JWKUtil.importKey>>;
-
-/**
- * `jwt.verify(verifier)`: true if the signature is valid, false if not.
- *
- * Nimbus verifiers return false (rather than throwing) for a header carrying unsupported critical parameters; jose
- * throws JWSInvalid for those, which is mapped to false as well. Anything else jose rejects is a JOSEException.
- *
- * @throws JOSEException
- */
-async function verifyWith(jwt: SignedJWT, verifier: JWSVerifier): Promise<boolean> {
-	const alg = jwt.header["alg"] as string;
-	try {
-		await compactVerify(jwt.serialized, verifier, { algorithms: [alg] });
-		return true;
-	} catch (e) {
-		if (e instanceof errors.JWSSignatureVerificationFailed || e instanceof errors.JWSInvalid) {
-			return false;
-		}
-		// TS: e.g. jose refuses RSA keys shorter than 2048 bits (TypeError), which Nimbus' RSASSAVerifier accepts
-		throw new JOSEException(e instanceof Error ? e.message : String(e), { cause: e });
-	}
-}
 
 export abstract class AbstractVerifyJwsSignature extends AbstractLenientJwksCondition {
 	protected async verifyJwsSignature(
@@ -201,7 +49,7 @@ export abstract class AbstractVerifyJwsSignature extends AbstractLenientJwksCond
 				);
 			}
 			const alg = headerAlg as string;
-			const headerKty = keyTypeForJWSAlgorithm(alg) as string;
+			const headerKty = keyTypeForAlgorithm(alg) as string;
 			const headerX509CertSha256Thumbprint = typeof header["x5t#S256"] === "string" ? header["x5t#S256"] : null;
 
 			let numberOfKeyValid = 0;
@@ -382,7 +230,7 @@ export abstract class AbstractVerifyJwsSignature extends AbstractLenientJwksCond
 					// ECDSAVerifier.verify() throws for an algorithm that does not match the key's curve
 					throw new JOSEException(unsupportedJWSAlgorithm(alg, [verifierAlg]));
 				}
-				if (await verifyWith(jwt, verifier)) {
+				if (await verifySignedJWT(jwt, { jwk: jwkKey, key: verifier })) {
 					return true;
 				} else {
 					// failed to verify with this key, moving on
@@ -404,6 +252,6 @@ export abstract class AbstractVerifyJwsSignature extends AbstractLenientJwksCond
 		if (!JWS_FAMILY_HMAC_SHA.includes(alg)) {
 			throw new JOSEException(unsupportedJWSAlgorithm(alg, JWS_FAMILY_HMAC_SHA));
 		}
-		return verifyWith(jwt, new Uint8Array(secret));
+		return verifySignedJWT(jwt, { jwk: { kty: "oct" }, key: new Uint8Array(secret) });
 	}
 }

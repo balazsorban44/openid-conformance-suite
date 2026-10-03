@@ -8,7 +8,9 @@ import {
 	type JsonObject,
 } from "../../framework/index.ts";
 import { JWKUtil, ParseException } from "../../util/JWKUtil.ts";
-import { isJOSEException, JWSSigner, parseClaimsSet } from "./AbstractSignJWT.ts";
+import { isJOSEException } from "../../util/nimbus/errors.ts";
+import { JWSSigner } from "../../util/nimbus/jws.ts";
+import { parseClaimsSet } from "../../util/nimbus/jwt.ts";
 
 export class SignDpopProof extends AbstractCondition {
 	static override pre: EnvironmentRequirements = { required: ["dpop_proof_claims", "client"] };

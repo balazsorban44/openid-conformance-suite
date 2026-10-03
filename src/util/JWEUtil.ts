@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { CompactEncrypt, compactDecrypt, type CompactJWEHeaderParameters } from "jose";
 import type { JsonObject } from "../framework/json.ts";
+import { JWKUtil, SkippedJwk, type JWK, type JWKSet } from "./JWKUtil.ts";
 import {
 	ENC_FAMILY_AES_CBC_HMAC_SHA,
 	ENC_FAMILY_AES_GCM,
@@ -10,144 +10,26 @@ import {
 	JWE_FAMILY_ECDH_ES,
 	JWE_FAMILY_RSA,
 	JWE_FAMILY_SYMMETRIC,
-	JWKUtil,
-	nimbusJwkOrder,
-	ParseException,
 	requireAlgorithmName,
-	SkippedJwk,
-	type JWK,
-	type JWKSet,
-} from "./JWKUtil.ts";
-import { nimbusParseJWEObject, type JWT } from "./JWTUtil.ts";
+} from "./nimbus/algorithms.ts";
+import { JOSEException, KeyLengthException, ParseException } from "./nimbus/errors.ts";
+import {
+	AES_SUPPORTED_ALGORITHMS,
+	castKey,
+	checkAesKeyLength,
+	checkDirectKeyLength,
+	DIRECT_SUPPORTED_ALGORITHMS,
+	ECDH_SUPPORTED_ALGORITHMS,
+	JWEDecrypter,
+	JWEEncrypter,
+	RSA_SUPPORTED_ALGORITHMS,
+} from "./nimbus/jwe.ts";
+import { nimbusJwkOrder } from "./nimbus/jwk.ts";
+import { parseJWEObject, type JWT } from "./nimbus/jwt.ts";
 
-/** Port of `com.nimbusds.jose.JOSEException`. */
-export class JOSEException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "JOSEException";
-	}
-}
-
-/** Port of `com.nimbusds.jose.KeyLengthException`. */
-export class KeyLengthException extends JOSEException {
-	constructor(message: string) {
-		super(message);
-		this.name = "KeyLengthException";
-	}
-}
-
-/** AESEncrypter / AESDecrypter SUPPORTED_ALGORITHMS */
-const AES_SUPPORTED_ALGORITHMS: readonly string[] = [...JWE_FAMILY_AES_KW, ...JWE_FAMILY_AES_GCM_KW];
-/** DirectEncrypter / DirectDecrypter SUPPORTED_ALGORITHMS */
-const DIRECT_SUPPORTED_ALGORITHMS: readonly string[] = ["dir"];
-/** RSAEncrypter / RSADecrypter SUPPORTED_ALGORITHMS */
-const RSA_SUPPORTED_ALGORITHMS: readonly string[] = JWE_FAMILY_RSA;
-/** ECDHEncrypter / ECDHDecrypter / X25519Encrypter / X25519Decrypter SUPPORTED_ALGORITHMS */
-const ECDH_SUPPORTED_ALGORITHMS: readonly string[] = JWE_FAMILY_ECDH_ES;
-
-const NIMBUS_KEY_CLASS: Record<string, string> = {
-	oct: "OctetSequenceKey",
-	RSA: "RSAKey",
-	EC: "ECKey",
-	OKP: "OctetKeyPair",
-};
-
-/** The Java cast `(RSAKey) key` etc: throws (like a ClassCastException) when the key is of another type. */
-function castKey(key: JWK, kty: string): JWK {
-	if (key["kty"] !== kty) {
-		throw new TypeError(
-			"class com.nimbusds.jose.jwk." +
-				NIMBUS_KEY_CLASS[key["kty"] as string] +
-				" cannot be cast to class com.nimbusds.jose.jwk." +
-				NIMBUS_KEY_CLASS[kty],
-		);
-	}
-	return key;
-}
-
-function octKeyLength(key: JWK): number {
-	return Buffer.from(String(key["k"]), "base64url").length;
-}
-
-/**
- * Replaces the Nimbus `JWEEncrypter` implementations (`AESEncrypter`, `DirectEncrypter`, `RSAEncrypter`,
- * `ECDHEncrypter`, `X25519Encrypter`). `name` is the Nimbus class name (Java `getClass().getSimpleName()`).
- * `new JWEObject(header, payload).encrypt(encrypter); jweObject.serialize()` becomes
- * `await encrypter.encrypt(header, payload)`.
- */
-export class JWEEncrypter {
-	readonly name: string;
-	readonly key: JWK;
-
-	constructor(name: string, key: JWK) {
-		this.name = name;
-		this.key = key;
-	}
-
-	/**
-	 * Encrypts `payload` with the given JWE header (must contain `alg` and `enc`; `apu`/`apv` are passed to jose as
-	 * key management parameters) and returns the compact serialization. Async because jose is.
-	 * @throws JOSEException / jose errors
-	 */
-	async encrypt(header: JsonObject, payload: string | Uint8Array): Promise<string> {
-		const alg = header["alg"] as string;
-		if (this.name === "AESEncrypter") {
-			const bits = octKeyLength(this.key) * 8;
-			const expected = /^A(\d{3})(?:GCM)?KW$/.exec(alg);
-			if (expected && Number(expected[1]) !== bits) {
-				throw new KeyLengthException(
-					"The Key Encryption Key (KEK) length must be " + expected[1] + " bits for " + alg + " encryption",
-				);
-			}
-		}
-		const { apu, apv, ...protectedHeader } = header;
-		const keyJwk =
-			this.name === "AESEncrypter" || this.name === "DirectEncrypter" ? this.key : JWKUtil.toPublicJWK(this.key);
-		const key = await JWKUtil.importKey(keyJwk as JWK, alg);
-		const jwe = new CompactEncrypt(typeof payload === "string" ? new TextEncoder().encode(payload) : payload);
-		jwe.setProtectedHeader(protectedHeader as CompactJWEHeaderParameters);
-		if (apu != null || apv != null) {
-			jwe.setKeyManagementParameters({
-				...(apu != null ? { apu: Buffer.from(String(apu), "base64url") } : {}),
-				...(apv != null ? { apv: Buffer.from(String(apv), "base64url") } : {}),
-			});
-		}
-		return await jwe.encrypt(key);
-	}
-
-	getClass(): { getSimpleName(): string } {
-		return { getSimpleName: () => this.name };
-	}
-}
-
-/**
- * Replaces the Nimbus `JWEDecrypter` implementations (`AESDecrypter`, `DirectDecrypter`, `RSADecrypter`,
- * `ECDHDecrypter`, `X25519Decrypter`). `encryptedJWT.decrypt(decrypter); encryptedJWT.getPayload()` becomes
- * `await decrypter.decrypt(compactJwe)` (returns the plaintext bytes). Async because jose is.
- */
-export class JWEDecrypter {
-	readonly name: string;
-	readonly key: JWK;
-	readonly algorithm: string;
-
-	constructor(name: string, algorithm: string, key: JWK) {
-		this.name = name;
-		this.algorithm = algorithm;
-		this.key = key;
-	}
-
-	/** @throws jose errors (Java: JOSEException) */
-	async decrypt(compactJwe: string): Promise<Uint8Array> {
-		const { plaintext } = await compactDecrypt(compactJwe, async (header) =>
-			JWKUtil.importKey(this.key, header.alg ?? this.algorithm),
-		);
-		return plaintext;
-	}
-
-	getClass(): { getSimpleName(): string } {
-		return { getSimpleName: () => this.name };
-	}
-}
+// The Nimbus emulation lives in ./nimbus/; re-exported here for the ported code that imports it from JWEUtil.
+export { JOSEException, KeyLengthException } from "./nimbus/errors.ts";
+export { JWEDecrypter, JWEEncrypter } from "./nimbus/jwe.ts";
 
 export class JWEUtil {
 	/**
@@ -362,11 +244,11 @@ export class JWEUtil {
 		const kty = key["kty"];
 		if ("oct" === kty) {
 			if (AES_SUPPORTED_ALGORITHMS.includes(key["alg"] as string)) {
-				JWEUtil.checkAesKeyLength(key);
+				checkAesKeyLength(key);
 				const aesEncrypter = new JWEEncrypter("AESEncrypter", key);
 				return aesEncrypter;
 			} else if (DIRECT_SUPPORTED_ALGORITHMS.includes(key["alg"] as string)) {
-				JWEUtil.checkDirectKeyLength(key);
+				checkDirectKeyLength(key);
 				const directEncrypter = new JWEEncrypter("DirectEncrypter", key);
 				return directEncrypter;
 			} else {
@@ -386,22 +268,6 @@ export class JWEUtil {
 			}
 		}
 		throw new Error("Unexpected key type:" + kty);
-	}
-
-	private static checkAesKeyLength(key: JWK): void {
-		if (![16, 24, 32].includes(octKeyLength(key))) {
-			throw new KeyLengthException(
-				"The Key Encryption Key length must be 128 bits (16 bytes), 192 bits (24 bytes) or 256 bits (32 bytes)",
-			);
-		}
-	}
-
-	private static checkDirectKeyLength(key: JWK): void {
-		if (![16, 24, 32, 48, 64].includes(octKeyLength(key))) {
-			throw new KeyLengthException(
-				"The Content Encryption Key length must be 128 bits (16 bytes), 192 bits (24 bytes), 256 bits (32 bytes), 384 bits (48 bytes) or 512 bites (64 bytes)",
-			);
-		}
 	}
 
 	/**
@@ -432,11 +298,11 @@ export class JWEUtil {
 			throw new Error("Private key is required for " + algorithm);
 		}
 		if (AES_SUPPORTED_ALGORITHMS.includes(algorithm)) {
-			JWEUtil.checkAesKeyLength(castKey(key, "oct"));
+			checkAesKeyLength(castKey(key, "oct"));
 			const decrypter = new JWEDecrypter("AESDecrypter", algorithm, key);
 			return decrypter;
 		} else if (DIRECT_SUPPORTED_ALGORITHMS.includes(algorithm)) {
-			JWEUtil.checkDirectKeyLength(castKey(key, "oct"));
+			checkDirectKeyLength(castKey(key, "oct"));
 			const directDecrypter = new JWEDecrypter("DirectDecrypter", algorithm, key);
 			return directDecrypter;
 		} else if (RSA_SUPPORTED_ALGORITHMS.includes(algorithm)) {
@@ -508,7 +374,7 @@ export class JWEUtil {
 	 * @throws ParseException when given a string that cannot be parsed
 	 */
 	static jweHeaderAsJsonObject(jweObject: JWT | string): JsonObject {
-		const jwe = typeof jweObject === "string" ? nimbusParseJWEObject(jweObject) : jweObject;
+		const jwe = typeof jweObject === "string" ? parseJWEObject(jweObject) : jweObject;
 		return structuredClone(jwe.header);
 	}
 
@@ -539,7 +405,7 @@ export class JWEUtil {
 	 * @throws ParseException if the compact JWE cannot be parsed
 	 */
 	static jweStringToJsonObjectForEnvironment(jweAsString: string, payload: JsonObject): JsonObject {
-		const jweObject = nimbusParseJWEObject(jweAsString);
+		const jweObject = parseJWEObject(jweAsString);
 		const out: JsonObject = {};
 		out["value"] = JSON.stringify(payload);
 		out["claims"] = payload;

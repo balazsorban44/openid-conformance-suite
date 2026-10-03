@@ -18,6 +18,7 @@ is wrong, port it as is and leave a `// UPSTREAM:` comment.
 | `condition/as/Foo.java`, `common/`, `rs/`, `util/`                                                              | `src/condition/as/Foo.ts`, ...                     |
 | `sequence/client/Foo.java`, `sequence/as/`, `sequence/Foo.java`                                                 | `src/sequence/client/Foo.ts`, ...                  |
 | `util/JWKUtil.java`                                                                                             | `src/util/JWKUtil.ts`                              |
+| Nimbus JOSE+JWT / JDK library behaviour (not upstream code)                                                     | `src/util/nimbus/*.ts`, `src/util/jdk/*.ts`        |
 | `variant/ClientAuthType.java`                                                                                   | `src/variant/ClientAuthType.ts`                    |
 | `openid/OIDCCServerTest.java`, `openid/client/...`                                                              | `src/openid/OIDCCServerTest.ts`, ...               |
 | `testmodule/*`, `condition/AbstractCondition`, `sequence/AbstractConditionSequence`, `frontchannel/*`, `plan/*` | `src/framework/*` (already ported, do not re-port) |
@@ -150,22 +151,43 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 
 ## Nimbus JOSE -> `jose`
 
-Use `jose` (https://github.com/panva/jose). The shared helpers live in `src/util/` (JWKUtil, JWSUtil, JWEUtil,
-JWTUtil, JWAUtil); check them before writing new JOSE code. Typical mappings:
+Use `jose` (https://github.com/panva/jose). Two layers:
 
-| Nimbus                                                                                | jose / port                                                                                                              |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `JWT jwt = JWTParser.parse(s)`                                                        | `JWTUtil.parseJWT(s)` -> `{ header, claims, signature... }` (see `src/util/JWTUtil.ts`)                                  |
-| `SignedJWT.parse(s)`                                                                  | `decodeProtectedHeader` + `decodeJwt` (unverified) or JWTUtil helpers                                                    |
-| `JWKSet.parse(json)` / `JWK.parse(json)`                                              | `JWKUtil.parseJWKSet(json)` (validates and returns the JSON-shaped set); jose `importJWK(jwk, alg)` to get a `CryptoKey` |
-| `jwt.verify(new RSASSAVerifier(key))`                                                 | `await jwtVerify(s, key, { algorithms: [alg] })` / `compactVerify`                                                       |
-| `JWSAlgorithm.parse(alg)`                                                             | plain string; validity via `JWSUtil.isValidJWSAlgorithm(alg)`                                                            |
-| `JWSHeader.Builder(alg).keyID(kid).build()`; `SignedJWT(header, claims).sign(signer)` | `new SignJWT(claims).setProtectedHeader({ alg, kid, typ }).sign(privateKey)` or `new CompactSign(payload)`               |
-| `JWEObject`, `JWEDecrypter`, `JWEEncrypter`                                           | `compactDecrypt`, `CompactEncrypt`, see `JWEUtil`                                                                        |
-| `jwt.getJWTClaimsSet().getStringClaim("iss")`                                         | `claims["iss"]` on the decoded claims object                                                                             |
-| `RSAKeyGenerator(2048).keyID(kid).generate()`                                         | `generateKeyPair("RS256", { modulusLength: 2048 })` + `exportJWK`                                                        |
-| `jwk.toPublicJWK()`                                                                   | strip private members (`d, p, q, dp, dq, qi, oth, k`) - see `JWKUtil.toPublicJWKSet`                                     |
-| `Base64URL.encode(bytes)`                                                             | `base64url.encode(bytes)` from jose, or `Buffer...toString("base64url")`                                                 |
+- `src/util/JWKUtil.ts`, `JWSUtil.ts`, `JWEUtil.ts`, `JWTUtil.ts`, `JWAUtil.ts` are lock-tracked 1:1 ports of the
+  upstream util classes and contain only their ported methods (plus re-exports of the emulation they used to hold).
+- `src/util/nimbus/` is **not** lock-tracked: it emulates the Nimbus JOSE+JWT 10.9 API the Java code calls (same
+  JSON member order, same exception classes and messages), on top of jose. `src/util/jdk/` does the same for JDK
+  behaviour (java.net.URI, String.format, ...), when it exists.
+
+**Rule: Nimbus or JDK behaviour lives in `src/util/nimbus` (and `src/util/jdk`); never define it inside a
+condition.** Look there first; if something is missing, extend it there (one copy, faithful to the Nimbus/JDK
+source, the decision documented in a comment) and give it a unit test (`src/util/nimbus/*.test.ts`, `node:test`)
+that pins the result and the exception message. Exception messages end up in the test log, so check them against
+the real library when you can (`java -cp nimbus-jose-jwt.jar Foo.java`).
+
+| Nimbus                                                                                 | jose / port                                                                                                         |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `JWT jwt = JWTParser.parse(s)`                                                         | `JWTUtil.parseJWT(s)` (adds upstream's character check) or `parseJWT(s)` from `nimbus/jwt.ts` -> `JWT` object       |
+| `SignedJWT.parse(s)`                                                                   | `parseSignedJWT(s)` from `nimbus/jwt.ts` (not `JWTUtil.parseJWT` + a type check: the messages differ)               |
+| `JWEObject.parse(s)` / `EncryptedJWT.parse(s)`                                         | `parseJWEObject(s)` from `nimbus/jwt.ts`                                                                            |
+| `JWTClaimsSet.parse(json.toString())` + `toJSONObject()` / `toPayload()`               | `parseClaimsSet(json, includeNullValues)` from `nimbus/jwt.ts`                                                      |
+| `JWKSet.parse(json)` / `JWK.parse(json)`                                               | `JWKUtil.parseJWKSet(json)` / `parseJWK(json)` (`nimbus/jwk.ts`), JSON-shaped; `importKey(jwk, alg)` -> jose key    |
+| `jwk.toPublicJWK()`, `jwk.isPrivate()`, `jwk.getRequiredParams()`                      | `toPublicJWK`, `isPrivate`, `getRequiredParams` (`nimbus/jwk.ts`; the first two also on `JWKUtil`)                  |
+| `jwkSet.toJSONObject(publicOnly)`                                                      | `jwkSetToJSONObject` (`nimbus/jwk.ts`), `JWKUtil.getPublicJwksAsJsonObject` / `getPrivateJwksAsJsonObject`          |
+| `JWKMatcher.forJWSHeader(header)`, `AlternateJWSVerificationKeySelector.selectJWSJwks` | `jwkMatcherForJWSHeader` (`nimbus/jwk.ts`), `selectJWSJwks(header, jwkSet)` (`nimbus/jws.ts`)                       |
+| `KeyType.forAlgorithm`, `Curve.forJWSAlgorithm`, `ECDSA.resolveAlgorithm`              | `keyTypeForAlgorithm`, `curvesForJWSAlgorithm`, `EC_CURVE_ALGORITHM` (`nimbus/algorithms.ts`)                       |
+| `JWSAlgorithm.Family.*`, `JWEAlgorithm.Family.*`, `EncryptionMethod.Family.*`          | `JWS_FAMILY_*`, `JWE_FAMILY_*`, `ENC_FAMILY_*` (`nimbus/algorithms.ts`, re-exported by `JWKUtil`)                   |
+| `JWSAlgorithm.parse(alg)`                                                              | plain string; validity via `JWSUtil.isValidJWSAlgorithm(alg)`                                                       |
+| `RSASSASigner`, `ECDSASigner`, `MACSigner`, `Ed25519Signer`, `DefaultJWSSignerFactory` | `JWSSigner.rsa/ec/mac/ed25519/create` (`nimbus/jws.ts`); `await signer.sign(header, payload)`                       |
+| `jwt.verify(verifier)` (`RSASSAVerifier`, `ECDSAVerifier`, `MACVerifier`, ...)         | `await verifySignedJWT(jwt, { jwk, key })` (`nimbus/jws.ts`): the Nimbus verifier checks, then jose `compactVerify` |
+| `AlgorithmSupportMessage.unsupportedJWSAlgorithm`                                      | `unsupportedJWSAlgorithm` (`nimbus/jws.ts`)                                                                         |
+| `JWEEncrypter` / `JWEDecrypter` implementations                                        | `JWEEncrypter`, `JWEDecrypter` (`nimbus/jwe.ts`), created by `JWEUtil.createEncrypter/createDecrypter`              |
+| `JSONObjectUtils.parse/getString/...`                                                  | `nimbusParseJsonObject`, `nimbusGetString`, ... (`nimbus/json.ts`)                                                  |
+| `java.text.ParseException`, `JOSEException`, `KeyLengthException`                      | `ParseException`, `JOSEException`, `KeyLengthException`, `isJOSEException(e)` (`nimbus/errors.ts`)                  |
+| a `HashMap` whose iteration order decides JSON member order                            | `JavaHashMap` (`nimbus/HashMap.ts`, JDK 21 order)                                                                   |
+| `jwt.getJWTClaimsSet().getStringClaim("iss")`                                          | `claims["iss"]` on the decoded claims object                                                                        |
+| `RSAKeyGenerator(2048).keyID(kid).generate()`                                          | `generateKeyPair("RS256", { modulusLength: 2048 })` + `exportJWK`                                                   |
+| `Base64URL.encode(bytes)`                                                              | `base64url.encode(bytes)` from jose, or `Buffer...toString("base64url")`                                            |
 
 jose is async: conditions that sign/verify become `async evaluate(...)`. jose also validates more strictly than
 Nimbus in places (e.g. unsupported curves); when Java leniently skipped keys, do the same explicitly.
@@ -268,4 +290,5 @@ Everything else is 1:1; these are the known, intentional differences (each is co
 - [ ] Order of checks and side effects on `env` unchanged (keys written/removed/mapped).
 - [ ] Null/empty semantics match (`Strings.isNullOrEmpty` -> `!s`; missing vs JSON null).
 - [ ] No behaviour added, removed or "fixed"; questionable upstream behaviour gets an `// UPSTREAM:` comment.
+- [ ] No Nimbus/JDK emulation defined in the file: it imports it from `src/util/nimbus` / `src/util/jdk`.
 - [ ] `npx tsc --noEmit` passes for the file's imports; `npx oxlint` and `npx oxfmt` clean.

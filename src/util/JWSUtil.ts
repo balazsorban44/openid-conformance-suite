@@ -1,4 +1,10 @@
-import { JWS_FAMILY_EC, JWS_FAMILY_ED, JWS_FAMILY_HMAC_SHA, JWS_FAMILY_RSA, requireAlgorithmName } from "./JWKUtil.ts";
+import {
+	JWS_FAMILY_EC,
+	JWS_FAMILY_ED,
+	JWS_FAMILY_HMAC_SHA,
+	JWS_FAMILY_RSA,
+	requireAlgorithmName,
+} from "./nimbus/algorithms.ts";
 
 export class JWSUtil {
 	/**

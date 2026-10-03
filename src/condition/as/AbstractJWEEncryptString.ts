@@ -1,13 +1,8 @@
-import { errors } from "jose";
 import { args, type JsonObject } from "../../framework/index.ts";
 import { JWEUtil, JOSEException, KeyLengthException, type JWEEncrypter } from "../../util/JWEUtil.ts";
 import { JWE_FAMILY_ASYMMETRIC, ParseException, type JWK, type JWKSet } from "../../util/JWKUtil.ts";
+import { isJOSEException } from "../../util/nimbus/errors.ts";
 import { AbstractLenientJwksCondition } from "../AbstractLenientJwksCondition.ts";
-
-/** Nimbus JOSEException equivalents: the util's JOSEException, jose's errors, and jose's key validation TypeErrors */
-function isJOSEException(e: unknown): boolean {
-	return e instanceof JOSEException || e instanceof errors.JOSEError || e instanceof TypeError;
-}
 
 /**
  * Can be used to encrypt id tokens, userinfo responses, request objects
@@ -155,7 +150,8 @@ export abstract class AbstractJWEEncryptString extends AbstractLenientJwksCondit
 			// Serialise to JWE compact form
 			jweString = await (jweEncrypter as JWEEncrypter).encrypt(jweHeader, stringToBeEncrypted);
 		} catch (e) {
-			if (isJOSEException(e)) {
+			// TS: jose reports key problems Nimbus' encrypters throw a JOSEException for as a TypeError
+			if (isJOSEException(e) || e instanceof TypeError) {
 				throw this.error(
 					"Encryption failed",
 					e,

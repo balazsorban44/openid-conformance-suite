@@ -1,24 +1,8 @@
-import { errors } from "jose";
 import { args, type Environment, type EnvironmentRequirements } from "../../framework/index.ts";
-import { JOSEException } from "../../util/JWEUtil.ts";
 import { ParseException } from "../../util/JWKUtil.ts";
-import { JWTUtil, type JWT } from "../../util/JWTUtil.ts";
+import { isJOSEException } from "../../util/nimbus/errors.ts";
+import { parseSignedJWT } from "../../util/nimbus/jwt.ts";
 import { AbstractVerifyJwsSignature } from "../client/AbstractVerifyJwsSignature.ts";
-
-/**
- * Nimbus SignedJWT.parse(s): like JWTParser.parse, but only accepts a JWS.
- * @throws ParseException
- */
-function parseSignedJWT(s: string): JWT {
-	const jwt = JWTUtil.parseJWT(s);
-	if (jwt.type !== "signed") {
-		if (jwt.parts.length !== 3) {
-			throw new ParseException("Unexpected number of Base64URL parts, must be three");
-		}
-		throw new ParseException("Invalid JWS header: Not a JWS header");
-	}
-	return jwt;
-}
 
 export class ValidateClientAssertionSignatureWithHMACAlgorithm extends AbstractVerifyJwsSignature {
 	static override pre: EnvironmentRequirements = { required: ["client", "client_assertion"] };
@@ -40,7 +24,7 @@ export class ValidateClientAssertionSignatureWithHMACAlgorithm extends AbstractV
 				);
 			}
 		} catch (ex) {
-			if (ex instanceof JOSEException || ex instanceof errors.JOSEError) {
+			if (isJOSEException(ex)) {
 				throw this.error(
 					"Failed to validate client assertion",
 					ex,

@@ -1,45 +1,7 @@
 import { AbstractCondition, args, type JsonObject } from "../../framework/index.ts";
-import {
-	JWE_FAMILY_AES_GCM_KW,
-	JWE_FAMILY_AES_KW,
-	JWE_FAMILY_ASYMMETRIC,
-	JWE_FAMILY_ECDH_ES,
-	JWE_FAMILY_PBES2,
-	JWE_FAMILY_RSA,
-	JWKUtil,
-	JWS_FAMILY_EC,
-	JWS_FAMILY_ED,
-	JWS_FAMILY_HMAC_SHA,
-	JWS_FAMILY_RSA,
-	ParseException,
-} from "../../util/JWKUtil.ts";
+import { JWE_FAMILY_ASYMMETRIC, JWKUtil, ParseException } from "../../util/JWKUtil.ts";
 import { JWTUtil } from "../../util/JWTUtil.ts";
-
-/** Nimbus `KeyType.forAlgorithm(new Algorithm(name))`, returning the `kty` value (null when unknown). */
-function keyTypeForAlgorithm(alg: string): string | null {
-	if (JWS_FAMILY_RSA.includes(alg)) {
-		return "RSA";
-	} else if (JWS_FAMILY_EC.includes(alg)) {
-		return "EC";
-	} else if (JWS_FAMILY_HMAC_SHA.includes(alg)) {
-		return "oct";
-	} else if (JWE_FAMILY_RSA.includes(alg)) {
-		return "RSA";
-	} else if (JWE_FAMILY_ECDH_ES.includes(alg)) {
-		return "EC";
-	} else if ("dir" === alg) {
-		return "oct";
-	} else if (JWE_FAMILY_AES_GCM_KW.includes(alg)) {
-		return "oct";
-	} else if (JWE_FAMILY_AES_KW.includes(alg)) {
-		return "oct";
-	} else if (JWE_FAMILY_PBES2.includes(alg)) {
-		return "oct";
-	} else if (JWS_FAMILY_ED.includes(alg)) {
-		return "OKP";
-	}
-	return null;
-}
+import { keyTypeForAlgorithm } from "../../util/nimbus/algorithms.ts";
 
 export abstract class AbstractVerifyJweEncryption extends AbstractCondition {
 	protected verifyJweEncryption(token: string, publicJwks: JsonObject, tokenName: string): boolean {

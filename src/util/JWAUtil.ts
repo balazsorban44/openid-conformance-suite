@@ -1,4 +1,4 @@
-import { JWS_FAMILY_HMAC_SHA, JWS_FAMILY_SIGNATURE } from "./JWKUtil.ts";
+import { JWS_FAMILY_HMAC_SHA, JWS_FAMILY_SIGNATURE } from "./nimbus/algorithms.ts";
 
 export class InvalidAlgorithmException extends Error {
 	constructor(algorithm: string) {

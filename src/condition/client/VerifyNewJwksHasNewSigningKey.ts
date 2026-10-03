@@ -1,14 +1,7 @@
 import { args, OIDFJSON, type JsonObject } from "../../framework/index.ts";
 import { JWKUtil, ParseException } from "../../util/JWKUtil.ts";
+import { getRequiredParams } from "../../util/nimbus/jwk.ts";
 import { AbstractCompareJwks } from "./AbstractCompareJwks.ts";
-
-/** Nimbus `JWK.getRequiredParams()` (the RFC 7638 thumbprint members, in lexicographic order) per key type */
-const REQUIRED_PARAMS: Record<string, string[]> = {
-	RSA: ["e", "kty", "n"],
-	EC: ["crv", "kty", "x", "y"],
-	OKP: ["crv", "kty", "x"],
-	oct: ["k", "kty"],
-};
 
 export class VerifyNewJwksHasNewSigningKey extends AbstractCompareJwks {
 	/**
@@ -25,10 +18,7 @@ export class VerifyNewJwksHasNewSigningKey extends AbstractCompareJwks {
 		for (const key of inputKeys) {
 			try {
 				const jwk = JWKUtil.parseJWK(JSON.stringify(key));
-				const requiredParamsJson: JsonObject = {};
-				for (const param of REQUIRED_PARAMS[jwk["kty"] as string] ?? []) {
-					requiredParamsJson[param] = jwk[param];
-				}
+				const requiredParamsJson: JsonObject = getRequiredParams(jwk);
 				requiredParamsJson["kid"] = (jwk["kid"] as string | undefined) ?? null;
 				AbstractCompareJwks.addToSet(out, requiredParamsJson);
 			} catch (e) {

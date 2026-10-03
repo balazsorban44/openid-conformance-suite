@@ -1,5 +1,4 @@
-import { createPublicKey, X509Certificate } from "node:crypto";
-import { importJWK, type CryptoKey, type JWK as JoseJWK } from "jose";
+import type { CryptoKey } from "jose";
 import type { Environment } from "../framework/Environment.ts";
 import {
 	isJsonArray,
@@ -10,31 +9,44 @@ import {
 	type JsonObject,
 	type JsonValue,
 } from "../framework/json.ts";
+import {
+	JWE_FAMILY_ASYMMETRIC,
+	JWE_FAMILY_SYMMETRIC,
+	JWS_FAMILY_EC,
+	JWS_FAMILY_ED,
+	JWS_FAMILY_SIGNATURE,
+} from "./nimbus/algorithms.ts";
+import { ParseException } from "./nimbus/errors.ts";
+import * as nimbusJwk from "./nimbus/jwk.ts";
+import {
+	EC_SUPPORTED_CURVES,
+	jwkSetToJSONObject,
+	OKP_SUPPORTED_CURVES,
+	parseCurve,
+	type JWK,
+	type JWKSet,
+} from "./nimbus/jwk.ts";
 
-/**
- * A JSON Web Key as plain JSON. Replaces Nimbus `com.nimbusds.jose.jwk.JWK` (and its subclasses `RSAKey`,
- * `ECKey`, `OctetKeyPair`, `OctetSequenceKey`). It is both a {@link JsonObject} (so it can be stored in the
- * environment as is) and a jose `JWK` (so it can be passed to `importJWK`).
- */
-export type JWK = JsonObject & JoseJWK;
-
-/** A JSON Web Key set as plain JSON. Replaces Nimbus `com.nimbusds.jose.jwk.JWKSet`. */
-export type JWKSet = JsonObject & { keys: JWK[] };
-
-/** Port of `java.text.ParseException`, thrown where Nimbus parse methods throw it. */
-export class ParseException extends Error {
-	readonly errorOffset: number;
-
-	constructor(message: string, errorOffset = 0, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "ParseException";
-		this.errorOffset = errorOffset;
-	}
-
-	getErrorOffset(): number {
-		return this.errorOffset;
-	}
-}
+// The Nimbus emulation lives in ./nimbus/; re-exported here for the ported code that imports it from JWKUtil.
+export type { JWK, JWKSet } from "./nimbus/jwk.ts";
+export { ParseException } from "./nimbus/errors.ts";
+export {
+	ENC_FAMILY_AES_CBC_HMAC_SHA,
+	ENC_FAMILY_AES_GCM,
+	JWE_FAMILY_AES_GCM_KW,
+	JWE_FAMILY_AES_KW,
+	JWE_FAMILY_ASYMMETRIC,
+	JWE_FAMILY_ECDH_1PU,
+	JWE_FAMILY_ECDH_ES,
+	JWE_FAMILY_PBES2,
+	JWE_FAMILY_RSA,
+	JWE_FAMILY_SYMMETRIC,
+	JWS_FAMILY_EC,
+	JWS_FAMILY_ED,
+	JWS_FAMILY_HMAC_SHA,
+	JWS_FAMILY_RSA,
+	JWS_FAMILY_SIGNATURE,
+} from "./nimbus/algorithms.ts";
 
 /** Port of `org.openqa.selenium.InvalidArgumentException` as thrown by JWKUtil. */
 export class InvalidArgumentException extends Error {
@@ -68,773 +80,6 @@ export class JwkIssue {
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Nimbus algorithm families (com.nimbusds.jose.JWSAlgorithm.Family / JWEAlgorithm.Family), as explicit lists.
-// ---------------------------------------------------------------------------------------------------------------
-
-/** JWSAlgorithm.Family.HMAC_SHA */
-export const JWS_FAMILY_HMAC_SHA: readonly string[] = ["HS256", "HS384", "HS512"];
-/** JWSAlgorithm.Family.RSA */
-export const JWS_FAMILY_RSA: readonly string[] = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512"];
-/** JWSAlgorithm.Family.EC */
-export const JWS_FAMILY_EC: readonly string[] = ["ES256", "ES256K", "ES384", "ES512"];
-/** JWSAlgorithm.Family.ED */
-export const JWS_FAMILY_ED: readonly string[] = ["EdDSA", "Ed25519", "Ed448"];
-/** JWSAlgorithm.Family.SIGNATURE (RSA + EC + ED) */
-export const JWS_FAMILY_SIGNATURE: readonly string[] = [...JWS_FAMILY_RSA, ...JWS_FAMILY_EC, ...JWS_FAMILY_ED];
-
-/** JWEAlgorithm.Family.RSA */
-export const JWE_FAMILY_RSA: readonly string[] = ["RSA1_5", "RSA-OAEP", "RSA-OAEP-256", "RSA-OAEP-384", "RSA-OAEP-512"];
-/** JWEAlgorithm.Family.AES_KW */
-export const JWE_FAMILY_AES_KW: readonly string[] = ["A128KW", "A192KW", "A256KW"];
-/** JWEAlgorithm.Family.ECDH_ES */
-export const JWE_FAMILY_ECDH_ES: readonly string[] = ["ECDH-ES", "ECDH-ES+A128KW", "ECDH-ES+A192KW", "ECDH-ES+A256KW"];
-/** JWEAlgorithm.Family.ECDH_1PU */
-export const JWE_FAMILY_ECDH_1PU: readonly string[] = [
-	"ECDH-1PU",
-	"ECDH-1PU+A128KW",
-	"ECDH-1PU+A192KW",
-	"ECDH-1PU+A256KW",
-];
-/** JWEAlgorithm.Family.AES_GCM_KW */
-export const JWE_FAMILY_AES_GCM_KW: readonly string[] = ["A128GCMKW", "A192GCMKW", "A256GCMKW"];
-/** JWEAlgorithm.Family.PBES2 */
-export const JWE_FAMILY_PBES2: readonly string[] = ["PBES2-HS256+A128KW", "PBES2-HS384+A192KW", "PBES2-HS512+A256KW"];
-/** JWEAlgorithm.Family.ASYMMETRIC (RSA + ECDH_ES) */
-export const JWE_FAMILY_ASYMMETRIC: readonly string[] = [...JWE_FAMILY_RSA, ...JWE_FAMILY_ECDH_ES];
-/** JWEAlgorithm.Family.SYMMETRIC (AES_KW + AES_GCM_KW + dir) */
-export const JWE_FAMILY_SYMMETRIC: readonly string[] = [...JWE_FAMILY_AES_KW, ...JWE_FAMILY_AES_GCM_KW, "dir"];
-
-/** EncryptionMethod.Family.AES_CBC_HMAC_SHA */
-export const ENC_FAMILY_AES_CBC_HMAC_SHA: readonly string[] = ["A128CBC-HS256", "A192CBC-HS384", "A256CBC-HS512"];
-/** EncryptionMethod.Family.AES_GCM */
-export const ENC_FAMILY_AES_GCM: readonly string[] = ["A128GCM", "A192GCM", "A256GCM"];
-
-/**
- * @internal Nimbus `JWSAlgorithm.parse(null)` / `JWEAlgorithm.parse(null)` / `EncryptionMethod.parse(null)` throw a
- * NullPointerException; the predicates built on them do the same.
- */
-export function requireAlgorithmName(name: string | null | undefined): string {
-	if (name == null) {
-		throw new TypeError('Cannot invoke "String.equals(Object)" because "s" is null');
-	}
-	return name;
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Minimal port of the Nimbus JSON / JWK parsing semantics (JSONObjectUtils, JWK.parse, JWKSet.parse,
-// JWK.toJSONObject). The JSON form produced here has the same members, in the same order, as Nimbus'
-// toJSONObject(): members Nimbus does not know are dropped, as they are when Java round-trips via Nimbus.
-// ---------------------------------------------------------------------------------------------------------------
-
-/** Nimbus JSONObjectUtils.getGeneric: null when missing or JSON null; throws on a wrong type. */
-function nimbusGet<T>(o: JsonObject, name: string, check: (v: JsonValue) => v is T & JsonValue): T | null {
-	const value = o[name];
-	if (value == null) {
-		return null;
-	}
-	if (!check(value)) {
-		throw new ParseException("Unexpected type of JSON object member " + name + "");
-	}
-	return value;
-}
-
-const isStr = (v: JsonValue): v is string => typeof v === "string";
-const isNum = (v: JsonValue): v is number => typeof v === "number";
-const isBool = (v: JsonValue): v is boolean => typeof v === "boolean";
-const isArr = (v: JsonValue): v is JsonArray => Array.isArray(v);
-const isObj = (v: JsonValue): v is JsonObject => isJsonObject(v);
-
-/** @internal Nimbus JSONObjectUtils.getString */
-export function nimbusGetString(o: JsonObject, name: string): string | null {
-	return nimbusGet(o, name, isStr);
-}
-
-/** @internal Nimbus JSONObjectUtils.getJSONArray */
-export function nimbusGetJSONArray(o: JsonObject, name: string): JsonArray | null {
-	return nimbusGet(o, name, isArr);
-}
-
-/** @internal Nimbus JSONObjectUtils.getJSONObject */
-export function nimbusGetJSONObject(o: JsonObject, name: string): JsonObject | null {
-	return nimbusGet(o, name, isObj);
-}
-
-/** @internal Nimbus JSONObjectUtils.getBoolean (throws when missing) */
-export function nimbusGetBoolean(o: JsonObject, name: string): boolean {
-	const v = nimbusGet(o, name, isBool);
-	if (v == null) {
-		throw new ParseException("JSON object member " + name + " is missing or null");
-	}
-	return v;
-}
-
-/** @internal Nimbus JSONObjectUtils.getLong / getInt (throws when missing; truncates like Number.longValue()) */
-export function nimbusGetLong(o: JsonObject, name: string): number {
-	const v = nimbusGet(o, name, isNum);
-	if (v == null) {
-		throw new ParseException("JSON object member " + name + " is missing or null");
-	}
-	return Math.trunc(v);
-}
-
-/** @internal Nimbus JSONObjectUtils.getStringList */
-export function nimbusGetStringList(o: JsonObject, name: string): (string | null)[] | null {
-	const arr = nimbusGetJSONArray(o, name);
-	if (arr == null) {
-		return null;
-	}
-	for (const item of arr) {
-		if (item !== null && typeof item !== "string") {
-			throw new ParseException("JSON object member " + name + " is not an array of strings");
-		}
-	}
-	return arr as (string | null)[];
-}
-
-/** @internal Nimbus JSONObjectUtils.getURI (java.net.URI syntax check, approximated) */
-export function nimbusGetURI(o: JsonObject, name: string): string | null {
-	const value = nimbusGetString(o, name);
-	if (value == null) {
-		return null;
-	}
-	// java.net.URI rejects whitespace, control characters and a few ASCII punctuation characters
-	// oxlint-disable-next-line no-control-regex
-	const m = /[\s"<>\\^`{|}\u0000-\u001f\u007f]/.exec(value);
-	if (m) {
-		throw new ParseException(uriSyntaxMessage(value, m.index));
-	}
-	return value;
-}
-
-/** The java.net.URISyntaxException message for an illegal character (approximating which component it is in). */
-function uriSyntaxMessage(value: string, index: number): string {
-	const schemeEnd = value.indexOf(":");
-	let component = "path";
-	if (schemeEnd !== -1 && index < schemeEnd) {
-		component = "scheme name";
-	} else {
-		const hashIndex = value.indexOf("#");
-		const queryIndex = value.indexOf("?");
-		if (hashIndex !== -1 && index > hashIndex) {
-			component = "fragment";
-		} else if (queryIndex !== -1 && index > queryIndex) {
-			component = "query";
-		} else if (schemeEnd !== -1 && value.startsWith("//", schemeEnd + 1)) {
-			const authorityStart = schemeEnd + 3;
-			const rest = value.substring(authorityStart).search(/[/?#]/);
-			const authorityEnd = rest === -1 ? value.length : authorityStart + rest;
-			if (index < authorityEnd) {
-				component = "authority";
-			}
-		}
-	}
-	return "Illegal character in " + component + " at index " + index + ": " + value;
-}
-
-/**
- * @internal Emulates the iteration order of a `java.util.HashMap` (JDK 21): Nimbus serializes headers, claims,
- * JWKs and JWK sets through HashMaps, so the Java JSON objects have their members in hash order, not in insertion
- * order. Integer-like member names still come first in a JS object, whatever is done here.
- */
-export class JavaHashMap {
-	private table: string[][] | null = null;
-	private threshold = 0;
-	private readonly values = new Map<string, JsonValue>();
-
-	static of(entries: Iterable<[string, JsonValue]>): JavaHashMap {
-		const m = new JavaHashMap();
-		for (const [k, v] of entries) {
-			m.put(k, v);
-		}
-		return m;
-	}
-
-	/** java.lang.String.hashCode() spread as in HashMap.hash() */
-	private static hash(key: string): number {
-		let h = 0;
-		for (let i = 0; i < key.length; i++) {
-			h = (Math.imul(31, h) + key.charCodeAt(i)) | 0;
-		}
-		return h ^ (h >>> 16);
-	}
-
-	private static tableSizeFor(c: number): number {
-		let n = 1;
-		while (n < c) {
-			n *= 2;
-		}
-		return n;
-	}
-
-	private resize(): void {
-		const oldCap = this.table?.length ?? 0;
-		const oldThr = this.threshold;
-		let newCap: number;
-		let newThr: number;
-		if (oldCap > 0) {
-			newCap = oldCap * 2;
-			newThr = oldCap >= 16 ? oldThr * 2 : Math.floor(newCap * 0.75);
-		} else if (oldThr > 0) {
-			newCap = oldThr;
-			newThr = Math.floor(newCap * 0.75);
-		} else {
-			newCap = 16;
-			newThr = 12;
-		}
-		const newTable: string[][] = Array.from({ length: newCap }, () => []);
-		for (const bucket of this.table ?? []) {
-			for (const key of bucket) {
-				newTable[JavaHashMap.hash(key) & (newCap - 1)].push(key);
-			}
-		}
-		this.table = newTable;
-		this.threshold = newThr;
-	}
-
-	put(key: string, value: JsonValue): void {
-		if (this.values.has(key)) {
-			this.values.set(key, value);
-			return;
-		}
-		if (this.table == null) {
-			this.resize();
-		}
-		const table = this.table as string[][];
-		table[JavaHashMap.hash(key) & (table.length - 1)].push(key);
-		this.values.set(key, value);
-		if (this.values.size > this.threshold) {
-			this.resize();
-		}
-	}
-
-	putAll(entries: [string, JsonValue][]): void {
-		const s = entries.length;
-		if (s > 0) {
-			if (this.table == null) {
-				// pre-size
-				const t = Math.ceil(s / 0.75);
-				if (t > this.threshold) {
-					this.threshold = JavaHashMap.tableSizeFor(t);
-				}
-			} else {
-				while (s > this.threshold) {
-					this.resize();
-				}
-			}
-			for (const [k, v] of entries) {
-				this.put(k, v);
-			}
-		}
-	}
-
-	entries(): [string, JsonValue][] {
-		const out: [string, JsonValue][] = [];
-		for (const bucket of this.table ?? []) {
-			for (const key of bucket) {
-				out.push([key, this.values.get(key) as JsonValue]);
-			}
-		}
-		return out;
-	}
-
-	toJsonObject(): JsonObject {
-		const o: JsonObject = {};
-		for (const [k, v] of this.entries()) {
-			o[k] = v;
-		}
-		return o;
-	}
-}
-
-/**
- * @internal Nimbus JSONObjectUtils.parse(String): strict JSON, the top level must be an object and duplicate member
- * names are rejected (Gson's map adapter throws on them). Any failure is "Invalid JSON object".
- */
-export function nimbusParseJsonObject(s: string, sizeLimit = -1): JsonObject {
-	if (s.trim().length === 0) {
-		throw new ParseException("Invalid JSON object");
-	}
-	if (sizeLimit >= 0 && s.length > sizeLimit) {
-		throw new ParseException("The parsed string is longer than the max accepted size of " + sizeLimit + " characters");
-	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(s);
-	} catch {
-		throw new ParseException("Invalid JSON object");
-	}
-	if (parsed === null) {
-		// Gson returns null for a JSON null; Nimbus then fails with a NullPointerException
-		throw new TypeError('Cannot invoke "java.util.Map.get(Object)" because "o" is null');
-	}
-	if (isJsonArray(parsed)) {
-		// Gson's map adapter also accepts the array-of-pairs form: [["k", v], ...]
-		const map: JsonObject = {};
-		for (const pair of parsed) {
-			if (!isJsonArray(pair) || pair.length !== 2 || (typeof pair[0] !== "string" && typeof pair[0] !== "number")) {
-				throw new ParseException("Invalid JSON object");
-			}
-			const key = String(pair[0]);
-			if (key in map) {
-				throw new ParseException("Invalid JSON object");
-			}
-			map[key] = pair[1];
-		}
-		return map;
-	}
-	if (!isJsonObject(parsed) || hasDuplicateKeys(s)) {
-		throw new ParseException("Invalid JSON object");
-	}
-	return parsed;
-}
-
-/**
- * Scans already-valid JSON text for a repeated member name in the top-level object (Gson's map adapter rejects
- * those; nested objects are read by its ObjectTypeAdapter, where the last value wins, as with JSON.parse).
- */
-function hasDuplicateKeys(text: string): boolean {
-	let i = 0;
-	let depth = 0;
-	const skipWs = () => {
-		while (i < text.length && " \t\n\r".includes(text[i])) {
-			i++;
-		}
-	};
-	const readString = (): string => {
-		const start = i;
-		i++; // opening quote
-		while (text[i] !== '"') {
-			if (text[i] === "\\") {
-				i++;
-			}
-			i++;
-		}
-		i++; // closing quote
-		return JSON.parse(text.slice(start, i)) as string;
-	};
-	const readValue = (): boolean => {
-		skipWs();
-		const c = text[i];
-		if (c === "{") {
-			i++;
-			const topLevel = depth === 0;
-			depth++;
-			const seen = new Set<string>();
-			skipWs();
-			if (text[i] === "}") {
-				i++;
-				return false;
-			}
-			for (;;) {
-				skipWs();
-				const key = readString();
-				if (topLevel && seen.has(key)) {
-					return true;
-				}
-				seen.add(key);
-				skipWs();
-				i++; // ':'
-				if (readValue()) {
-					return true;
-				}
-				skipWs();
-				if (text[i] === ",") {
-					i++;
-					continue;
-				}
-				i++; // '}'
-				return false;
-			}
-		}
-		if (c === "[") {
-			i++;
-			skipWs();
-			if (text[i] === "]") {
-				i++;
-				return false;
-			}
-			for (;;) {
-				if (readValue()) {
-					return true;
-				}
-				skipWs();
-				if (text[i] === ",") {
-					i++;
-					continue;
-				}
-				i++; // ']'
-				return false;
-			}
-		}
-		if (c === '"') {
-			readString();
-			return false;
-		}
-		while (i < text.length && !",]} \t\n\r".includes(text[i])) {
-			i++;
-		}
-		return false;
-	};
-	return readValue();
-}
-
-const EC_SUPPORTED_CURVES = ["P-256", "secp256k1", "P-384", "P-521"];
-const OKP_SUPPORTED_CURVES = ["Ed25519", "Ed448", "X25519", "X448"];
-const KEY_OPERATIONS = ["sign", "verify", "encrypt", "decrypt", "wrapKey", "unwrapKey", "deriveKey", "deriveBits"];
-const KEY_USE_OPS: Record<string, string[]> = {
-	sig: ["sign", "verify"],
-	enc: ["encrypt", "decrypt", "wrapKey", "unwrapKey"],
-};
-
-/** Nimbus Curve.parse */
-function parseCurve(s: string | null): string {
-	if (s == null || s.trim().length === 0) {
-		throw new Error("The cryptographic curve string must not be null or empty");
-	}
-	return s;
-}
-
-/** Big-endian unsigned integer comparison of two base64url values (Base64URL.decodeToBigInteger().equals) */
-function sameBigInteger(a: string, b: string): boolean {
-	const strip = (buf: Buffer) => {
-		let i = 0;
-		while (i < buf.length - 1 && buf[i] === 0) {
-			i++;
-		}
-		return buf.subarray(i).toString("hex");
-	};
-	return strip(Buffer.from(a, "base64url")) === strip(Buffer.from(b, "base64url"));
-}
-
-/**
- * Port of `com.nimbusds.jose.jwk.JWK.parse(Map)`: validates the key the way Nimbus does (same error messages) and
- * returns the JSON produced by Nimbus' `toJSONObject()` for it.
- */
-function nimbusParseJWK(o: JsonObject): JWK {
-	const kty = nimbusGetString(o, "kty");
-	if (kty == null) {
-		throw new ParseException('Missing key type "kty" parameter');
-	}
-	if (kty !== "EC" && kty !== "RSA" && kty !== "oct" && kty !== "OKP") {
-		throw new ParseException('Unsupported key type "kty" parameter: ' + kty);
-	}
-
-	// type specific parameters, read before the metadata as in the Nimbus parse methods
-	let crv: string | null = null;
-	const params: Record<string, string | null> = {};
-	let oth: JsonArray | null = null;
-	try {
-		if (kty === "EC" || kty === "OKP") {
-			crv = parseCurve(nimbusGetString(o, "crv"));
-		}
-	} catch (e) {
-		if (e instanceof ParseException) {
-			throw e;
-		}
-		throw new ParseException((e as Error).message);
-	}
-	const typeParams: Record<string, string[]> = {
-		EC: ["x", "y", "d"],
-		OKP: ["x", "d"],
-		RSA: ["n", "e", "d", "p", "q", "dp", "dq", "qi"],
-		oct: ["k"],
-	};
-	for (const p of typeParams[kty]) {
-		params[p] = nimbusGetString(o, p);
-	}
-	if (kty === "RSA" && "oth" in o) {
-		oth = nimbusGetJSONArray(o, "oth");
-		if (oth != null) {
-			for (const item of oth) {
-				if (isJsonObject(item)) {
-					for (const m of ["r", "d", "t"]) {
-						if (nimbusGetString(item, m) == null) {
-							throw new ParseException("The " + m + " value must not be null");
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// metadata (JWKMetadata.parse*)
-	const use = nimbusGetString(o, "use");
-	if (use != null && use !== "sig" && use !== "enc" && use.trim().length === 0) {
-		throw new ParseException("JWK use value must not be empty or blank");
-	}
-	let ops: string[] | null = null;
-	const opsList = nimbusGetStringList(o, "key_ops");
-	if (opsList != null) {
-		ops = [];
-		for (const s of opsList) {
-			if (s == null) {
-				continue;
-			}
-			if (!KEY_OPERATIONS.includes(s)) {
-				throw new ParseException("Invalid JWK operation: " + s);
-			}
-			if (!ops.includes(s)) {
-				ops.push(s);
-			}
-		}
-	}
-	const alg = nimbusGetString(o, "alg");
-	const kid = nimbusGetString(o, "kid");
-	const x5u = nimbusGetURI(o, "x5u");
-	const x5t = nimbusGetString(o, "x5t");
-	const x5t256 = nimbusGetString(o, "x5t#S256");
-	let x5c: string[] | null = null;
-	const x5cArr = nimbusGetJSONArray(o, "x5c");
-	if (x5cArr != null) {
-		x5c = [];
-		for (let i = 0; i < x5cArr.length; i++) {
-			const item = x5cArr[i];
-			if (item == null) {
-				throw new ParseException("The X.509 certificate at position " + i + " must not be null");
-			}
-			if (typeof item !== "string") {
-				throw new ParseException("The X.509 certificate at position " + i + " must be encoded as a Base64 string");
-			}
-			x5c.push(item);
-		}
-		if (x5c.length === 0) {
-			x5c = null; // Empty chains not allowed
-		}
-	}
-	const exp = o["exp"] == null ? null : nimbusGetLong(o, "exp");
-	const nbf = o["nbf"] == null ? null : nimbusGetLong(o, "nbf");
-	const iat = o["iat"] == null ? null : nimbusGetLong(o, "iat");
-	let revoked: JsonObject | null = null;
-	if (o["revoked"] != null) {
-		revoked = nimbusGetJSONObject(o, "revoked") as JsonObject;
-		const revokedOut: JsonObject = { revoked_at: nimbusGetLong(revoked, "revoked_at") };
-		if (revoked["reason"] != null) {
-			revokedOut["reason"] = nimbusGetString(revoked, "reason");
-		}
-		revoked = JavaHashMap.of(Object.entries(revokedOut)).toJsonObject();
-	}
-
-	// constructor checks (thrown as IllegalArgumentException / NullPointerException in Java, wrapped into a
-	// ParseException with the same message by the parse methods)
-	if (use != null && ops != null && KEY_USE_OPS[use] && !ops.every((op) => KEY_USE_OPS[use].includes(op))) {
-		throw new ParseException(
-			'The key use "use" and key options "key_ops" parameters are not consistent, see RFC 7517, section 4.3',
-		);
-	}
-	let firstCert: X509Certificate | null = null;
-	if (x5c != null) {
-		for (let i = 0; i < x5c.length; i++) {
-			try {
-				const cert = new X509Certificate(Buffer.from(x5c[i], "base64"));
-				if (i === 0) {
-					firstCert = cert;
-				}
-			} catch (e) {
-				throw new ParseException(
-					'Invalid X.509 certificate chain "x5c": Invalid X.509 certificate at position ' +
-						i +
-						": " +
-						(e as Error).message,
-				);
-			}
-		}
-	}
-
-	const certMismatch =
-		"The public subject key info of the first X.509 certificate in the chain must match the JWK type and public parameters";
-	if (kty === "EC") {
-		if (params["x"] == null) {
-			throw new ParseException("The x coordinate must not be null");
-		}
-		if (params["y"] == null) {
-			throw new ParseException("The y coordinate must not be null");
-		}
-		if (!EC_SUPPORTED_CURVES.includes(crv as string)) {
-			throw new ParseException("Unknown / unsupported curve: " + crv);
-		}
-		try {
-			createPublicKey({ key: { kty: "EC", crv: crv as string, x: params["x"], y: params["y"] }, format: "jwk" });
-		} catch {
-			throw new ParseException("Invalid EC JWK: The 'x' and 'y' public coordinates are not on the " + crv + " curve");
-		}
-		if (firstCert != null) {
-			const certJwk = certPublicJwk(firstCert);
-			if (
-				certJwk?.kty !== "EC" ||
-				!sameBigInteger(params["x"], certJwk.x as string) ||
-				!sameBigInteger(params["y"], certJwk.y as string)
-			) {
-				throw new ParseException(certMismatch);
-			}
-		}
-	} else if (kty === "RSA") {
-		if (params["n"] == null) {
-			throw new ParseException("The modulus value must not be null");
-		}
-		if (params["e"] == null) {
-			throw new ParseException("The public exponent value must not be null");
-		}
-		if (firstCert != null) {
-			const certJwk = certPublicJwk(firstCert);
-			if (
-				certJwk?.kty !== "RSA" ||
-				!sameBigInteger(params["e"], certJwk.e as string) ||
-				!sameBigInteger(params["n"], certJwk.n as string)
-			) {
-				throw new ParseException(certMismatch);
-			}
-		}
-		const crt = ["p", "q", "dp", "dq", "qi"].map((p) => params[p]);
-		const allSet = crt.every((v) => v != null);
-		const noneSet = crt.every((v) => v == null);
-		if (!allSet && !noneSet) {
-			const names = [
-				"The first prime factor",
-				"The second prime factor",
-				"The first factor CRT exponent",
-				"The second factor CRT exponent",
-				"The first CRT coefficient",
-			];
-			const missing = crt.findIndex((v) => v == null);
-			throw new ParseException(
-				"Incomplete second private (CRT) representation: " + names[missing] + " must not be null",
-			);
-		}
-	} else if (kty === "OKP") {
-		if (!OKP_SUPPORTED_CURVES.includes(crv as string)) {
-			throw new ParseException("Unknown / unsupported curve: " + crv);
-		}
-		if (params["x"] == null) {
-			throw new ParseException("The x parameter must not be null");
-		}
-	} else if (params["k"] == null) {
-		throw new ParseException("The key value must not be null");
-	}
-
-	// JWK.toJSONObject()
-	const out: JsonObject = { kty }; // JWK.toJSONObject() puts in this order into a HashMap
-	if (use != null) {
-		out["use"] = use;
-	}
-	if (ops != null) {
-		out["key_ops"] = ops;
-	}
-	if (alg != null) {
-		out["alg"] = alg;
-	}
-	if (kid != null) {
-		out["kid"] = kid;
-	}
-	if (x5u != null) {
-		out["x5u"] = x5u;
-	}
-	if (x5t != null) {
-		out["x5t"] = x5t;
-	}
-	if (x5t256 != null) {
-		out["x5t#S256"] = x5t256;
-	}
-	if (x5c != null) {
-		out["x5c"] = x5c;
-	}
-	if (exp != null) {
-		out["exp"] = exp;
-	}
-	if (nbf != null) {
-		out["nbf"] = nbf;
-	}
-	if (iat != null) {
-		out["iat"] = iat;
-	}
-	if (revoked != null) {
-		out["revoked"] = revoked;
-	}
-	if (kty === "EC" || kty === "OKP") {
-		out["crv"] = crv;
-	}
-	for (const p of typeParams[kty]) {
-		if (params[p] != null) {
-			out[p] = params[p];
-		}
-	}
-	if (oth != null && oth.length > 0 && params["p"] != null) {
-		out["oth"] = oth
-			.filter((x) => isJsonObject(x))
-			.map((x) => JavaHashMap.of(Object.entries({ r: x["r"], d: x["d"], t: x["t"] })).toJsonObject());
-	}
-	return JavaHashMap.of(Object.entries(out)).toJsonObject() as JWK;
-}
-
-/** Member order of Nimbus JWK.toJSONObject() before hashing. */
-const JWK_MEMBER_ORDER = [
-	"kty",
-	"use",
-	"key_ops",
-	"alg",
-	"kid",
-	"x5u",
-	"x5t",
-	"x5t#S256",
-	"x5c",
-	"exp",
-	"nbf",
-	"iat",
-	"revoked",
-	"crv",
-	"x",
-	"y",
-	"n",
-	"e",
-	"d",
-	"p",
-	"q",
-	"dp",
-	"dq",
-	"qi",
-	"oth",
-	"k",
-];
-
-/** @internal Re-orders JWK members as Nimbus' toJSONObject() does (unknown members kept, after the known ones). */
-export function nimbusJwkOrder(jwk: JsonObject): JWK {
-	const entries: [string, JsonValue][] = [];
-	for (const name of JWK_MEMBER_ORDER) {
-		if (name in jwk) {
-			entries.push([name, jwk[name]]);
-		}
-	}
-	for (const [k, v] of Object.entries(jwk)) {
-		if (!JWK_MEMBER_ORDER.includes(k)) {
-			entries.push([k, v]);
-		}
-	}
-	return JavaHashMap.of(entries).toJsonObject() as JWK;
-}
-
-/** @internal Nimbus JWKSet.toJSONObject(): custom members (a HashMap) put first, then "keys". */
-export function nimbusJwkSetJson(customMembers: [string, JsonValue][], keys: JsonValue[]): JsonObject {
-	const custom = JavaHashMap.of(customMembers);
-	const o = new JavaHashMap();
-	o.putAll(custom.entries());
-	o.put("keys", keys);
-	return o.toJsonObject();
-}
-
-function certPublicJwk(cert: X509Certificate): JsonObject | null {
-	try {
-		return cert.publicKey.export({ format: "jwk" }) as JsonObject;
-	} catch {
-		return null;
-	}
-}
-
-const PRIVATE_MEMBERS_BY_KTY: Record<string, string[]> = {
-	EC: ["d"],
-	OKP: ["d"],
-	RSA: ["d", "p", "q", "dp", "dq", "qi", "oth"],
-};
-
 export class JWKUtil {
 	/** Alias so `new JWKUtil.SkippedJwk(...)` works as in Java; the type is the exported {@link SkippedJwk}. */
 	static readonly SkippedJwk = SkippedJwk;
@@ -842,53 +87,24 @@ export class JWKUtil {
 	static readonly JwkIssue = JwkIssue;
 
 	/**
-	 * Replaces Nimbus `JWKSet.parse(String)`: strict parsing with Nimbus' error messages. Keys with an unknown
-	 * `kty` are silently dropped (RFC 7517 section 5) as Nimbus does. Returns the JSON form of the parsed set
-	 * (Nimbus `JWKSet.toJSONObject(false)`: custom top-level members first, then `keys`).
+	 * Nimbus `JWKSet.parse(String)` (implemented in nimbus/jwk.ts): returns the JSON form of the parsed set.
 	 * Also accepts an already parsed JSON object.
 	 *
 	 * @throws ParseException
 	 */
 	static parseJWKSet(jwksString: string | JsonObject): JWKSet {
-		const json = typeof jwksString === "string" ? nimbusParseJsonObject(jwksString) : jwksString;
-		const keyArray = nimbusGetJSONArray(json, "keys");
-		if (keyArray == null) {
-			throw new ParseException('Missing required "keys" member');
-		}
-		const keys: JWK[] = [];
-		for (let i = 0; i < keyArray.length; i++) {
-			const keyJSONObject = keyArray[i];
-			if (!isJsonObject(keyJSONObject)) {
-				throw new ParseException('The "keys" JSON array must contain JSON objects only');
-			}
-			try {
-				keys.push(nimbusParseJWK(keyJSONObject));
-			} catch (e) {
-				if (e instanceof ParseException) {
-					if (e.message.startsWith("Unsupported key type")) {
-						// Ignore unknown key type
-						// https://tools.ietf.org/html/rfc7517#section-5
-						continue;
-					}
-					throw new ParseException("Invalid JWK at position " + i + ": " + e.message);
-				}
-				throw e;
-			}
-		}
-		// Parse additional custom members
-		const additionalMembers = Object.entries(json).filter(([k]) => k !== "keys");
-		return nimbusJwkSetJson(additionalMembers, keys) as JWKSet;
+		const jwkSet = nimbusJwk.parseJWKSet(jwksString);
+		return jwkSet;
 	}
 
 	/**
-	 * Replaces Nimbus `JWK.parse(String)` / `JWK.parse(Map)`: validates a single key with Nimbus' rules and error
-	 * messages and returns its normalized JSON form (Nimbus `JWK.toJSONObject()`).
+	 * Not in upstream: Nimbus `JWK.parse(String)` / `JWK.parse(Map)` (implemented in nimbus/jwk.ts), kept here for
+	 * the conditions that call `JWKUtil.parseJWK`.
 	 *
 	 * @throws ParseException
 	 */
 	static parseJWK(jwk: string | JsonObject): JWK {
-		const json = typeof jwk === "string" ? nimbusParseJsonObject(jwk) : jwk;
-		return nimbusParseJWK(json);
+		return nimbusJwk.parseJWK(jwk);
 	}
 
 	/**
@@ -1078,7 +294,7 @@ export class JWKUtil {
 		return issues;
 	}
 
-	private static unsupportedCurve(key: JsonObject, supported: string[]): string | null {
+	private static unsupportedCurve(key: JsonObject, supported: readonly string[]): string | null {
 		const crv = JWKUtil.stringMember(key, "crv");
 		if (crv == null || crv.length === 0) {
 			return null; // missing/empty crv is a structural concern, not an "unusable" warning
@@ -1172,76 +388,27 @@ export class JWKUtil {
 	 * private members removed), in Nimbus' member order.
 	 */
 	static getPublicJwksAsJsonObject(jwks: JsonObject): JsonObject {
-		return JWKUtil.jwkSetToJSONObject(jwks, true);
+		return jwkSetToJSONObject(jwks, true);
 	}
 
 	/** Replaces `jwks.toJSONObject(false)` on a Nimbus JWKSet: all keys including private members. */
 	static getPrivateJwksAsJsonObject(jwks: JsonObject): JsonObject {
-		return JWKUtil.jwkSetToJSONObject(jwks, false);
+		return jwkSetToJSONObject(jwks, false);
 	}
 
-	/** Nimbus JWKSet.toJSONObject(publicKeysOnly) on a JSON JWK set (keys are normalized via Nimbus parsing). */
-	private static jwkSetToJSONObject(jwks: JsonObject, publicKeysOnly: boolean): JsonObject {
-		const a: JsonArray = [];
-		const keys = jwks["keys"];
-		for (const key of isJsonArray(keys) ? keys : []) {
-			const jwk = nimbusParseJWK(key as JsonObject);
-			if (publicKeysOnly) {
-				// Try to get public key, then serialise
-				const publicKey = JWKUtil.toPublicJWK(jwk);
-				if (publicKey != null) {
-					a.push(publicKey);
-				}
-			} else {
-				a.push(jwk);
-			}
-		}
-		return nimbusJwkSetJson(
-			Object.entries(jwks).filter(([k]) => k !== "keys"),
-			a,
-		);
-	}
-
-	/**
-	 * Replaces Nimbus `JWK.toPublicJWK()`: a copy without the private members, or null for a symmetric (oct) key.
-	 */
+	/** Not in upstream: Nimbus `JWK.toPublicJWK()` (implemented in nimbus/jwk.ts). */
 	static toPublicJWK(jwk: JsonObject): JWK | null {
-		const kty = jwk["kty"];
-		if (kty === "oct") {
-			return null;
-		}
-		const out: JsonObject = {};
-		const privateMembers = PRIVATE_MEMBERS_BY_KTY[kty as string] ?? [];
-		for (const [k, v] of Object.entries(jwk)) {
-			if (!privateMembers.includes(k)) {
-				out[k] = v;
-			}
-		}
-		return nimbusJwkOrder(out);
+		return nimbusJwk.toPublicJWK(jwk);
 	}
 
-	/** Replaces Nimbus `JWK.isPrivate()`: true when the key carries private (or symmetric) key material. */
+	/** Not in upstream: Nimbus `JWK.isPrivate()` (implemented in nimbus/jwk.ts). */
 	static isPrivate(jwk: JsonObject): boolean {
-		if (jwk["kty"] === "oct") {
-			return true;
-		}
-		return (PRIVATE_MEMBERS_BY_KTY[jwk["kty"] as string] ?? []).some((m) => jwk[m] != null);
+		return nimbusJwk.isPrivate(jwk);
 	}
 
-	/**
-	 * Converts a JSON JWK into a jose key (`CryptoKey`, or `Uint8Array` for oct keys) for use with jose
-	 * sign/verify/encrypt/decrypt. Replaces Nimbus `toRSAPublicKey()`, `toECPrivateKey()`, `toSecretKey()` etc.
-	 * The JWK's `use`, `key_ops`, `ext` (and `alg`, when `alg` is given) are not passed to jose, because jose
-	 * (WebCrypto) rejects a key whose metadata does not match the requested operation while Nimbus does not.
-	 * Async because jose's `importJWK` is.
-	 */
+	/** Not in upstream: a JSON JWK as a jose key, replacing Nimbus `toRSAPublicKey()` etc. (see nimbus/jwk.ts). */
 	static async importKey(jwk: JsonObject, alg?: string): Promise<CryptoKey | Uint8Array> {
-		const { use: _use, key_ops: _ops, ext: _ext, ...rest } = jwk;
-		const keyAlg = alg ?? (typeof jwk["alg"] === "string" ? jwk["alg"] : undefined);
-		const key = await importJWK({ ...rest, ...(keyAlg ? { alg: keyAlg } : {}) } as JoseJWK, keyAlg, {
-			extractable: true,
-		});
-		return key;
+		return await nimbusJwk.importKey(jwk, alg);
 	}
 
 	static getAlgFromClientJwks(env: Environment): string {
@@ -1386,7 +553,7 @@ export class JWKUtil {
 		try {
 			const json = JSON.stringify(input);
 			const fullSet = JWKUtil.parseJWKSet(json);
-			return JWKUtil.jwkSetToJSONObject(fullSet, true);
+			return jwkSetToJSONObject(fullSet, true);
 		} catch (e) {
 			throw new Error("Failed to convert JWKS to public version", { cause: e });
 		}

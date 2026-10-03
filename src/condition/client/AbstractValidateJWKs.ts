@@ -12,91 +12,15 @@ import {
 	type JsonObject,
 	type JsonValue,
 } from "../../framework/index.ts";
-import {
-	JWKUtil,
-	JWS_FAMILY_EC,
-	JWS_FAMILY_ED,
-	JWS_FAMILY_HMAC_SHA,
-	JWS_FAMILY_RSA,
-	ParseException,
-	type JWK,
-	type JWKSet,
-} from "../../util/JWKUtil.ts";
-import { isJOSEException, JWSSigner, parseClaimsSet } from "./AbstractSignJWT.ts";
+import { JWKUtil, ParseException, type JWK, type JWKSet } from "../../util/JWKUtil.ts";
+import { isJOSEException } from "../../util/nimbus/errors.ts";
+import { JWSSigner, selectJWSJwks } from "../../util/nimbus/jws.ts";
+import { parseClaimsSet } from "../../util/nimbus/jwt.ts";
 
 /** A signed JWT: its header and compact serialization (replaces Nimbus SignedJWT). */
 interface SignedJWT {
 	header: JsonObject;
 	serialized: string;
-}
-
-/** Nimbus `KeyType.forAlgorithm` for JWS algorithms */
-function keyTypeForJWSAlgorithm(alg: string): string | null {
-	if (JWS_FAMILY_RSA.includes(alg)) {
-		return "RSA";
-	} else if (JWS_FAMILY_EC.includes(alg)) {
-		return "EC";
-	} else if (JWS_FAMILY_HMAC_SHA.includes(alg)) {
-		return "oct";
-	} else if (JWS_FAMILY_ED.includes(alg)) {
-		return "OKP";
-	}
-	return null;
-}
-
-/** Nimbus `Curve.forJWSAlgorithm` for the ED family */
-function curvesForEdAlgorithm(alg: string): string[] {
-	if (alg === "Ed25519") {
-		return ["Ed25519"];
-	}
-	return ["Ed25519", "Ed448"];
-}
-
-/**
- * Nimbus `JWKMatcher.forJWSHeader(header)` applied to the keys of `jwkSet` (as used by
- * AlternateJWSVerificationKeySelector.selectJWSJwks). Returns an empty list for an unsupported algorithm.
- */
-function selectJWSJwks(header: JsonObject, jwkSet: JWKSet): JWK[] {
-	const alg = header["alg"] as string;
-	const kid = (header["kid"] as string | undefined) ?? null;
-	const kty = keyTypeForJWSAlgorithm(alg);
-	if (kty == null) {
-		return [];
-	}
-	const matches: JWK[] = [];
-	for (const jwk of jwkSet.keys) {
-		if (jwk["kty"] !== kty) {
-			continue;
-		}
-		if (kid != null && jwk["kid"] !== kid) {
-			continue;
-		}
-		if (jwk["alg"] != null && jwk["alg"] !== alg) {
-			continue;
-		}
-		if (kty === "oct") {
-			// privateOnly(true) - symmetric keys are always private; no use restriction for HMAC
-		} else if (jwk["use"] != null && jwk["use"] !== "sig") {
-			continue;
-		}
-		if (kty === "OKP" && !curvesForEdAlgorithm(alg).includes(jwk["crv"] as string)) {
-			continue;
-		}
-		matches.push(jwk);
-	}
-	// Get non-EdDSA keys from original function
-	const sanitizedJWKs: JWK[] = [];
-	for (const jwk of matches) {
-		if (jwk["kty"] !== "oct") {
-			sanitizedJWKs.push(JWKUtil.toPublicJWK(jwk) as JWK);
-			if (JWKUtil.isPrivate(jwk)) {
-				sanitizedJWKs.push(jwk);
-			}
-		} else {
-			sanitizedJWKs.push(jwk);
-		}
-	}
-	return sanitizedJWKs;
 }
 
 /** RFC 8410 key types (node:crypto `asymmetricKeyType`) for the OKP curves; replaces the OID comparison. */

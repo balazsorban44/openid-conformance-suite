@@ -1,5 +1,6 @@
 import { AbstractCondition, args, type Environment, type EnvironmentRequirements } from "../../framework/index.ts";
-import { JWTUtil, ParseException } from "../../util/JWTUtil.ts";
+import { ParseException } from "../../util/JWTUtil.ts";
+import { parseSignedJWT } from "../../util/nimbus/jwt.ts";
 
 export class ValidateUserInfoSigningAlgIsRS256 extends AbstractCondition {
 	static override pre: EnvironmentRequirements = { required: ["userinfo_object"] };
@@ -9,11 +10,7 @@ export class ValidateUserInfoSigningAlgIsRS256 extends AbstractCondition {
 
 		try {
 			// translate stored items into nimbus objects
-			// SignedJWT.parse(userInfoObj)
-			const jwt = JWTUtil.parseJWT(userInfoObj);
-			if (jwt.type !== "signed") {
-				throw new ParseException("Not a JWS header");
-			}
+			const jwt = parseSignedJWT(userInfoObj);
 			const alg = jwt.header["alg"] as string;
 
 			if (alg !== "RS256") {
