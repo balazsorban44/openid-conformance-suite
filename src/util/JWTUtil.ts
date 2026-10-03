@@ -1,6 +1,7 @@
 import { OIDFJSON, type JsonObject, type JsonValue } from "../framework/json.ts";
 import { JWEUtil } from "./JWEUtil.ts";
 import {
+	JavaHashMap,
 	JWE_FAMILY_SYMMETRIC,
 	JWKUtil,
 	nimbusGetBoolean,
@@ -149,13 +150,17 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 	const registered =
 		kind === "plain" ? COMMON_HEADER_PARAMS : kind === "signed" ? JWS_HEADER_PARAMS : JWE_HEADER_PARAMS;
 
+	// Header.toJSONObject(): the custom parameters (a HashMap) are put first into a HashMap, then the registered ones
+	const custom = JavaHashMap.of(Object.entries(json).filter(([name]) => !registered.includes(name)));
 	const out: JsonObject = {};
-	// custom parameters first
-	for (const [name, value] of Object.entries(json)) {
-		if (!registered.includes(name)) {
-			out[name] = value;
+	const finish = (): JsonObject => {
+		const o = new JavaHashMap();
+		o.putAll(custom.entries());
+		for (const [k, v] of Object.entries(out)) {
+			o.put(k, v);
 		}
-	}
+		return o.toJsonObject();
+	};
 	const putString = (name: string, value: string | null) => {
 		if (value != null) {
 			out[name] = value;
@@ -169,7 +174,7 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 		out["crit"] = [...new Set(crit)];
 	}
 	if (kind === "plain") {
-		return out;
+		return finish();
 	}
 	putString("jku", nimbusGetURI(json, "jku"));
 	const jwkJson = nimbusGetJSONObject(json, "jwk");
@@ -202,7 +207,7 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 		if ("b64" in json && !nimbusGetBoolean(json, "b64")) {
 			out["b64"] = false;
 		}
-		return out;
+		return finish();
 	}
 	out["enc"] = enc;
 	const epkJson = "epk" in json ? nimbusGetJSONObject(json, "epk") : null;
@@ -238,7 +243,7 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 			}
 		}
 	}
-	return out;
+	return finish();
 }
 
 function parseHeaderPart(part: string, kind: "plain" | "signed" | "encrypted"): JsonObject {
@@ -379,28 +384,28 @@ function claimsSetToJSONObject(json: JsonObject): JsonObject {
 		}
 	}
 
-	const o: JsonObject = {};
+	const o = new JavaHashMap();
 	for (const [key, value] of claims) {
 		if (dateClaims.has(key)) {
 			// Transform dates to Unix timestamps
-			o[key] = value;
+			o.put(key, value);
 		} else if (key === "aud") {
 			// Serialise single audience list and string
 			const audList = value as string[] | null;
 			if (audList != null && audList.length > 0) {
 				if (audList.length === 1) {
-					o["aud"] = audList[0];
+					o.put("aud", audList[0]);
 				} else {
-					o["aud"] = [...audList];
+					o.put("aud", [...audList]);
 				}
 			} else {
-				o["aud"] = null;
+				o.put("aud", null);
 			}
 		} else {
-			o[key] = value;
+			o.put(key, value);
 		}
 	}
-	return o;
+	return o.toJsonObject();
 }
 
 export class JWTUtil {

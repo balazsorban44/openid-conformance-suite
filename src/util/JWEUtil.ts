@@ -11,6 +11,7 @@ import {
 	JWE_FAMILY_RSA,
 	JWE_FAMILY_SYMMETRIC,
 	JWKUtil,
+	nimbusJwkOrder,
 	ParseException,
 	requireAlgorithmName,
 	SkippedJwk,
@@ -333,7 +334,7 @@ export class JWEUtil {
 				builder["kid"] = keyId;
 			}
 			builder["k"] = secretBytes.toString("base64url");
-			return builder as JWK;
+			return nimbusJwkOrder(builder);
 		};
 		if (JWE_FAMILY_AES_GCM_KW.includes(algorithm) || JWE_FAMILY_AES_KW.includes(algorithm)) {
 			const secretBytes = JWEUtil.deriveEncryptionKey(algorithm, secret);

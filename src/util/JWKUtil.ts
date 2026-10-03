@@ -201,9 +201,149 @@ export function nimbusGetURI(o: JsonObject, name: string): string | null {
 	// java.net.URI rejects whitespace, control characters and a few ASCII punctuation characters
 	const m = /[\s"<>\\^`{|}\u0000-\u001f\u007f]/.exec(value);
 	if (m) {
-		throw new ParseException("Illegal character in URI at index " + m.index + ": " + value);
+		throw new ParseException(uriSyntaxMessage(value, m.index));
 	}
 	return value;
+}
+
+/** The java.net.URISyntaxException message for an illegal character (approximating which component it is in). */
+function uriSyntaxMessage(value: string, index: number): string {
+	const schemeEnd = value.indexOf(":");
+	let component = "path";
+	if (schemeEnd !== -1 && index < schemeEnd) {
+		component = "scheme name";
+	} else {
+		const hashIndex = value.indexOf("#");
+		const queryIndex = value.indexOf("?");
+		if (hashIndex !== -1 && index > hashIndex) {
+			component = "fragment";
+		} else if (queryIndex !== -1 && index > queryIndex) {
+			component = "query";
+		} else if (schemeEnd !== -1 && value.startsWith("//", schemeEnd + 1)) {
+			const authorityStart = schemeEnd + 3;
+			const rest = value.substring(authorityStart).search(/[/?#]/);
+			const authorityEnd = rest === -1 ? value.length : authorityStart + rest;
+			if (index < authorityEnd) {
+				component = "authority";
+			}
+		}
+	}
+	return "Illegal character in " + component + " at index " + index + ": " + value;
+}
+
+/**
+ * @internal Emulates the iteration order of a `java.util.HashMap` (JDK 21): Nimbus serializes headers, claims,
+ * JWKs and JWK sets through HashMaps, so the Java JSON objects have their members in hash order, not in insertion
+ * order. Integer-like member names still come first in a JS object, whatever is done here.
+ */
+export class JavaHashMap {
+	private table: string[][] | null = null;
+	private threshold = 0;
+	private readonly values = new Map<string, JsonValue>();
+
+	static of(entries: Iterable<[string, JsonValue]>): JavaHashMap {
+		const m = new JavaHashMap();
+		for (const [k, v] of entries) {
+			m.put(k, v);
+		}
+		return m;
+	}
+
+	/** java.lang.String.hashCode() spread as in HashMap.hash() */
+	private static hash(key: string): number {
+		let h = 0;
+		for (let i = 0; i < key.length; i++) {
+			h = (Math.imul(31, h) + key.charCodeAt(i)) | 0;
+		}
+		return h ^ (h >>> 16);
+	}
+
+	private static tableSizeFor(c: number): number {
+		let n = 1;
+		while (n < c) {
+			n *= 2;
+		}
+		return n;
+	}
+
+	private resize(): void {
+		const oldCap = this.table?.length ?? 0;
+		const oldThr = this.threshold;
+		let newCap: number;
+		let newThr: number;
+		if (oldCap > 0) {
+			newCap = oldCap * 2;
+			newThr = oldCap >= 16 ? oldThr * 2 : Math.floor(newCap * 0.75);
+		} else if (oldThr > 0) {
+			newCap = oldThr;
+			newThr = Math.floor(newCap * 0.75);
+		} else {
+			newCap = 16;
+			newThr = 12;
+		}
+		const newTable: string[][] = Array.from({ length: newCap }, () => []);
+		for (const bucket of this.table ?? []) {
+			for (const key of bucket) {
+				newTable[JavaHashMap.hash(key) & (newCap - 1)].push(key);
+			}
+		}
+		this.table = newTable;
+		this.threshold = newThr;
+	}
+
+	put(key: string, value: JsonValue): void {
+		if (this.values.has(key)) {
+			this.values.set(key, value);
+			return;
+		}
+		if (this.table == null) {
+			this.resize();
+		}
+		const table = this.table as string[][];
+		table[JavaHashMap.hash(key) & (table.length - 1)].push(key);
+		this.values.set(key, value);
+		if (this.values.size > this.threshold) {
+			this.resize();
+		}
+	}
+
+	putAll(entries: [string, JsonValue][]): void {
+		const s = entries.length;
+		if (s > 0) {
+			if (this.table == null) {
+				// pre-size
+				const t = Math.ceil(s / 0.75);
+				if (t > this.threshold) {
+					this.threshold = JavaHashMap.tableSizeFor(t);
+				}
+			} else {
+				while (s > this.threshold) {
+					this.resize();
+				}
+			}
+			for (const [k, v] of entries) {
+				this.put(k, v);
+			}
+		}
+	}
+
+	entries(): [string, JsonValue][] {
+		const out: [string, JsonValue][] = [];
+		for (const bucket of this.table ?? []) {
+			for (const key of bucket) {
+				out.push([key, this.values.get(key) as JsonValue]);
+			}
+		}
+		return out;
+	}
+
+	toJsonObject(): JsonObject {
+		const o: JsonObject = {};
+		for (const [k, v] of this.entries()) {
+			o[k] = v;
+		}
+		return o;
+	}
 }
 
 /**
@@ -222,6 +362,25 @@ export function nimbusParseJsonObject(s: string, sizeLimit = -1): JsonObject {
 		parsed = JSON.parse(s);
 	} catch {
 		throw new ParseException("Invalid JSON object");
+	}
+	if (parsed === null) {
+		// Gson returns null for a JSON null; Nimbus then fails with a NullPointerException
+		throw new TypeError('Cannot invoke "java.util.Map.get(Object)" because "o" is null');
+	}
+	if (isJsonArray(parsed)) {
+		// Gson's map adapter also accepts the array-of-pairs form: [["k", v], ...]
+		const map: JsonObject = {};
+		for (const pair of parsed) {
+			if (!isJsonArray(pair) || pair.length !== 2 || (typeof pair[0] !== "string" && typeof pair[0] !== "number")) {
+				throw new ParseException("Invalid JSON object");
+			}
+			const key = String(pair[0]);
+			if (key in map) {
+				throw new ParseException("Invalid JSON object");
+			}
+			map[key] = pair[1];
+		}
+		return map;
 	}
 	if (!isJsonObject(parsed) || hasDuplicateKeys(s)) {
 		throw new ParseException("Invalid JSON object");
@@ -446,7 +605,7 @@ function nimbusParseJWK(o: JsonObject): JWK {
 		if (revoked["reason"] != null) {
 			revokedOut["reason"] = nimbusGetString(revoked, "reason");
 		}
-		revoked = revokedOut;
+		revoked = JavaHashMap.of(Object.entries(revokedOut)).toJsonObject();
 	}
 
 	// constructor checks (thrown as IllegalArgumentException / NullPointerException in Java, wrapped into a
@@ -547,7 +706,7 @@ function nimbusParseJWK(o: JsonObject): JWK {
 	}
 
 	// JWK.toJSONObject()
-	const out: JsonObject = { kty };
+	const out: JsonObject = { kty }; // JWK.toJSONObject() puts in this order into a HashMap
 	if (use != null) {
 		out["use"] = use;
 	}
@@ -593,9 +752,66 @@ function nimbusParseJWK(o: JsonObject): JWK {
 		}
 	}
 	if (oth != null && oth.length > 0 && params["p"] != null) {
-		out["oth"] = oth.filter((x) => isJsonObject(x)).map((x) => ({ r: x["r"], d: x["d"], t: x["t"] }));
+		out["oth"] = oth
+			.filter((x) => isJsonObject(x))
+			.map((x) => JavaHashMap.of(Object.entries({ r: x["r"], d: x["d"], t: x["t"] })).toJsonObject());
 	}
-	return out as JWK;
+	return JavaHashMap.of(Object.entries(out)).toJsonObject() as JWK;
+}
+
+/** Member order of Nimbus JWK.toJSONObject() before hashing. */
+const JWK_MEMBER_ORDER = [
+	"kty",
+	"use",
+	"key_ops",
+	"alg",
+	"kid",
+	"x5u",
+	"x5t",
+	"x5t#S256",
+	"x5c",
+	"exp",
+	"nbf",
+	"iat",
+	"revoked",
+	"crv",
+	"x",
+	"y",
+	"n",
+	"e",
+	"d",
+	"p",
+	"q",
+	"dp",
+	"dq",
+	"qi",
+	"oth",
+	"k",
+];
+
+/** @internal Re-orders JWK members as Nimbus' toJSONObject() does (unknown members kept, after the known ones). */
+export function nimbusJwkOrder(jwk: JsonObject): JWK {
+	const entries: [string, JsonValue][] = [];
+	for (const name of JWK_MEMBER_ORDER) {
+		if (name in jwk) {
+			entries.push([name, jwk[name]]);
+		}
+	}
+	for (const [k, v] of Object.entries(jwk)) {
+		if (!JWK_MEMBER_ORDER.includes(k)) {
+			entries.push([k, v]);
+		}
+	}
+	return JavaHashMap.of(entries).toJsonObject() as JWK;
+}
+
+/** @internal Nimbus JWKSet.toJSONObject(): custom members (a HashMap) put first, then "keys". */
+export function nimbusJwkSetJson(customMembers: [string, JsonValue][], keys: JsonValue[]): JsonObject {
+	const custom = JavaHashMap.of(customMembers);
+	const o = new JavaHashMap();
+	o.putAll(custom.entries());
+	o.put("keys", keys);
+	return o.toJsonObject();
 }
 
 function certPublicJwk(cert: X509Certificate): JsonObject | null {
@@ -652,14 +868,9 @@ export class JWKUtil {
 				throw e;
 			}
 		}
-		const out: JsonObject = {};
-		for (const [k, v] of Object.entries(json)) {
-			if (k !== "keys") {
-				out[k] = v;
-			}
-		}
-		out["keys"] = keys;
-		return out as JWKSet;
+		// Parse additional custom members
+		const additionalMembers = Object.entries(json).filter(([k]) => k !== "keys");
+		return nimbusJwkSetJson(additionalMembers, keys) as JWKSet;
 	}
 
 	/**
@@ -964,12 +1175,6 @@ export class JWKUtil {
 
 	/** Nimbus JWKSet.toJSONObject(publicKeysOnly) on a JSON JWK set (keys are normalized via Nimbus parsing). */
 	private static jwkSetToJSONObject(jwks: JsonObject, publicKeysOnly: boolean): JsonObject {
-		const o: JsonObject = {};
-		for (const [k, v] of Object.entries(jwks)) {
-			if (k !== "keys") {
-				o[k] = v;
-			}
-		}
 		const a: JsonArray = [];
 		const keys = jwks["keys"];
 		for (const key of isJsonArray(keys) ? keys : []) {
@@ -984,8 +1189,10 @@ export class JWKUtil {
 				a.push(jwk);
 			}
 		}
-		o["keys"] = a;
-		return o;
+		return nimbusJwkSetJson(
+			Object.entries(jwks).filter(([k]) => k !== "keys"),
+			a,
+		);
 	}
 
 	/**
@@ -1003,7 +1210,7 @@ export class JWKUtil {
 				out[k] = v;
 			}
 		}
-		return out as JWK;
+		return nimbusJwkOrder(out);
 	}
 
 	/** Replaces Nimbus `JWK.isPrivate()`: true when the key carries private (or symmetric) key material. */
