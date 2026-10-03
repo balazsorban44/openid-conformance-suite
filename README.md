@@ -89,7 +89,9 @@ for tooling.
 
 - `target` (optional) starts your implementation before the plan and stops it afterwards; `command` runs in the
   directory you invoke the CLI/action from (`cwd` and `env` are optional). Leave it out if your OP is already
-  running or hosted elsewhere.
+  running or hosted elsewhere. With `"url": "http://localhost:${PORT}"` the suite picks a free port, passes it to
+  the command as `PORT` and replaces `${TARGET_URL}` everywhere in the configuration (see
+  `configs/oidc-provider/*.json`), so several runs never compete for a port.
 - `expectedFailures` / `expectedSkips` (optional) point at JSON lists in the official suite's
   `expected-failures-*.json` format for known deviations you want to tolerate.
 
@@ -114,7 +116,8 @@ implementation built on [`openid-client`](https://github.com/panva/openid-client
 ## CLI
 
 ```bash
-pnpm add -D @balazsorban44/openid-conformance-suite   # or npm i -D
+npm i -g pnpm                                          # pnpm 12 (or the standalone installer); npm works too
+pnpm add -D @balazsorban44/openid-conformance-suite   # or: npm i -D @balazsorban44/openid-conformance-suite
 pnpm exec playwright install --with-deps chromium
 
 pnpm exec openid-conformance list                        # plans, their variants
@@ -127,25 +130,27 @@ Node.js 24 or newer; no build step (native TypeScript).
 
 ## What is in the box
 
-|                                                  |                                                                                                                               |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `src/condition/`, `src/sequence/`, `src/openid/` | 1:1 ports of the Java conditions, sequences, test modules and plans                                                           |
-| `src/framework/`                                 | the test framework (environment, condition runner, status machine, event log, HTTP client/server, Playwright browser control) |
-| `src/util/`                                      | 1:1 ports of the Java util classes; `nimbus/` and `jdk/` emulate the Nimbus JOSE+JWT and JDK behaviour the Java relies on     |
-| `src/runner/`, `bin/`                            | the module runner, CI project list, expected-failure analysis, reporters, and the `openid-conformance` CLI                    |
-| `scripts/`                                       | `sync-upstream.ts`, `gen-registry.ts` (generates `src/registry.ts`), `log-fingerprint.ts` (log fidelity diff)                 |
-| `targets/`                                       | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                          |
-| `configs/`                                       | the CI test configurations and expected-failure lists                                                                         |
-| `tests/plan.spec.ts`                             | the Playwright entry point                                                                                                    |
-| `action.yml`                                     | the composite GitHub Action                                                                                                   |
+|                                                  |                                                                                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/op/*.spec.ts`, `tests/fixtures.ts`        | the rewrite: one explicit Playwright test per upstream test module, and the `op`/`client`/`variant` fixtures                   |
+| `src/suite/`                                     | the engine: event log, checks (`condition`, `soft`, `block`), HTTP client and server, scripted browser, config, target, report |
+| `src/op/`                                        | the upstream client-side conditions as functions (discovery, registration, authorization, token, id_token, userinfo, jwks)     |
+| `src/condition/`, `src/sequence/`, `src/openid/` | 1:1 ports of the Java conditions, sequences, test modules and plans (the old framework, until the rewrite covers every plan)   |
+| `src/framework/`, `tests/plan.spec.ts`           | the old class framework and its Playwright entry point, for the modules not rewritten yet                                      |
+| `src/util/`                                      | 1:1 ports of the Java util classes; `nimbus/` and `jdk/` emulate the Nimbus JOSE+JWT and JDK behaviour the Java relies on      |
+| `src/runner/`, `bin/cli.ts`                      | the CI project list (`projects.ts`, `portedPlans`), the old module runner, and the `openid-conformance` CLI (commander)        |
+| `scripts/`                                       | `sync-upstream.ts`, `upstream-lock-symbols.ts`, `gen-registry.ts`, `log-fingerprint.ts` (log fidelity diff)                    |
+| `targets/`                                       | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                           |
+| `configs/`                                       | the CI test configurations and expected-failure lists                                                                          |
+| `action.yml`                                     | the composite GitHub Action                                                                                                    |
 
 CI runs every OP plan against `oidc-provider`, every RP plan against the `openid-client` RP, and the OP plan
 against the suite's own emulated OP (suite-vs-suite), on every push to `main` and every pull request.
 
 ## Maintaining
 
-Everything is ported 1:1 from upstream at the commit pinned in `upstream.lock.json`, which also records the
-blob hash of every ported Java file. `pnpm sync-upstream` reports which ported files changed upstream, shows
+Everything is ported from upstream at the commit pinned in `upstream.lock.json`, which records the blob hash of
+every ported Java file (`files` for the 1:1 ports, `symbols` for the functions and tests of the rewrite). `pnpm sync-upstream` reports which ported files changed upstream, shows
 the Java diffs, and finds the files a new plan needs. The porting rules live in `.claude/skills/` and are written
 for both humans and coding agents:
 
@@ -153,6 +158,7 @@ for both humans and coding agents:
 - `port-conditions`, `port-test-module` - workflows for conditions/sequences and modules/plans/variants
 - `sync-upstream` - keeping up with upstream
 - `run-conformance` - running and debugging plans
+- `writing-tests` - how tests, checks and helpers of the rewrite are written
 
 Framework changes are checked for fidelity by the unit tests (`pnpm test:unit`), the suite-vs-suite project
 and a before/after diff of every module's log with `scripts/log-fingerprint.ts` (see `CONTRIBUTING.md`).

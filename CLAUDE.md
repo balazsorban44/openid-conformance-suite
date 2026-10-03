@@ -9,12 +9,21 @@ config, dynamic client registration, RP-initiated/back-channel/front-channel log
 
 - **1:1 port.** Every ported file maps to one Java class with the same name and path; messages, severities and
   spec requirement tags are identical. `upstream.lock.json` pins the upstream commit and per-file blob hashes.
-- **Least dependencies.** Runtime: `@playwright/test`, `jose`, `undici`. Dev: `typescript`, `oxlint`, `oxfmt`,
-  the CI targets (`oidc-provider`, `openid-client`). Prefer web APIs (`fetch`, `Response`, `URL`, `crypto.subtle`).
+- **Rewrite in progress.** The class framework (`src/framework`, 1:1 condition/module ports) is being replaced by
+  explicit Playwright tests (`tests/op/*.spec.ts`) on plain helper functions (`src/suite`, `src/op`); read
+  `.claude/skills/writing-tests`. New code never imports `src/framework`, `src/condition`, `src/sequence`,
+  `src/openid`. Messages, severities and requirement tags stay identical to upstream.
+- **Least dependencies.** Runtime: `@playwright/test`, `jose`, `commander`, `undici` (old framework only). Dev:
+  `typescript`, `oxlint`, `oxfmt`, `vitest`, `msw`, the CI targets (`oidc-provider`, `openid-client`). Prefer web
+  and node APIs (`Response`, `URL`, `node:http`, `crypto`).
 - **Native TS.** Node >= 24 runs the sources directly; no build step. No enums/namespaces/decorators/parameter
   properties (`erasableSyntaxOnly`). Imports carry `.ts` extensions.
 
 ## Layout
+
+- `tests/op/*.spec.ts` + `tests/fixtures.ts` - the rewrite: one test per upstream module; `src/suite/` - the engine
+  (log, checks, http, server, browser, config, target, jose, expected, report); `src/op/` - OP helpers (upstream
+  client conditions as functions). `portedPlans` in `src/runner/projects.ts` says which modules moved.
 
 - `src/framework/` - the test framework (ported from `testmodule/`, `condition/AbstractCondition`, `sequence/`,
   `frontchannel/BrowserControl` (Playwright), `plan/`, `variant/` support and `VariantService` (`expandPlan`),
@@ -31,7 +40,7 @@ config, dynamic client registration, RP-initiated/back-channel/front-channel log
 - `targets/` - implementations under test for CI (panva `oidc-provider` OP, `openid-client` RP).
 - `configs/` - CI test configurations, expected-failures/skips lists, the bundled TLS certificate.
 - `.claude/skills/` - maintenance skills: `java-to-ts-porting`, `port-conditions`, `port-test-module`,
-  `sync-upstream`, `run-conformance`. Read the relevant one before touching the corresponding area.
+  `sync-upstream`, `run-conformance`, `writing-tests`. Read the relevant one before touching the corresponding area.
 
 ## Commands
 
@@ -40,6 +49,8 @@ pnpm check          # typecheck + lint + format check
 pnpm test:unit      # Vitest unit tests (src/**/*.test.ts)
 node bin/cli.ts ci --project <name>   # one CI project (`... projects` lists them)
 pnpm sync-upstream  # compare with upstream (see .claude/skills/sync-upstream)
+pnpm lock-symbols   # record the rewritten functions/tests in upstream.lock.json (`symbols`)
+CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts   # one rewritten plan against its target
 ```
 
 `pnpm test` is plain `playwright test`; it only runs a plan when `CONFORMANCE_PROJECT` or

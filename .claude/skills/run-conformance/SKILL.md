@@ -18,7 +18,9 @@ node bin/cli.ts ci --project op-basic-dynamic
 # RP plan: the suite emulates the OP, the bundled openid-client RP is driven through it
 node bin/cli.ts ci --project rp-basic
 # extra Playwright args after `--`, e.g. one module
-node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["
+node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
+# a rewritten plan's spec directly (tests/op/*.spec.ts; see .claude/skills/writing-tests)
+CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts
 
 # Any plan/config:
 node bin/cli.ts run --plan oidcc-basic-certification-test-plan \
@@ -27,19 +29,22 @@ node bin/cli.ts run --plan oidcc-basic-certification-test-plan \
 node bin/cli.ts list [--plans|--modules|--variants]
 ```
 
-`ci` and `run` spawn `playwright test tests/plan.spec.ts` with the `CONFORMANCE_*` environment below (`ci` also
-sets `CONFORMANCE_TLS=1` unless already set). `pnpm test` is plain `playwright test`: it runs whatever the
+`ci` and `run` spawn `playwright test` with the `CONFORMANCE_*` environment below (`ci` also sets
+`CONFORMANCE_TLS=1` unless already set). playwright.config.ts matches the plan's rewritten spec file (`portedPlans`
+in `src/runner/projects.ts`) and `tests/plan.spec.ts` (the old framework) for its other modules; the
+`CONFORMANCE_MODULE` glob becomes Playwright's `grep` over both title styles. `pnpm test` is plain `playwright test`: it runs whatever the
 environment selects (`CONFORMANCE_PROJECT=<name>`, or `CONFORMANCE_PLAN` + `CONFORMANCE_CONFIG`) and otherwise
 reports a single skipped test. The Playwright project is named after `CONFORMANCE_PROJECT` (default
-`conformance`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs the `node:test` unit tests.
+`conformance`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs the Vitest unit tests.
 
-One Playwright test = one test module instance (`<plan> › <module>[variants]`). Each test writes into its
+One Playwright test = one test module instance (`<plan> › <module>: <behaviour>` in the rewritten specs,
+`<plan> › <module>[variants]` in plan.spec.ts). Each test writes into its
 `test-results/<test>/` directory (and attaches to the HTML report): `log.json` (the full event log), `log.html`
 (rendered log, same shape as the upstream log-detail page), `module-report.json` (result + expected-failure
 analysis), `target-output.txt` (stdout/stderr of the `target` process), screenshots of every scripted-browser
 page on failure, `emulated-op-log.html` for suite-vs-suite runs, and Playwright's video/trace when enabled.
 
-Test outcome (`src/runner/expected.ts`, a port of upstream's `run-test-plan.py` analysis): a module's test passes
+Test outcome (`src/suite/expected.ts`, a port of upstream's `run-test-plan.py` analysis): a module's test passes
 when its log has no FAILURE or WARNING entry that is not in the config's expected-failures list, every listed
 expected failure/warning did happen, the module was not SKIPPED unless the expected-skips list says so (then the
 Playwright test is reported skipped), and it was not INTERRUPTED. Expected failures and warnings are annotated.
@@ -52,7 +57,7 @@ Playwright test is reported skipped), and it was not INTERRUPTED. Expected failu
 | `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG`                | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)       |
 | `CONFORMANCE_MODULE`                                                           | only modules whose `testName` matches this glob                                         |
 | `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`                             | serve the suite over https (default: the bundled `configs/certs/localhost.*`)           |
-| `CONFORMANCE_PORT`, `CONFORMANCE_HOST`, `CONFORMANCE_EXTERNAL_URL`             | where the suite server listens / the base URL it advertises                             |
+| `CONFORMANCE_PORT`, `CONFORMANCE_HOST`, `CONFORMANCE_EXTERNAL_URL`             | old framework only: where the suite server listens / the URL it advertises              |
 | `CONFORMANCE_CWD`                                                              | directory the config's `target.command` runs in (the CLI sets the caller's cwd)         |
 | `CONFORMANCE_MODULE_TIMEOUT` (s, 150), `CONFORMANCE_TEST_TIMEOUT` (ms, 240000) | per-module run timeout / Playwright test timeout                                        |
 | `CONFORMANCE_WORKERS`                                                          | Playwright workers (default 1)                                                          |
@@ -70,8 +75,10 @@ Playwright test is reported skipped), and it was not INTERRUPTED. Expected failu
 Same JSON as upstream (`server`, `client`, `client2`, `browser`, `alias`, `description`, ...). Extra keys used
 by the port:
 
-- `target` (optional): `{ "command": "node targets/oidc-provider/server.ts", "readyUrl": "http://localhost:3000/.well-known/openid-configuration" }`
-  starts an implementation under test before the plan and stops it afterwards.
+- `target` (optional): `{ "command": "node targets/oidc-provider/server.ts", "url": "https://localhost:${PORT}",
+"readyUrl": "${TARGET_URL}/.well-known/openid-configuration" }` starts an implementation under test before the
+  plan (once per Playwright worker) and stops it afterwards. `${PORT}` is a free port the command receives as
+  `PORT`; `${TARGET_URL}` (the `url`) is substituted everywhere in the configuration.
 - `expectedFailures` / `expectedSkips` (optional): path to upstream-format JSON lists.
 - `browser` may be a `.ts` config exporting `{ ...json, browser: async ({ page, url }) => {...} }` instead of the
   task array.
@@ -120,8 +127,9 @@ entries per module, and modules found on one side only (`!!!`); any of these exi
 of regexes; a changed message that matches one (old or new text) is accepted. Entries that only moved (`>`) are
 listed but accepted: the scripted browser and the test module log concurrently, so two runs of unchanged code
 interleave some entries differently (`--strict-order` fails on moves too). The framework messages themselves are
-pinned by the unit tests (`pnpm test:unit`: `src/framework/*.test.ts`, `src/runner/*.test.ts`,
-`src/util/{nimbus,jdk}/*.test.ts`).
+pinned by the unit tests (`pnpm test:unit`: `src/suite/*.test.ts`, `src/op/*.test.ts`,
+`src/util/{nimbus,jdk}/*.test.ts`). The same fingerprint diff checks a rewritten module against the old
+framework's log of it (only the old framework's own entries and moved entries may differ).
 
 ## Debugging a failing module
 

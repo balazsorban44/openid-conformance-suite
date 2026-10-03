@@ -16,8 +16,11 @@ parameter properties) and `.ts` import extensions.
 
 ## Porting more of upstream
 
-The whole point of this repository is to stay a faithful, file-by-file port of the Java suite. Before touching
-`src/condition`, `src/sequence`, `src/openid`, `src/variant` or `src/util`, read the skills in `.claude/skills/`:
+The suite is being rewritten from a file-by-file port of the Java classes into explicit Playwright tests with
+helper functions (`tests/op/*.spec.ts`, `src/op`, `src/suite`); read `.claude/skills/writing-tests` before writing
+a test or a check. The messages, severities and requirement tags stay identical to upstream either way. Before
+touching `src/condition`, `src/sequence`, `src/openid`, `src/variant` or `src/util`, read the skills in
+`.claude/skills/`:
 
 1. `java-to-ts-porting` - the rulebook (read first, every time)
 2. `port-conditions` / `port-test-module` - workflows
@@ -37,10 +40,9 @@ rely on: the status machine and lock (`setStatus`), the event log entry shape (`
 A change to `src/framework`, `src/runner`, `src/util` or `targets` must not change any log entry the ported tests
 produce. Before merging it, pass these gates:
 
-1. Unit tests: `pnpm test:unit` (`node:test`, `src/**/*.test.ts`). They pin the framework's own messages
-   (pre/post environment checks, skips, status machine, HTTP log entries), the rendered views and the scripted
-   browser's log entries (snapshots; regenerate deliberately with `node --test --test-update-snapshots <file>`) and the
-   Nimbus/JDK emulation in `src/util/{nimbus,jdk}`.
+1. Unit tests: `pnpm test:unit` (Vitest, `src/**/*.test.ts`, `scripts/**/*.test.ts`). They pin the engine's log
+   entries (checks, HTTP request/response entries via MSW, the server's requestParts), the OP helpers' messages
+   and the Nimbus/JDK emulation in `src/util/{nimbus,jdk}`.
 2. Suite-vs-suite: `node bin/cli.ts ci --project suite-vs-suite` stays green (the OP tests run
    against the suite's own RP test module acting as OP, so both sides of the framework are exercised).
 3. Log fingerprint diff: record `scripts/log-fingerprint.ts` fingerprints of the affected projects before and after
