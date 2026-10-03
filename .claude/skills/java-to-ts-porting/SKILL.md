@@ -229,6 +229,25 @@ See `.claude/skills/port-test-module/SKILL.md`. Short version: everything that r
 `await`ed; `@PublishTestModule` -> `static readonly meta`; variant annotations -> `static override variants`;
 HTTP handlers return a web `Response` built with `jsonResponse` / `redirectView` / `modelAndView` / `noContent`.
 
+## Deliberate deviations from upstream
+
+Everything else is 1:1; these are the known, intentional differences (each is commented at the code site):
+
+- `src/util/UriComponentsBuilder.ts` encodes `+` in query parameters as `%2B`. Spring leaves it alone, but every
+  form-decoding server reads a literal `+` as a space, which broke suite-vs-suite with the client ids the RP
+  tests generate.
+- `src/framework/BrowserControl.ts` records a url as visited when the navigation starts (Java: after
+  `driver.get()` returns). A user-driven browser records it before the RP redirects, which is what
+  `oidcc-client-test-3rd-party-init-login` checks for.
+- `src/framework/views/checkSessionIFrame.ts` splits the postMessage `"client_id session_state"` on the last
+  space; the template splits on the first one and breaks with client ids containing spaces.
+- `AbstractTestModule.setKeepServingAfterFinish()` lets the RP test module acting as emulated OP in
+  suite-vs-suite runs answer requests after its own flow finished (FINISHED -> RUNNING is allowed then).
+- `src/framework/server.ts` adds `x-ssl-protocol` / `x-ssl-cipher` to incoming requests over TLS, which the
+  nginx/apache proxy adds upstream.
+- `src/runner/TestRunner.ts` starts modules with `autoStart() == false` right away (upstream's CI script does
+  the same for `oidcc-server-rotate-keys`).
+
 ## Fidelity checklist (review every ported file against it)
 
 - [ ] Same class name, same file path, same `extends`.

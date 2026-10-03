@@ -1,5 +1,7 @@
 # openid-conformance-suite
 
+[![CI](https://github.com/balazsorban44/openid-conformance-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/balazsorban44/openid-conformance-suite/actions/workflows/ci.yml)
+
 A TypeScript port of the [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-suite),
 driven by [Playwright](https://playwright.dev) and built to run in GitHub Actions. Point it at your OpenID
 Provider / OAuth 2.0 authorization server or at your Relying Party / client and get the same checks, the same
