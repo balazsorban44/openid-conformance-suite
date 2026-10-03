@@ -46,7 +46,7 @@ class Module extends AbstractTestModule {
 	static override readonly meta: PublishTestModule = { testName: "unit-test-module", displayName: "x", profile: "x" };
 	stopAtFailure = false;
 
-	override async configure(config: JsonObject, baseUrl: string): Promise<void> {
+	override async configure(config: JsonObject, baseUrl: string, _ext: string, _mtls: string): Promise<void> {
 		this.env.putObject("config", config);
 		this.env.putString("base_url", baseUrl);
 		await this.setStatus(Status.CONFIGURED);

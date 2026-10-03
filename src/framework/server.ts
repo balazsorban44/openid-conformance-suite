@@ -137,6 +137,10 @@ export class SuiteServer {
 		const pathname = url.pathname;
 		let kind: "test" | "mtls" | "wellknown";
 		let rest: string;
+		if (pathname === "/.well-known/webfinger") {
+			await this.send(res, await this.handleWebfinger(req, url));
+			return;
+		}
 		if (pathname.startsWith(TEST_PATH)) {
 			kind = "test";
 			rest = pathname.substring(TEST_PATH.length);
@@ -214,6 +218,70 @@ export class SuiteServer {
 		}
 		logOutgoingHttpResponse(test, pathname, response);
 		await this.send(res, response);
+	}
+
+	/** Port of TestDispatcher.handleWellKnownWebFingerRequest: routes webfinger to the RP test module named in `resource` */
+	private async handleWebfinger(req: IncomingMessage, url: URL): Promise<Response> {
+		const resource = url.searchParams.get("resource");
+		if (resource == null) {
+			// https://tools.ietf.org/html/rfc7033#section-4
+			return jsonResponse({ error: "resource parameter missing" }, 400);
+		}
+		let testName: string;
+		let alias: string;
+		let resourcePrefix: string;
+		const acct = /^acct:([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)@.*$/i.exec(resource);
+		const https = /^https?:\/\/.*\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)$/i.exec(resource);
+		if (acct) {
+			resourcePrefix = "acct";
+			alias = acct[1];
+			testName = acct[2];
+		} else if (https) {
+			resourcePrefix = "https";
+			alias = https[1];
+			testName = https[2];
+		} else {
+			return new Response(null, { status: 400 });
+		}
+		const testId = this.aliases.get(alias) ?? alias;
+		const test = this.tests.get(testId);
+		if (!test) {
+			return jsonResponse({ error: "no running test for test id '" + testId + "' from alias '" + alias + "'" }, 404);
+		}
+		const clientTest = test as AbstractTestModule & {
+			handleWebfingerRequest?: (
+				testName: string,
+				prefix: string,
+				resource: string,
+				parts: JsonObject,
+			) => Promise<JsonObject | Response | null>;
+		};
+		if (typeof clientTest.handleWebfingerRequest !== "function") {
+			return new Response(null, { status: 400 });
+		}
+		const requestParts: JsonObject = {
+			headers: mapToJsonObject(req.headers as Record<string, string | string[] | undefined>, true),
+			query_string_params: mapToJsonObject(convertQueryStringParamsToMap(url.search.substring(1)), false),
+			method: (req.method ?? "GET").toUpperCase(),
+		};
+		logIncomingHttpRequest(test, "/.well-known/webfinger", requestParts);
+		try {
+			if (test.getStatus() === "CREATED") {
+				throw new TestFailureException(
+					test.getId(),
+					"Please wait for the test to be in WAITING state. The current status is CREATED",
+				);
+			}
+			const response = await clientTest.handleWebfingerRequest(testName, resourcePrefix, resource, requestParts);
+			const out = response instanceof Response ? response : jsonResponse(response ?? {}, 200);
+			logOutgoingHttpResponse(test, "/.well-known/webfinger", out);
+			return out;
+		} catch (e) {
+			test.forceReleaseLock();
+			const error = e instanceof TestInterruptedException ? e : new TestFailureException(test.getId(), e);
+			await test.handleException(error, "incoming webfinger request");
+			return jsonResponse({ error: error.message }, 400);
+		}
 	}
 
 	private async send(res: ServerResponse, response: Response): Promise<void> {
