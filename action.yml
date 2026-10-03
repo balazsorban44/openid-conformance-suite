@@ -1,0 +1,98 @@
+name: "OpenID Connect conformance tests"
+description: "Run OpenID Connect Core OP/RP conformance test plans (TypeScript port of the OpenID Foundation suite) against your implementation, with a human and agent friendly summary and full logs/screenshots as artifacts."
+author: "balazsorban44"
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  plan:
+    description: "Test plan name, e.g. oidcc-basic-certification-test-plan (see `openid-conformance list`)"
+    required: true
+  config:
+    description: "Path (in the caller's workspace) to the test configuration JSON/TS file"
+    required: true
+  variant:
+    description: "Variant selection, e.g. '[server_metadata=discovery][client_registration=dynamic_client]'"
+    required: false
+    default: ""
+  module:
+    description: "Only run test modules whose name matches this glob"
+    required: false
+    default: ""
+  node-version:
+    description: "Node.js version to use"
+    required: false
+    default: "24"
+  artifact-name:
+    description: "Name of the uploaded report artifact ('' to skip upload)"
+    required: false
+    default: "openid-conformance-report"
+  working-directory:
+    description: "Directory to run in (defaults to the caller's workspace)"
+    required: false
+    default: "."
+  fail-on-error:
+    description: "Fail the job when a module fails unexpectedly"
+    required: false
+    default: "true"
+
+outputs:
+  results:
+    description: "Path to conformance-report/results.json"
+    value: ${{ steps.run.outputs.results }}
+  summary:
+    description: "Path to conformance-report/summary.md"
+    value: ${{ steps.run.outputs.summary }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install the conformance suite
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm ci --prefix "${{ github.action_path }}"
+        npx --prefix "${{ github.action_path }}" playwright install --with-deps chromium
+
+    - name: Run conformance plan
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONFORMANCE_PLAN: ${{ inputs.plan }}
+        CONFORMANCE_VARIANT: ${{ inputs.variant }}
+        CONFORMANCE_MODULE: ${{ inputs.module }}
+        CONFORMANCE_REPORT_DIR: ${{ github.workspace }}/conformance-report
+        CONFORMANCE_SUMMARY_TITLE: "OpenID conformance: ${{ inputs.plan }} ${{ inputs.variant }}"
+        PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/playwright-report
+        PLAYWRIGHT_TEST_OUTPUT_DIR: ${{ github.workspace }}/test-results
+      run: |
+        set -uo pipefail
+        CONFIG="$(realpath "${{ inputs.config }}")"
+        export CONFORMANCE_CONFIG="$CONFIG"
+        cd "${{ github.action_path }}"
+        set +e
+        node bin/openid-conformance.ts run --plan "$CONFORMANCE_PLAN" --config "$CONFIG"
+        STATUS=$?
+        set -e
+        echo "results=${CONFORMANCE_REPORT_DIR}/results.json" >> "$GITHUB_OUTPUT"
+        echo "summary=${CONFORMANCE_REPORT_DIR}/summary.md" >> "$GITHUB_OUTPUT"
+        if [ "$STATUS" != "0" ] && [ "${{ inputs.fail-on-error }}" = "true" ]; then
+          exit "$STATUS"
+        fi
+
+    - name: Upload report
+      if: ${{ always() && inputs.artifact-name != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ github.workspace }}/conformance-report
+          ${{ github.workspace }}/playwright-report
+          ${{ github.workspace }}/test-results
+        if-no-files-found: ignore

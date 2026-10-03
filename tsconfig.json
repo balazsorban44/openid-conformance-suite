@@ -1,22 +1,22 @@
 {
-  "compilerOptions": {
-    "target": "es2024",
-    "lib": ["es2024"],
-    "types": ["node"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "moduleDetection": "force",
-    "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": false,
-    "erasableSyntaxOnly": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "strict": true,
-    "noUncheckedIndexedAccess": false,
-    "noImplicitOverride": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true
-  },
-  "include": ["src", "tests", "bin", "scripts", "targets", "playwright.config.ts"]
+	"compilerOptions": {
+		"target": "es2024",
+		"lib": ["es2024"],
+		"types": ["node"],
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"moduleDetection": "force",
+		"allowImportingTsExtensions": true,
+		"rewriteRelativeImportExtensions": false,
+		"erasableSyntaxOnly": true,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"noEmit": true,
+		"strict": true,
+		"noUncheckedIndexedAccess": false,
+		"noImplicitOverride": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true
+	},
+	"include": ["src", "tests", "bin", "scripts", "targets", "playwright.config.ts"]
 }

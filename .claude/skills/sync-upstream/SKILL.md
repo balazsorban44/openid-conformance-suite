@@ -9,10 +9,14 @@ The port tracks upstream at the commit recorded in `upstream.lock.json`:
 
 ```json
 {
-  "upstream": { "repo": "https://gitlab.com/openid/Conformance-suite.git", "commit": "<sha>", "date": "..." },
-  "files": {
-    "src/condition/client/ValidateAtHash.ts": { "java": "src/main/java/net/openid/conformance/condition/client/ValidateAtHash.java", "blob": "<git blob sha>", "loc": 14 }
-  }
+	"upstream": { "repo": "https://gitlab.com/openid/Conformance-suite.git", "commit": "<sha>", "date": "..." },
+	"files": {
+		"src/condition/client/ValidateAtHash.ts": {
+			"java": "src/main/java/net/openid/conformance/condition/client/ValidateAtHash.java",
+			"blob": "<git blob sha>",
+			"loc": 14
+		}
+	}
 }
 ```
 

@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck, lint, format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run fmt:check
+      - name: registry is up to date
+        run: node scripts/gen-registry.ts && git diff --exit-code -- src/registry.ts
+      - run: npm run test:unit
+
+  conformance:
+    name: ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - op-basic-static
+          - op-basic-dynamic
+          - op-config
+          - op-dynamic
+          - op-rp-initiated-logout
+          - op-backchannel-logout
+          - op-frontchannel-logout
+          - op-session-management
+          - op-3rdparty-init-login
+          - rp-basic
+          - rp-dynamic
+          - rp-rp-initiated-logout
+          - rp-backchannel-logout
+          - rp-frontchannel-logout
+          - rp-session-management
+          - rp-3rdparty-init-login
+          - suite-vs-suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run ${{ matrix.project }}
+        run: node bin/openid-conformance.ts ci --project ${{ matrix.project }}
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ matrix.project }}
+          path: |
+            conformance-report
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  node-latest:
+    name: smoke on latest Node
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: latest
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx playwright install --with-deps chromium
+      - run: node bin/openid-conformance.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["

@@ -1,46 +1,46 @@
 {
-  "name": "@balazsorban44/openid-conformance-suite",
-  "version": "0.1.0",
-  "description": "TypeScript port of the OpenID Foundation conformance suite (OpenID Connect Core OP and RP tests), driven by Playwright, runnable in GitHub Actions.",
-  "license": "MIT",
-  "repository": "github:balazsorban44/openid-conformance-suite",
-  "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
-  "bin": {
-    "openid-conformance": "./bin/openid-conformance.ts"
-  },
-  "files": [
-    "bin",
-    "src",
-    "tests",
-    "playwright.config.ts",
-    "upstream.lock.json",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "lint": "oxlint",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
-    "check": "npm run typecheck && npm run lint && npm run fmt:check",
-    "test": "playwright test",
-    "test:unit": "node --test 'src/**/*.test.ts'",
-    "sync-upstream": "node scripts/sync-upstream.ts"
-  },
-  "dependencies": {
-    "@playwright/test": "^1.63.0",
-    "jose": "^6.2.12",
-    "undici": "^8.11.2"
-  },
-  "devDependencies": {
-    "@types/node": "^24",
-    "oidc-provider": "^9.12.2",
-    "openid-client": "^6.8.8",
-    "oxfmt": "^0.71.0",
-    "oxlint": "^1.86.0",
-    "typescript": "^7.0.2"
-  }
+	"name": "@balazsorban44/openid-conformance-suite",
+	"version": "0.1.0",
+	"description": "TypeScript port of the OpenID Foundation conformance suite (OpenID Connect Core OP and RP tests), driven by Playwright, runnable in GitHub Actions.",
+	"license": "MIT",
+	"repository": "github:balazsorban44/openid-conformance-suite",
+	"bin": {
+		"openid-conformance": "./bin/openid-conformance.ts"
+	},
+	"files": [
+		"bin",
+		"src",
+		"tests",
+		"playwright.config.ts",
+		"upstream.lock.json",
+		"README.md",
+		"LICENSE"
+	],
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"lint": "oxlint",
+		"fmt": "oxfmt",
+		"fmt:check": "oxfmt --check",
+		"check": "npm run typecheck && npm run lint && npm run fmt:check",
+		"test": "playwright test",
+		"test:unit": "node --test 'src/**/*.test.ts'",
+		"sync-upstream": "node scripts/sync-upstream.ts"
+	},
+	"dependencies": {
+		"@playwright/test": "^1.63.0",
+		"jose": "^6.2.12",
+		"undici": "^8.11.2"
+	},
+	"devDependencies": {
+		"@types/node": "^24",
+		"oidc-provider": "^9.12.2",
+		"openid-client": "^6.8.8",
+		"oxfmt": "^0.71.0",
+		"oxlint": "^1.86.0",
+		"typescript": "^7.0.2"
+	},
+	"engines": {
+		"node": ">=24"
+	}
 }

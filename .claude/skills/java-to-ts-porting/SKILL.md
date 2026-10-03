@@ -12,14 +12,14 @@ is wrong, port it as is and leave a `// UPSTREAM:` comment.
 
 ## Where things live
 
-| Java (`src/main/java/net/openid/conformance/...`) | TypeScript |
-|---|---|
-| `condition/client/Foo.java` | `src/condition/client/Foo.ts` |
-| `condition/as/Foo.java`, `common/`, `rs/`, `util/` | `src/condition/as/Foo.ts`, ... |
-| `sequence/client/Foo.java`, `sequence/as/`, `sequence/Foo.java` | `src/sequence/client/Foo.ts`, ... |
-| `util/JWKUtil.java` | `src/util/JWKUtil.ts` |
-| `variant/ClientAuthType.java` | `src/variant/ClientAuthType.ts` |
-| `openid/OIDCCServerTest.java`, `openid/client/...` | `src/openid/OIDCCServerTest.ts`, ... |
+| Java (`src/main/java/net/openid/conformance/...`)                                                               | TypeScript                                         |
+| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `condition/client/Foo.java`                                                                                     | `src/condition/client/Foo.ts`                      |
+| `condition/as/Foo.java`, `common/`, `rs/`, `util/`                                                              | `src/condition/as/Foo.ts`, ...                     |
+| `sequence/client/Foo.java`, `sequence/as/`, `sequence/Foo.java`                                                 | `src/sequence/client/Foo.ts`, ...                  |
+| `util/JWKUtil.java`                                                                                             | `src/util/JWKUtil.ts`                              |
+| `variant/ClientAuthType.java`                                                                                   | `src/variant/ClientAuthType.ts`                    |
+| `openid/OIDCCServerTest.java`, `openid/client/...`                                                              | `src/openid/OIDCCServerTest.ts`, ...               |
 | `testmodule/*`, `condition/AbstractCondition`, `sequence/AbstractConditionSequence`, `frontchannel/*`, `plan/*` | `src/framework/*` (already ported, do not re-port) |
 
 `upstream.lock.json` lists every file in scope with its Java source path and the blob hash at the pinned
@@ -47,6 +47,7 @@ export class CheckStateInAuthorizationResponse extends AbstractCondition {
 ```
 
 Rules:
+
 - Always import from the barrel `../../framework/index.ts` (adjust the number of `../`). Never from
   `src/framework/<file>.ts` directly (framework files themselves must not import the barrel).
 - Imports of other ported classes use relative paths with the `.ts` extension:
@@ -66,34 +67,34 @@ Rules:
 
 ## Framework API equivalents (conditions)
 
-| Java | TypeScript |
-|---|---|
-| `throw error("msg")` | `throw this.error("msg")` |
-| `throw error("msg", args("k", v))` | `throw this.error("msg", args("k", v))` |
-| `throw error("msg", e)` / `error(e)` / `error("msg", e, args(...))` | same shapes on `this.error(...)` |
-| `logSuccess("msg")`, `logSuccess("msg", args(...))`, `logSuccess(jsonObject)` | `this.logSuccess(...)` (same overloads) |
-| `log("msg")`, `log("msg", args(...))`, `log(map)` | `this.log(...)` |
-| `logFailure(...)` | `this.logFailure(...)` |
-| `args("a", 1, "b", 2)` | `args("a", 1, "b", 2)` (imported from the barrel) |
-| `ex(e)`, `ex(e, map)` | `ex(e)`, `ex(e, map)` |
-| `getRequirements()` | `this.getRequirements()` (a `Set<string>`) |
-| `getStringFromEnvironment(env, key, path, name)` | `this.getStringFromEnvironment(env, key, path, name)` |
-| `getJsonObjectFromEnvironment(...)`, `getJsonArrayFromEnvironment(...)` | same |
-| `createBrowserInteractionPlaceholder(msg)` | `this.createBrowserInteractionPlaceholder(msg)` |
-| `Condition.ConditionResult.FAILURE` | `ConditionResult.FAILURE` |
-| `getMessage()` | `this.getMessage()` |
-| `RandomStringUtils.secure().nextAlphanumeric(n)` | `RandomStringUtils.nextAlphanumeric(n)` |
-| `Strings.isNullOrEmpty(s)` | `!s` (for `string \| null`) |
-| `Strings.nullToEmpty(s)` | `s ?? ""` |
-| `Instant.now().getEpochSecond()` | `Math.floor(Date.now() / 1000)` |
-| `String.format(...)` / `"%s".formatted(x)` | template literal |
-| `Objects.equals(a, b)` | `a === b` |
-| `List.of(...)` / `Set.of(...)` | arrays / `new Set([...])` |
-| `BaseEncoding.base64Url()...` | `Buffer.from(x).toString("base64url")` / `Buffer.from(s, "base64url")` |
-| `URI`/`URL` parsing | `new URL(s)` (throws on invalid), `URL.canParse(s)` |
-| `UriComponentsBuilder.fromUriString(u).queryParam(k, v)` | `const url = new URL(u); url.searchParams.append(k, v)` |
-| `URLEncodedUtils.parse(s, charset, '&')` | `[...new URLSearchParams(s).entries()]` |
-| `MessageDigest.getInstance("SHA-256").digest(b)` | `createHash("sha256").update(b).digest()` from `node:crypto` |
+| Java                                                                          | TypeScript                                                             |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `throw error("msg")`                                                          | `throw this.error("msg")`                                              |
+| `throw error("msg", args("k", v))`                                            | `throw this.error("msg", args("k", v))`                                |
+| `throw error("msg", e)` / `error(e)` / `error("msg", e, args(...))`           | same shapes on `this.error(...)`                                       |
+| `logSuccess("msg")`, `logSuccess("msg", args(...))`, `logSuccess(jsonObject)` | `this.logSuccess(...)` (same overloads)                                |
+| `log("msg")`, `log("msg", args(...))`, `log(map)`                             | `this.log(...)`                                                        |
+| `logFailure(...)`                                                             | `this.logFailure(...)`                                                 |
+| `args("a", 1, "b", 2)`                                                        | `args("a", 1, "b", 2)` (imported from the barrel)                      |
+| `ex(e)`, `ex(e, map)`                                                         | `ex(e)`, `ex(e, map)`                                                  |
+| `getRequirements()`                                                           | `this.getRequirements()` (a `Set<string>`)                             |
+| `getStringFromEnvironment(env, key, path, name)`                              | `this.getStringFromEnvironment(env, key, path, name)`                  |
+| `getJsonObjectFromEnvironment(...)`, `getJsonArrayFromEnvironment(...)`       | same                                                                   |
+| `createBrowserInteractionPlaceholder(msg)`                                    | `this.createBrowserInteractionPlaceholder(msg)`                        |
+| `Condition.ConditionResult.FAILURE`                                           | `ConditionResult.FAILURE`                                              |
+| `getMessage()`                                                                | `this.getMessage()`                                                    |
+| `RandomStringUtils.secure().nextAlphanumeric(n)`                              | `RandomStringUtils.nextAlphanumeric(n)`                                |
+| `Strings.isNullOrEmpty(s)`                                                    | `!s` (for `string \| null`)                                            |
+| `Strings.nullToEmpty(s)`                                                      | `s ?? ""`                                                              |
+| `Instant.now().getEpochSecond()`                                              | `Math.floor(Date.now() / 1000)`                                        |
+| `String.format(...)` / `"%s".formatted(x)`                                    | template literal                                                       |
+| `Objects.equals(a, b)`                                                        | `a === b`                                                              |
+| `List.of(...)` / `Set.of(...)`                                                | arrays / `new Set([...])`                                              |
+| `BaseEncoding.base64Url()...`                                                 | `Buffer.from(x).toString("base64url")` / `Buffer.from(s, "base64url")` |
+| `URI`/`URL` parsing                                                           | `new URL(s)` (throws on invalid), `URL.canParse(s)`                    |
+| `UriComponentsBuilder.fromUriString(u).queryParam(k, v)`                      | `const url = new URL(u); url.searchParams.append(k, v)`                |
+| `URLEncodedUtils.parse(s, charset, '&')`                                      | `[...new URLSearchParams(s).entries()]`                                |
+| `MessageDigest.getInstance("SHA-256").digest(b)`                              | `createHash("sha256").update(b).digest()` from `node:crypto`           |
 
 ## Environment
 
@@ -108,32 +109,32 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 
 ## Gson -> JSON
 
-| Gson | TypeScript (`src/framework/json.ts`, re-exported by the barrel) |
-|---|---|
-| `JsonObject` | `JsonObject` (`{ [k: string]: JsonValue }`) |
-| `JsonArray` | `JsonArray` (`JsonValue[]`) |
-| `JsonElement` | `JsonValue` (`| undefined` when it may be missing) |
-| `new JsonObject()` | `{}` typed as `const o: JsonObject = {}` |
-| `o.addProperty("k", v)` / `o.add("k", el)` | `o["k"] = v` |
-| `o.get("k")` (null if missing) | `o["k"]` (undefined if missing) |
-| `o.has("k")` | `has(o, "k")` or `"k" in o` |
-| `o.remove("k")` | `const v = o["k"]; delete o["k"]` |
-| `o.keySet()` / `o.entrySet()` / `o.size()` | `Object.keys(o)` / `Object.entries(o)` / `Object.keys(o).length` |
-| `el.isJsonObject()` / `isJsonArray()` / `isJsonNull()` | `isJsonObject(el)` / `isJsonArray(el)` / `el === null` |
-| `el.isJsonPrimitive() && el.getAsJsonPrimitive().isString()` | `typeof el === "string"` (or `isJsonString(el)`) |
-| `...isNumber()` / `...isBoolean()` | `typeof el === "number"` / `typeof el === "boolean"` |
-| `el.getAsJsonObject()` / `getAsJsonArray()` | `el as JsonObject` after an `isJsonObject` check |
-| `OIDFJSON.getString(el)` etc. | `OIDFJSON.getString(el)` (same strict semantics, throws on wrong type) |
-| `el.getAsString()` (avoid upstream too) | `OIDFJSON.getString(el)` or `String(el)` only where Java coerces |
-| `JsonParser.parseString(s)` | `parseJson(s)` (throws `JsonParseException`); `parseJsonObject(s)` for `.getAsJsonObject()` |
-| `JsonSyntaxException` / `JsonParseException` | `JsonParseException` |
-| `el.toString()` / `gson.toJson(x)` | `JSON.stringify(el)` |
-| `el.deepCopy()` | `deepCopy(el)` |
-| `a.equals(b)` on elements | `jsonEquals(a, b)` |
-| `arr.contains(new JsonPrimitive("x"))` | `jsonArrayContains(arr, "x")` |
-| `new JsonPrimitive(x)` | `x` |
-| `arr.add(x)` / `arr.size()` / `arr.get(i)` | `arr.push(x)` / `arr.length` / `arr[i]` |
-| `JsonNull.INSTANCE` | `null` |
+| Gson                                                         | TypeScript (`src/framework/json.ts`, re-exported by the barrel)                             |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `JsonObject`                                                 | `JsonObject` (`{ [k: string]: JsonValue }`)                                                 |
+| `JsonArray`                                                  | `JsonArray` (`JsonValue[]`)                                                                 |
+| `JsonElement`                                                | `JsonValue` (`                                                                              | undefined` when it may be missing) |
+| `new JsonObject()`                                           | `{}` typed as `const o: JsonObject = {}`                                                    |
+| `o.addProperty("k", v)` / `o.add("k", el)`                   | `o["k"] = v`                                                                                |
+| `o.get("k")` (null if missing)                               | `o["k"]` (undefined if missing)                                                             |
+| `o.has("k")`                                                 | `has(o, "k")` or `"k" in o`                                                                 |
+| `o.remove("k")`                                              | `const v = o["k"]; delete o["k"]`                                                           |
+| `o.keySet()` / `o.entrySet()` / `o.size()`                   | `Object.keys(o)` / `Object.entries(o)` / `Object.keys(o).length`                            |
+| `el.isJsonObject()` / `isJsonArray()` / `isJsonNull()`       | `isJsonObject(el)` / `isJsonArray(el)` / `el === null`                                      |
+| `el.isJsonPrimitive() && el.getAsJsonPrimitive().isString()` | `typeof el === "string"` (or `isJsonString(el)`)                                            |
+| `...isNumber()` / `...isBoolean()`                           | `typeof el === "number"` / `typeof el === "boolean"`                                        |
+| `el.getAsJsonObject()` / `getAsJsonArray()`                  | `el as JsonObject` after an `isJsonObject` check                                            |
+| `OIDFJSON.getString(el)` etc.                                | `OIDFJSON.getString(el)` (same strict semantics, throws on wrong type)                      |
+| `el.getAsString()` (avoid upstream too)                      | `OIDFJSON.getString(el)` or `String(el)` only where Java coerces                            |
+| `JsonParser.parseString(s)`                                  | `parseJson(s)` (throws `JsonParseException`); `parseJsonObject(s)` for `.getAsJsonObject()` |
+| `JsonSyntaxException` / `JsonParseException`                 | `JsonParseException`                                                                        |
+| `el.toString()` / `gson.toJson(x)`                           | `JSON.stringify(el)`                                                                        |
+| `el.deepCopy()`                                              | `deepCopy(el)`                                                                              |
+| `a.equals(b)` on elements                                    | `jsonEquals(a, b)`                                                                          |
+| `arr.contains(new JsonPrimitive("x"))`                       | `jsonArrayContains(arr, "x")`                                                               |
+| `new JsonPrimitive(x)`                                       | `x`                                                                                         |
+| `arr.add(x)` / `arr.size()` / `arr.get(i)`                   | `arr.push(x)` / `arr.length` / `arr[i]`                                                     |
+| `JsonNull.INSTANCE`                                          | `null`                                                                                      |
 
 `Map<String, Object>` log args are `Record<string, unknown>`; `JsonObject` and maps are interchangeable in logs.
 
@@ -142,19 +143,19 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 Use `jose` (https://github.com/panva/jose). The shared helpers live in `src/util/` (JWKUtil, JWSUtil, JWEUtil,
 JWTUtil, JWAUtil); check them before writing new JOSE code. Typical mappings:
 
-| Nimbus | jose / port |
-|---|---|
-| `JWT jwt = JWTParser.parse(s)` | `JWTUtil.parseJWT(s)` -> `{ header, claims, signature... }` (see `src/util/JWTUtil.ts`) |
-| `SignedJWT.parse(s)` | `decodeProtectedHeader` + `decodeJwt` (unverified) or JWTUtil helpers |
-| `JWKSet.parse(json)` / `JWK.parse(json)` | `JWKUtil.parseJWKSet(json)` (validates and returns the JSON-shaped set); jose `importJWK(jwk, alg)` to get a `CryptoKey` |
-| `jwt.verify(new RSASSAVerifier(key))` | `await jwtVerify(s, key, { algorithms: [alg] })` / `compactVerify` |
-| `JWSAlgorithm.parse(alg)` | plain string; validity via `JWSUtil.isValidJWSAlgorithm(alg)` |
-| `JWSHeader.Builder(alg).keyID(kid).build()`; `SignedJWT(header, claims).sign(signer)` | `new SignJWT(claims).setProtectedHeader({ alg, kid, typ }).sign(privateKey)` or `new CompactSign(payload)` |
-| `JWEObject`, `JWEDecrypter`, `JWEEncrypter` | `compactDecrypt`, `CompactEncrypt`, see `JWEUtil` |
-| `jwt.getJWTClaimsSet().getStringClaim("iss")` | `claims["iss"]` on the decoded claims object |
-| `RSAKeyGenerator(2048).keyID(kid).generate()` | `generateKeyPair("RS256", { modulusLength: 2048 })` + `exportJWK` |
-| `jwk.toPublicJWK()` | strip private members (`d, p, q, dp, dq, qi, oth, k`) - see `JWKUtil.toPublicJWKSet` |
-| `Base64URL.encode(bytes)` | `base64url.encode(bytes)` from jose, or `Buffer...toString("base64url")` |
+| Nimbus                                                                                | jose / port                                                                                                              |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `JWT jwt = JWTParser.parse(s)`                                                        | `JWTUtil.parseJWT(s)` -> `{ header, claims, signature... }` (see `src/util/JWTUtil.ts`)                                  |
+| `SignedJWT.parse(s)`                                                                  | `decodeProtectedHeader` + `decodeJwt` (unverified) or JWTUtil helpers                                                    |
+| `JWKSet.parse(json)` / `JWK.parse(json)`                                              | `JWKUtil.parseJWKSet(json)` (validates and returns the JSON-shaped set); jose `importJWK(jwk, alg)` to get a `CryptoKey` |
+| `jwt.verify(new RSASSAVerifier(key))`                                                 | `await jwtVerify(s, key, { algorithms: [alg] })` / `compactVerify`                                                       |
+| `JWSAlgorithm.parse(alg)`                                                             | plain string; validity via `JWSUtil.isValidJWSAlgorithm(alg)`                                                            |
+| `JWSHeader.Builder(alg).keyID(kid).build()`; `SignedJWT(header, claims).sign(signer)` | `new SignJWT(claims).setProtectedHeader({ alg, kid, typ }).sign(privateKey)` or `new CompactSign(payload)`               |
+| `JWEObject`, `JWEDecrypter`, `JWEEncrypter`                                           | `compactDecrypt`, `CompactEncrypt`, see `JWEUtil`                                                                        |
+| `jwt.getJWTClaimsSet().getStringClaim("iss")`                                         | `claims["iss"]` on the decoded claims object                                                                             |
+| `RSAKeyGenerator(2048).keyID(kid).generate()`                                         | `generateKeyPair("RS256", { modulusLength: 2048 })` + `exportJWK`                                                        |
+| `jwk.toPublicJWK()`                                                                   | strip private members (`d, p, q, dp, dq, qi, oth, k`) - see `JWKUtil.toPublicJWKSet`                                     |
+| `Base64URL.encode(bytes)`                                                             | `base64url.encode(bytes)` from jose, or `Buffer...toString("base64url")`                                                 |
 
 jose is async: conditions that sign/verify become `async evaluate(...)`. jose also validates more strictly than
 Nimbus in places (e.g. unsupported curves); when Java leniently skipped keys, do the same explicitly.

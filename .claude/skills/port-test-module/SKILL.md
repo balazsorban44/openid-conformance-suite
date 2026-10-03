@@ -71,55 +71,55 @@ export class OIDCCServerTest extends AbstractOIDCCServerTest {
 
 ## Mapping table
 
-| Java | TypeScript |
-|---|---|
-| `@PublishTestModule(testName=..., displayName=..., summary=..., profile=..., configurationFields={...})` | `static override readonly meta: PublishTestModule = {...}` |
-| `@VariantParameters({A.class, B.class})` | `variants.parameters: [A, B]` |
-| `@VariantNotApplicable(parameter = A.class, values = {"x"})` (repeatable) | `variants.notApplicable: [{ parameter: A, values: ["x"] }]` |
-| `@VariantApplicableOnly` | `variants.applicableOnly` |
-| `@VariantNotApplicableWhen(...)` | `variants.notApplicableWhen: [{ parameter, values, whenParameter, hasValues }]` |
-| `@VariantConfigurationFields(parameter = A.class, value = "x", configurationFields = {...})` | `variants.configurationFields: [{ parameter: A, value: "x", configurationFields: [...] }]` |
-| `@VariantHidesConfigurationFields(...)` | `variants.hidesConfigurationFields` |
-| `@ConfigurationFields({...})` on the class | `variants.plainConfigurationFields: [...]` |
-| `@VariantSetup(parameter = A.class, value = "x") public void setupX()` | `variants.setup: [{ parameter: A, value: "x", method: "setupX" }]` + a public `setupX(): void` method |
-| `getVariant(A.class)` | `this.getVariant(A)` |
-| `getVariant(A.class) == A.FOO` | `this.getVariant(A) === A.FOO` |
-| `switch (getVariant(A.class)) { case FOO: }` | `switch (this.getVariant(A)) { case A.FOO: }` |
-| `callAndStopOnFailure(X.class, "REQ")` | `await this.callAndStopOnFailure(X, "REQ")` |
-| `callAndContinueOnFailure(X.class, ConditionResult.WARNING, "REQ")` | `await this.callAndContinueOnFailure(X, ConditionResult.WARNING, "REQ")` |
-| `skipIfMissing(new String[]{"a"}, null, INFO, X.class, FAILURE, "REQ")` | `await this.skipIfMissing(["a"], null, ConditionResult.INFO, X, ConditionResult.FAILURE, "REQ")` |
-| `skipIfElementMissing("obj", "path", INFO, X.class, WARNING, "REQ")` | `await this.skipIfElementMissing("obj", "path", ConditionResult.INFO, X, ConditionResult.WARNING, "REQ")` |
-| `call(sequence(X.class))` | `await this.call(this.sequence(X))` |
-| `call(sequence(() -> new X(arg)))` / `call(sequence(supplier))` | `await this.call(this.sequence(() => new X(arg)))` |
-| `call(new X(args))` (a sequence instance) | `await this.call(new X(args))` |
-| `call(condition(X.class).skipIfElementMissing(...).onFail(...).dontStopOnFailure())` | `await this.call(this.condition(X)....)` |
-| `call(exec().mapKey("a", "b"))` / `exec().startBlock("...")` / `exec().unmapKey(...).endBlock()` | `await this.call(this.exec().mapKey("a", "b"))` ... |
-| `eventLog.startBlock("...")` / `eventLog.endBlock()` / `eventLog.log(getName(), args(...))` | `this.eventLog.startBlock(...)` ... |
-| `Class<? extends ConditionSequence> field` / `Supplier<? extends ConditionSequence> field` | `ConditionSequenceClass \| null` / `ConditionSequenceSupplier \| null` |
-| `Class<? extends Condition> field` | `ConditionClass \| null` |
-| `setStatus(Status.RUNNING)` | `await this.setStatus(Status.RUNNING)` |
-| `fireTestFinished()` | `await this.fireTestFinished()` |
-| `fireTestSkipped("msg")` | `this.fireTestSkipped("msg")` (throws; use `return this.fireTestSkipped(...)` where Java `return`s after) |
-| `fireSetupDone()` | `this.fireSetupDone()` |
-| `expose("k", v)` / `exposeEnvString("k")` | same (sync) |
-| `env.mapKey(...)` / `env.putObject(...)` | same (sync) |
-| `throw new TestFailureException(getId(), "msg")` | `throw new TestFailureException(this.getId(), "msg")` |
-| `new TestFailureException(getId(), "error", "error_description")` | `TestFailureException.oauthError(this.getId(), "error", "error_description")` |
-| `getTestExecutionManager().runInBackground(() -> {...; return "done";})` | `this.getTestExecutionManager().runInBackground(async () => {...; return "done";})` |
-| `Thread.sleep(ms)` inside background tasks | `await sleep(ms, this.getTestExecutionManager().signal)` |
-| `browser.goToUrl(url)` / `(url, placeholder)` / `(url, placeholder, method)` | `this.browser.goToUrl(url, placeholder, method)` |
-| `imageService.getRemainingPlaceholders(getId(), true)` | `this.imageService.getRemainingPlaceholders(this.getId(), true)` |
-| `handleHttp(path, req, res, session, requestParts)` returning `Object` | `override async handleHttp(path, req, res, session, requestParts): Promise<Response>` |
-| `new ResponseEntity<>(jsonObject, HttpStatus.OK)` | `jsonResponse(jsonObject, 200)` |
-| `new ResponseEntity<>(body, headers, HttpStatus.X)` | `jsonResponse(body, status, headersObject)` or `responseEntity(...)` |
-| `new ResponseEntity<Object>("", HttpStatus.NO_CONTENT)` | `noContent()` |
-| `new RedirectView(url, false, false, false)` | `redirectView(url)` |
-| `new ModelAndView("name", ImmutableMap.of("k", v))` | `modelAndView("name", { k: v })` (register missing templates in `src/framework/views/`) |
-| `@UserFacing` | drop (comment) |
-| `HttpServletRequest req` uses (TLS info) | `req.tls?.cipher` etc. (`IncomingHttpRequest`) |
-| `ResponseType.CODE.includesCode()` | `ResponseType.CODE.includesCode()` (enum methods are kept) |
-| `responseType.toString()` | `this.responseType.toString()` |
-| `Instant.now().getEpochSecond()` | `Math.floor(Date.now() / 1000)` |
+| Java                                                                                                     | TypeScript                                                                                                |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `@PublishTestModule(testName=..., displayName=..., summary=..., profile=..., configurationFields={...})` | `static override readonly meta: PublishTestModule = {...}`                                                |
+| `@VariantParameters({A.class, B.class})`                                                                 | `variants.parameters: [A, B]`                                                                             |
+| `@VariantNotApplicable(parameter = A.class, values = {"x"})` (repeatable)                                | `variants.notApplicable: [{ parameter: A, values: ["x"] }]`                                               |
+| `@VariantApplicableOnly`                                                                                 | `variants.applicableOnly`                                                                                 |
+| `@VariantNotApplicableWhen(...)`                                                                         | `variants.notApplicableWhen: [{ parameter, values, whenParameter, hasValues }]`                           |
+| `@VariantConfigurationFields(parameter = A.class, value = "x", configurationFields = {...})`             | `variants.configurationFields: [{ parameter: A, value: "x", configurationFields: [...] }]`                |
+| `@VariantHidesConfigurationFields(...)`                                                                  | `variants.hidesConfigurationFields`                                                                       |
+| `@ConfigurationFields({...})` on the class                                                               | `variants.plainConfigurationFields: [...]`                                                                |
+| `@VariantSetup(parameter = A.class, value = "x") public void setupX()`                                   | `variants.setup: [{ parameter: A, value: "x", method: "setupX" }]` + a public `setupX(): void` method     |
+| `getVariant(A.class)`                                                                                    | `this.getVariant(A)`                                                                                      |
+| `getVariant(A.class) == A.FOO`                                                                           | `this.getVariant(A) === A.FOO`                                                                            |
+| `switch (getVariant(A.class)) { case FOO: }`                                                             | `switch (this.getVariant(A)) { case A.FOO: }`                                                             |
+| `callAndStopOnFailure(X.class, "REQ")`                                                                   | `await this.callAndStopOnFailure(X, "REQ")`                                                               |
+| `callAndContinueOnFailure(X.class, ConditionResult.WARNING, "REQ")`                                      | `await this.callAndContinueOnFailure(X, ConditionResult.WARNING, "REQ")`                                  |
+| `skipIfMissing(new String[]{"a"}, null, INFO, X.class, FAILURE, "REQ")`                                  | `await this.skipIfMissing(["a"], null, ConditionResult.INFO, X, ConditionResult.FAILURE, "REQ")`          |
+| `skipIfElementMissing("obj", "path", INFO, X.class, WARNING, "REQ")`                                     | `await this.skipIfElementMissing("obj", "path", ConditionResult.INFO, X, ConditionResult.WARNING, "REQ")` |
+| `call(sequence(X.class))`                                                                                | `await this.call(this.sequence(X))`                                                                       |
+| `call(sequence(() -> new X(arg)))` / `call(sequence(supplier))`                                          | `await this.call(this.sequence(() => new X(arg)))`                                                        |
+| `call(new X(args))` (a sequence instance)                                                                | `await this.call(new X(args))`                                                                            |
+| `call(condition(X.class).skipIfElementMissing(...).onFail(...).dontStopOnFailure())`                     | `await this.call(this.condition(X)....)`                                                                  |
+| `call(exec().mapKey("a", "b"))` / `exec().startBlock("...")` / `exec().unmapKey(...).endBlock()`         | `await this.call(this.exec().mapKey("a", "b"))` ...                                                       |
+| `eventLog.startBlock("...")` / `eventLog.endBlock()` / `eventLog.log(getName(), args(...))`              | `this.eventLog.startBlock(...)` ...                                                                       |
+| `Class<? extends ConditionSequence> field` / `Supplier<? extends ConditionSequence> field`               | `ConditionSequenceClass \| null` / `ConditionSequenceSupplier \| null`                                    |
+| `Class<? extends Condition> field`                                                                       | `ConditionClass \| null`                                                                                  |
+| `setStatus(Status.RUNNING)`                                                                              | `await this.setStatus(Status.RUNNING)`                                                                    |
+| `fireTestFinished()`                                                                                     | `await this.fireTestFinished()`                                                                           |
+| `fireTestSkipped("msg")`                                                                                 | `this.fireTestSkipped("msg")` (throws; use `return this.fireTestSkipped(...)` where Java `return`s after) |
+| `fireSetupDone()`                                                                                        | `this.fireSetupDone()`                                                                                    |
+| `expose("k", v)` / `exposeEnvString("k")`                                                                | same (sync)                                                                                               |
+| `env.mapKey(...)` / `env.putObject(...)`                                                                 | same (sync)                                                                                               |
+| `throw new TestFailureException(getId(), "msg")`                                                         | `throw new TestFailureException(this.getId(), "msg")`                                                     |
+| `new TestFailureException(getId(), "error", "error_description")`                                        | `TestFailureException.oauthError(this.getId(), "error", "error_description")`                             |
+| `getTestExecutionManager().runInBackground(() -> {...; return "done";})`                                 | `this.getTestExecutionManager().runInBackground(async () => {...; return "done";})`                       |
+| `Thread.sleep(ms)` inside background tasks                                                               | `await sleep(ms, this.getTestExecutionManager().signal)`                                                  |
+| `browser.goToUrl(url)` / `(url, placeholder)` / `(url, placeholder, method)`                             | `this.browser.goToUrl(url, placeholder, method)`                                                          |
+| `imageService.getRemainingPlaceholders(getId(), true)`                                                   | `this.imageService.getRemainingPlaceholders(this.getId(), true)`                                          |
+| `handleHttp(path, req, res, session, requestParts)` returning `Object`                                   | `override async handleHttp(path, req, res, session, requestParts): Promise<Response>`                     |
+| `new ResponseEntity<>(jsonObject, HttpStatus.OK)`                                                        | `jsonResponse(jsonObject, 200)`                                                                           |
+| `new ResponseEntity<>(body, headers, HttpStatus.X)`                                                      | `jsonResponse(body, status, headersObject)` or `responseEntity(...)`                                      |
+| `new ResponseEntity<Object>("", HttpStatus.NO_CONTENT)`                                                  | `noContent()`                                                                                             |
+| `new RedirectView(url, false, false, false)`                                                             | `redirectView(url)`                                                                                       |
+| `new ModelAndView("name", ImmutableMap.of("k", v))`                                                      | `modelAndView("name", { k: v })` (register missing templates in `src/framework/views/`)                   |
+| `@UserFacing`                                                                                            | drop (comment)                                                                                            |
+| `HttpServletRequest req` uses (TLS info)                                                                 | `req.tls?.cipher` etc. (`IncomingHttpRequest`)                                                            |
+| `ResponseType.CODE.includesCode()`                                                                       | `ResponseType.CODE.includesCode()` (enum methods are kept)                                                |
+| `responseType.toString()`                                                                                | `this.responseType.toString()`                                                                            |
+| `Instant.now().getEpochSecond()`                                                                         | `Math.floor(Date.now() / 1000)`                                                                           |
 
 All methods that (transitively) call conditions become `protected async foo(): Promise<void>` and every call site
 awaits them. Hooks that Java leaves empty (`onConfigure`, `onPostAuthorizationFlowComplete`) stay `async` too so
@@ -139,13 +139,21 @@ import { VariantEnum, type VariantParameterInfo } from "../framework/index.ts";
 
 export class ResponseType extends VariantEnum {
 	static override readonly parameter: VariantParameterInfo = {
-		name: "response_type", sortOrder: 40, displayName: "Response Type", description: "...",
+		name: "response_type",
+		sortOrder: 40,
+		displayName: "Response Type",
+		description: "...",
 	};
 	static readonly CODE = new ResponseType("CODE", ["code"]);
 	static readonly ID_TOKEN = new ResponseType("ID_TOKEN", ["id_token"]);
 	private readonly types: string[];
-	private constructor(name: string, types: string[]) { super(name, types.join(" ")); this.types = types; }
-	includesCode(): boolean { return this.types.includes("code"); }
+	private constructor(name: string, types: string[]) {
+		super(name, types.join(" "));
+		this.types = types;
+	}
+	includesCode(): boolean {
+		return this.types.includes("code");
+	}
 }
 ```
 
