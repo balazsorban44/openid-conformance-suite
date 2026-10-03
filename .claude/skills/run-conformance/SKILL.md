@@ -53,6 +53,16 @@ by the port:
 - `expectedFailures` / `expectedSkips` (optional): path to upstream-format JSON lists.
 - `browser` may be a `.ts` config exporting `{ ...json, browser: async ({ page, url }) => {...} }` instead of the
   task array.
+- `suite_target` (suite-vs-suite): `{ "module": "oidcc-client-test", "alias": "emulated-op", "variant": {...},
+"config": {...} }` runs that RP test module in-process as the OP for every module of the plan and points
+  `server.discoveryUrl` at it. Variant parameters left out of `suite_target.variant` are taken from the module
+  under test (so `client_auth_type` follows e.g. `oidcc-server-client-secret-post`). The emulated module keeps
+  answering requests after its own single flow finished (`setKeepServingAfterFinish`, not in upstream), because
+  OP modules call userinfo twice, authorize twice, etc.; what it cannot emulate (single-use codes, the unusable
+  keys it publishes on purpose) is listed in `configs/expected-failures/suite-vs-suite.json`.
+
+Modules that upstream starts manually from the UI (`autoStart() == false`, i.e. `oidcc-server-rotate-keys`) are
+started right away, as upstream's `run-test-plan.py` does in CI.
 
 ## Reading the CI summary
 

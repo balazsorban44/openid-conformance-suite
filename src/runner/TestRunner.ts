@@ -143,7 +143,20 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 
 	executionManager.runInBackground(async () => {
 		await module.configure(config, url, externalUrlOverride, mtlsUrl);
-		if (module.getStatus() === Status.CONFIGURED && module.autoStart()) {
+		if (module.getStatus() === Status.CONFIGURED) {
+			if (!module.autoStart()) {
+				// as upstream's run-test-plan.py does for oidcc-server-rotate-keys: a module that waits for the user to
+				// press 'Start' (after rotating the OP's keys) is started right away in an unattended run
+				eventLog.log(
+					"TEST-RUNNER",
+					args(
+						"msg",
+						"Starting the test module without waiting for the user to press 'Start' (unattended run)",
+						"result",
+						ConditionResult.INFO,
+					),
+				);
+			}
 			await module.start();
 		}
 		return "done";
@@ -222,7 +235,20 @@ async function startEmulatedOp(
 	const testId = newTestId();
 	const eventLog = new TestInstanceEventLog(testId, opts.onLog);
 	const imageService = new ImageService(eventLog);
-	const module = VariantService.newInstance(moduleClass, new VariantSelection(target.variant ?? {}));
+	// suite_target.variant wins; a parameter the emulated module declares but the config leaves out is taken from
+	// the variant of the module under test when it has one (e.g. client_auth_type), so the two sides agree
+	const variant: Record<string, string> = {};
+	for (const p of VariantService.parametersOf(moduleClass)) {
+		const name = p.parameter.name;
+		const value = target.variant?.[name] ?? opts.variant.getVariant()[name];
+		if (value !== undefined) {
+			variant[name] = value;
+		}
+	}
+	const module = VariantService.newInstance(moduleClass, new VariantSelection(variant));
+	// OP test modules call the emulated OP's endpoints after its own single flow has finished (second userinfo
+	// request, a second authorization, ...)
+	module.setKeepServingAfterFinish(true);
 	const executionManager = new TestExecutionManager(testId, {
 		onError: (error, source) => module.handleException(error, source),
 		afterTask: () => module.forceReleaseLock(),

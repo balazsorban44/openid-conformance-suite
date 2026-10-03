@@ -1,1 +1,11 @@
-[]
+[
+	{
+		"test-name": "oidcc-server-rotate-keys",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "VerifyNewJwksHasNewSigningKey",
+		"expected-result": "failure",
+		"comment": "oidc-provider's signing keys are not rotated during the CI run (same as upstream's CI against its local provider)"
+	}
+]

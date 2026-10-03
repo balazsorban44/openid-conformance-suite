@@ -859,6 +859,12 @@ export abstract class AbstractTestModule {
 						throw illegal();
 					}
 					break;
+				case Status.FINISHED:
+					// not in upstream: an emulated OP (suite-vs-suite) keeps answering requests after its own flow finished
+					if (!(this.keepServingAfterFinish && allowed(Status.RUNNING, Status.WAITING))) {
+						throw illegal();
+					}
+					break;
 				default:
 					throw illegal();
 			}
@@ -1149,6 +1155,17 @@ export abstract class AbstractTestModule {
 	}
 
 	/** Force the lock to be released, if held. Used in failure paths to cleanup. */
+	/**
+	 * Not in upstream. When set, incoming HTTP requests are still handled after the module has finished (status
+	 * FINISHED -> RUNNING is allowed). The runner sets it on the RP test module that acts as the emulated OP in
+	 * suite-vs-suite runs, where OP test modules call e.g. the userinfo endpoint more than once.
+	 */
+	private keepServingAfterFinish = false;
+
+	setKeepServingAfterFinish(keep: boolean): void {
+		this.keepServingAfterFinish = keep;
+	}
+
 	forceReleaseLock(): void {
 		this.mutex.release();
 	}
