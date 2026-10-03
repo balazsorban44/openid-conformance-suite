@@ -7,10 +7,9 @@ import {
 	type EnvironmentRequirements,
 	type JsonObject,
 } from "../../../framework/index.ts";
-import { URISyntaxException } from "../../../util/validation/RedirectURIValidationUtil.ts";
+import { parseJavaURI, URISyntaxException } from "../../../util/jdk/uri.ts";
 import { RFC6749AppendixASyntaxUtils } from "../../util/RFC6749AppendixASyntaxUtils.ts";
 import { CreateEffectiveAuthorizationRequestParameters } from "../CreateEffectiveAuthorizationRequestParameters.ts";
-import { parseJavaURI } from "../dynregistration/AbstractClientValidationCondition.ts";
 
 /**
  * https://openid.net/specs/openid-connect-session-1_0.html#CreatingUpdatingSessions

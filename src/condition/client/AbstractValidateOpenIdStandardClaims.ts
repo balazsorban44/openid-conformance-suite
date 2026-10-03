@@ -1,17 +1,11 @@
 import { AbstractCondition, isJsonObject, OIDFJSON, type JsonObject, type JsonValue } from "../../framework/index.ts";
+import { isBlank } from "../../util/jdk/strings.ts";
 
 export interface ElementValidator {
 	getDescription(): string;
 
 	isValid(elt: JsonValue | undefined): boolean;
 }
-
-// Java String.isBlank(): true if the string is empty or contains only Character.isWhitespace code points
-// (note this excludes the non-breaking spaces U+00A0, U+2007 and U+202F, which JS trim() would strip)
-const JAVA_BLANK = new RegExp(
-	// oxlint-disable-next-line no-control-regex
-	"^[\\t\\n\\u000B\\f\\r\\u001C-\\u001F \\u1680\\u2000-\\u2006\\u2008-\\u200A\\u2028\\u2029\\u205F\\u3000]*$",
-);
 
 const VALIDATE_STRING: ElementValidator = {
 	getDescription(): string {
@@ -23,7 +17,7 @@ const VALIDATE_STRING: ElementValidator = {
 		if (typeof elt !== "string") {
 			return false;
 		}
-		if (JAVA_BLANK.test(OIDFJSON.getString(elt))) {
+		if (isBlank(OIDFJSON.getString(elt))) {
 			return false;
 		}
 		// Not explicitly stated in any spec, but we've seen servers return this incorrectly as a user's name

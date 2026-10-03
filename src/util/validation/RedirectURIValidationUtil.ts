@@ -1,10 +1,4 @@
-/** Port of `java.net.URISyntaxException` as thrown by {@link RedirectURIValidationUtil}. */
-export class URISyntaxException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "URISyntaxException";
-	}
-}
+import { URISyntaxException } from "../jdk/uri.ts";
 
 export class RedirectURIValidationUtil {
 	/**

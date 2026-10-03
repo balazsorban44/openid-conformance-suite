@@ -6,12 +6,9 @@ import {
 	type JsonArray,
 	type JsonObject,
 } from "../../../framework/index.ts";
-import { RedirectURIValidationUtil, URISyntaxException } from "../../../util/validation/RedirectURIValidationUtil.ts";
-import {
-	AbstractClientValidationCondition,
-	IllegalStateException,
-	parseJavaURI,
-} from "./AbstractClientValidationCondition.ts";
+import { parseJavaURI, URISyntaxException } from "../../../util/jdk/uri.ts";
+import { RedirectURIValidationUtil } from "../../../util/validation/RedirectURIValidationUtil.ts";
+import { AbstractClientValidationCondition, IllegalStateException } from "./AbstractClientValidationCondition.ts";
 
 /**
  * Registration request must contain at least one redirect_uri

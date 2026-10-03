@@ -95,6 +95,16 @@ Rules:
 | `UriComponentsBuilder.fromUriString(u).queryParam(k, v)`                      | `const url = new URL(u); url.searchParams.append(k, v)`                |
 | `URLEncodedUtils.parse(s, charset, '&')`                                      | `[...new URLSearchParams(s).entries()]`                                |
 | `MessageDigest.getInstance("SHA-256").digest(b)`                              | `createHash("sha256").update(b).digest()` from `node:crypto`           |
+| `new URI(s)` (accept/reject, host, port matter), `URISyntaxException`         | `parseJavaURI(s)`, `URISyntaxException` in `src/util/jdk/uri.ts`       |
+| `new LdapName(dn).getRdns()`, `Rdn.equals`, `InvalidNameException`            | `parseLdapName`, `rdnEquals`, `InvalidNameException` in `jdk/ldap.ts`  |
+| `InetAddresses.forString(s)` compared with `InetAddress.equals`               | `inetAddressBytes(s)` in `src/util/jdk/inet.ts`                        |
+| `s.getBytes(US_ASCII)`                                                        | `Buffer.from(toUsAscii(s), "latin1")`, `src/util/jdk/strings.ts`       |
+| `s.isBlank()`, `URLEncoder.encode(s, UTF_8)`                                  | `isBlank(s)`, `urlEncode(s)` in `src/util/jdk/strings.ts`              |
+| `Base64.getDecoder().decode(s)`, its `IllegalArgumentException`               | `javaBase64Decode(s)`, `IllegalArgumentException` in `jdk/strings.ts`  |
+| `CertificateFactory.generateCertificates`, `CertificateException`             | `generateCertificates`, `CertificateException` in `jdk/x509.ts`        |
+| `publicKey.getAlgorithm()`                                                    | `javaKeyAlgorithm(key)` in `src/util/jdk/x509.ts`                      |
+| `cert.getSubjectX500Principal().getName()`                                    | `getSubjectX500PrincipalName(cert)` in `src/util/jdk/x509.ts`          |
+| `cert.getSubjectAlternativeNames()`                                           | `getSubjectAlternativeNames(cert)` in `src/util/jdk/x509.ts`           |
 
 ## Environment
 

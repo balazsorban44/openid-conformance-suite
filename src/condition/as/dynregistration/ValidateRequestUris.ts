@@ -6,12 +6,8 @@ import {
 	type EnvironmentRequirements,
 	type JsonObject,
 } from "../../../framework/index.ts";
-import { URISyntaxException } from "../../../util/validation/RedirectURIValidationUtil.ts";
-import {
-	AbstractClientValidationCondition,
-	IllegalStateException,
-	parseJavaURI,
-} from "./AbstractClientValidationCondition.ts";
+import { parseJavaURI, URISyntaxException } from "../../../util/jdk/uri.ts";
+import { AbstractClientValidationCondition, IllegalStateException } from "./AbstractClientValidationCondition.ts";
 
 /**
  * request_uris

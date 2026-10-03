@@ -4,11 +4,7 @@ import {
 	type EnvironmentRequirements,
 	type JsonObject,
 } from "../../framework/index.ts";
-
-/** Equivalent of Java's URLEncoder.encode(s, UTF_8) (application/x-www-form-urlencoded) */
-function urlEncode(s: string): string {
-	return new URLSearchParams([["x", s]]).toString().substring(2);
-}
+import { urlEncode } from "../../util/jdk/strings.ts";
 
 export class AddBasicAuthClientSecretToRequest extends AbstractCondition {
 	static override pre: EnvironmentRequirements = { required: ["request_headers", "client"] };

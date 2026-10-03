@@ -1,11 +1,7 @@
 import { createHash, type Hash } from "node:crypto";
 import { AbstractCondition, args, type Environment, type EnvironmentRequirements } from "../../framework/index.ts";
+import { toUsAscii } from "../../util/jdk/strings.ts";
 import { InvalidAlgorithmException, JWAUtil } from "../../util/JWAUtil.ts";
-
-/** Java String.getBytes(US_ASCII): every non-ASCII character (code point) becomes '?' */
-function toUsAscii(s: string): string {
-	return Array.from(s, (c) => ((c.codePointAt(0) as number) > 0x7f ? "?" : c)).join("");
-}
 
 export class CalculateCHash extends AbstractCondition {
 	static override pre: EnvironmentRequirements = { strings: ["signing_algorithm", "authorization_code"] };

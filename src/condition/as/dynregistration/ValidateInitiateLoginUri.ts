@@ -5,8 +5,8 @@ import {
 	type EnvironmentRequirements,
 	type JsonObject,
 } from "../../../framework/index.ts";
-import { URISyntaxException } from "../../../util/validation/RedirectURIValidationUtil.ts";
-import { AbstractClientValidationCondition, parseJavaURI } from "./AbstractClientValidationCondition.ts";
+import { parseJavaURI, URISyntaxException } from "../../../util/jdk/uri.ts";
+import { AbstractClientValidationCondition } from "./AbstractClientValidationCondition.ts";
 
 /**
  * initiate_login_uri
