@@ -466,9 +466,14 @@ export async function createIdToken(op: EmulatedOp, codeGrant: boolean): Promise
 			addAuthTimeToIdTokenClaims(claims, authz.authTime ?? Math.floor(Date.now() / 1000), "OIDCC-3.1.2.1");
 		}
 	}
+	op.options.customIdTokenClaims?.(claims, op);
 	let idToken = op.options.signIdToken
 		? await op.options.signIdToken(claims, op)
 		: await oidccSignIdToken(claims, op.keys.jwks, client, op.signingAlg as string, "OIDCC-2");
+	if (!op.options.signIdToken) {
+		// upstream OIDCCSignIdToken records every id_token it signs ("all_issued_id_tokens")
+		op.issuedIdTokens.push(idToken);
+	}
 	if (op.options.idTokenSignature) {
 		idToken = op.options.idTokenSignature(idToken);
 	}

@@ -10,6 +10,7 @@
  * The client driver contract is in targets/openid-client-rp/README.md: the start call blocks until the RP has run
  * its flow for the module (or gave up), so when it returns the RP will not send further requests.
  */
+import type { Browser } from "../suite/browser.ts";
 import { logModule } from "../suite/conditions.ts";
 import type { ClientDriverConfig, TestConfig } from "../suite/config.ts";
 import type { EventLog } from "../suite/log.ts";
@@ -39,6 +40,11 @@ export interface Rp {
 	skipTest(reason: string): never;
 	/** Stops a client driver call that is still running */
 	close(): Promise<void>;
+	/**
+	 * The suite's scripted browser (the config's `browser` automation): the user agent the OP sends to the RP itself,
+	 * e.g. to the RP's initiate_login_uri (3rd party initiated login)
+	 */
+	readonly browser: Browser;
 }
 
 export function createRp(ctx: {
@@ -50,6 +56,7 @@ export function createRp(ctx: {
 	clientDriver: ClientDriverConfig | null;
 	/** Playwright's testInfo.skip */
 	skip: (reason: string) => never;
+	browser: Browser;
 }): Rp {
 	let op: EmulatedOp | null = null;
 	let driving: Promise<ClientDriverResult> | null = null;
@@ -98,6 +105,7 @@ export function createRp(ctx: {
 			abort.abort(new Error("The test has finished"));
 			await driving;
 		},
+		browser: ctx.browser,
 	};
 }
 

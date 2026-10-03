@@ -24,6 +24,8 @@ interface ServerConfigurationOverrides {
 	grantTypes?: string[];
 	/** addAdditionalConfiguration: called last */
 	additional?: (server: ServerMetadata, baseUrl: string) => void;
+	/** The requirements the call site passes (upstream callAndStopOnFailure(..., "OIDCSM-3.3", ...)) */
+	requirements?: string[];
 }
 
 /**
@@ -32,7 +34,7 @@ interface ServerConfigurationOverrides {
  * OIDCCGenerateServerConfiguration only change parts of the document).
  */
 function generateServerConfiguration(name: string, baseUrl: string, o: ServerConfigurationOverrides): ServerMetadata {
-	const c: Condition = condition(name);
+	const c: Condition = condition(name, ...(o.requirements ?? []));
 	const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
 	const asymmetricAndSymmetric = [...JWE_FAMILY_ASYMMETRIC, ...JWE_FAMILY_SYMMETRIC];
 	const encValues = [...ENC_FAMILY_AES_CBC_HMAC_SHA, ...ENC_FAMILY_AES_GCM];
@@ -184,5 +186,23 @@ export function addRandomJwksUriToServerConfiguration(server: ServerMetadata, su
 	server.jwks_uri = newJwksUri;
 	condition("AddRandomJwksUriToServerConfiguration").log("Added random jwks_uri to server configuration", {
 		jwks_uri: newJwksUri,
+	});
+}
+
+/** upstream: condition/as/OIDCCGenerateServerConfigurationWithSessionManagement.java */
+export function oidccGenerateServerConfigurationWithSessionManagement(
+	baseUrl: string,
+	...requirements: string[]
+): ServerMetadata {
+	return generateServerConfiguration("OIDCCGenerateServerConfigurationWithSessionManagement", baseUrl, {
+		requirements,
+		additional: (server, base) => {
+			server["check_session_iframe"] = base + "check_session_iframe";
+			server["end_session_endpoint"] = base + "end_session_endpoint";
+			server["frontchannel_logout_supported"] = true;
+			server["frontchannel_logout_session_supported"] = true;
+			server["backchannel_logout_supported"] = true;
+			server["backchannel_logout_session_supported"] = true;
+		},
 	});
 }

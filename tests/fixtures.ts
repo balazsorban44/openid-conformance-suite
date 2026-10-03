@@ -258,6 +258,7 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 			server: conformance.server,
 			log: conformance.log,
 			clientDriver: suite.loaded.clientDriver,
+			browser: conformance.browser,
 			skip: (reason) => {
 				testInfo.skip(true, reason);
 				throw new Error("unreachable: testInfo.skip throws");

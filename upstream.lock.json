@@ -4511,6 +4511,12 @@
 			"ts": "src/op/authorization.ts",
 			"symbol": "shannonEntropy"
 		},
+		"src/main/java/net/openid/conformance/condition/AbstractValidateResponseCacheHeaders.java": {
+			"blob": "4e73c610921018fd65c0b7dad75f98bc339199ad",
+			"loc": 56,
+			"ts": "src/rp/logout.ts",
+			"symbol": "headerContains"
+		},
 		"src/main/java/net/openid/conformance/condition/as/AbstractEnsureResponseType.java": {
 			"blob": "886cfe01557b21e3586b81e8306f1d764eb624bb",
 			"loc": 31,
@@ -4859,6 +4865,12 @@
 			"ts": "src/rp/registration.ts",
 			"symbol": "validateClientGrantTypes"
 		},
+		"src/main/java/net/openid/conformance/condition/as/dynregistration/ValidateClientInitiateLoginUri.java": {
+			"blob": "ea95bb3efbabb04a52c0fb6defa8b703d3773ee8",
+			"loc": 43,
+			"ts": "src/rp/registration.ts",
+			"symbol": "validateClientInitiateLoginUri"
+		},
 		"src/main/java/net/openid/conformance/condition/as/dynregistration/ValidateClientLogoUris.java": {
 			"blob": "1bbf46519afcbf42b271b2e5b97160ab53bbd512",
 			"loc": 100,
@@ -5165,6 +5177,186 @@
 			"ts": "src/rp/id-token.ts",
 			"symbol": "invalidateIdTokenSignature"
 		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddInvalidAudValueToLogoutToken.java": {
+			"blob": "2e50268dd4560b70b852251e25260f242d17c8cd",
+			"loc": 33,
+			"ts": "src/rp/logout.ts",
+			"symbol": "addInvalidAudValueToLogoutToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddInvalidEventsClaimToLogoutToken.java": {
+			"blob": "13137db152c01c63df2492a4fce9db134da81a2a",
+			"loc": 33,
+			"ts": "src/rp/logout.ts",
+			"symbol": "addInvalidEventsClaimToLogoutToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddInvalidIssValueToLogoutToken.java": {
+			"blob": "380d3ab66daa6289f1a9818b7af934d7f121a0fd",
+			"loc": 33,
+			"ts": "src/rp/logout.ts",
+			"symbol": "addInvalidIssValueToLogoutToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddInvalidStateToPostLogoutRedirectUriParams.java": {
+			"blob": "2bcd35cc00906c346235fb2f2435d92f4bca072c",
+			"loc": 34,
+			"ts": "src/rp/logout.ts",
+			"symbol": "addInvalidStateToPostLogoutRedirectUriParams"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddNonceToLogoutToken.java": {
+			"blob": "93294afefae873435bcddc3aa3ec143c3385a5df",
+			"loc": 29,
+			"ts": "src/rp/logout.ts",
+			"symbol": "addNonceToLogoutToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddSessionStateToAuthorizationEndpointResponseParams.java": {
+			"blob": "15d90ac38f35f4d9e52e672017b279d2d0c9d769",
+			"loc": 32,
+			"ts": "src/rp/session.ts",
+			"symbol": "addSessionStateToAuthorizationEndpointResponseParams"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/AddSidToIdTokenClaims.java": {
+			"blob": "88f6f528a2a19b1c14fb3e81428bb5d268292736",
+			"loc": 30,
+			"ts": "src/rp/session.ts",
+			"symbol": "addSidToIdTokenClaims"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/CallRPBackChannelLogoutEndpoint.java": {
+			"blob": "95d661b9bca882ec9054616e3b0f8ab058f12a6d",
+			"loc": 78,
+			"ts": "src/rp/logout.ts",
+			"symbol": "callRPBackChannelLogoutEndpoint"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/CreatePostLogoutRedirectUriParams.java": {
+			"blob": "e499fedba3f2bd03176fe03e7a904a6d1a720191",
+			"loc": 32,
+			"ts": "src/rp/logout.ts",
+			"symbol": "createPostLogoutRedirectUriParams"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/CreatePostLogoutRedirectUriRedirect.java": {
+			"blob": "dff535dd95a9fb1fae6b6c9d3f8b504eb3856c76",
+			"loc": 37,
+			"ts": "src/rp/logout.ts",
+			"symbol": "createPostLogoutRedirectUriRedirect"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/CreateRPFrontChannelLogoutRequestUrl.java": {
+			"blob": "3424c2f4c367545c56c98c2d8bccdee46b042235",
+			"loc": 34,
+			"ts": "src/rp/logout.ts",
+			"symbol": "createRPFrontChannelLogoutRequestUrl"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureBackChannelLogoutEndpointResponseContainsCacheHeaders.java": {
+			"blob": "0ec6c89b94e8be9e49e81f175ae3d8d8a31be019",
+			"loc": 21,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureBackChannelLogoutEndpointResponseContainsCacheHeaders"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureBackChannelLogoutUriResponseStatusCodeIs200.java": {
+			"blob": "24cad4840b232107a2b10f3723f523a3c46942ee",
+			"loc": 26,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureBackChannelLogoutUriResponseStatusCodeIs200"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureBackChannelLogoutUriResponseStatusCodeIs400.java": {
+			"blob": "782e2d8b33693e25d6acb7adf3c6d217269f4a66",
+			"loc": 26,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureBackChannelLogoutUriResponseStatusCodeIs400"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureClientHasAtLeastOneOfBackOrFrontChannelLogoutUri.java": {
+			"blob": "9e408b961af04aa595fdd45fb34d0c7dcd2c157b",
+			"loc": 39,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureClientHasAtLeastOneOfBackOrFrontChannelLogoutUri"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureClientHasBackChannelLogoutUri.java": {
+			"blob": "1db7ccb5b9e3a95d9f08199f614b8e59f1ee9593",
+			"loc": 26,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureClientHasBackChannelLogoutUri"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureClientHasFrontChannelLogoutUri.java": {
+			"blob": "1c85d04e38c71e7cf6a8039d7e8c6ad0a0310b42",
+			"loc": 26,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureClientHasFrontChannelLogoutUri"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/EnsureEndSessionEndpointRequestContainsStateParameter.java": {
+			"blob": "c46018a6eddeaa00ec13be66c3dbcfe663c8ef31",
+			"loc": 26,
+			"ts": "src/rp/logout.ts",
+			"symbol": "ensureEndSessionEndpointRequestContainsStateParameter"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/GenerateLogoutTokenClaims.java": {
+			"blob": "e6ad0a3b8536d7e5df9c98adeb0acf688203cd6b",
+			"loc": 55,
+			"ts": "src/rp/logout.ts",
+			"symbol": "generateLogoutTokenClaims"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/GenerateSessionState.java": {
+			"blob": "b7c3b0bd49bacd94601a7c5958c7883018e6d2e4",
+			"loc": 85,
+			"ts": "src/rp/session.ts",
+			"symbol": "generateSessionState"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/LogCheckSessionIframeRequest.java": {
+			"blob": "b558165ba96394f92a485e9778ced770e219c387",
+			"loc": 14,
+			"ts": "src/rp/session.ts",
+			"symbol": "logCheckSessionIframeRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/LogGetSessionStateRequest.java": {
+			"blob": "f33f77f280afaff8f9b54799692b4f4db16d2a85",
+			"loc": 19,
+			"ts": "src/rp/session.ts",
+			"symbol": "logGetSessionStateRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/LogoutByRemovingSessionState.java": {
+			"blob": "74f22a48784e67b772a487476e3416b175c8bd0e",
+			"loc": 22,
+			"ts": "src/rp/session.ts",
+			"symbol": "logoutByRemovingSessionState"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/OIDCCSignLogoutToken.java": {
+			"blob": "05778f1a51167daa978f0de17fd6f4f0d2c4621e",
+			"loc": 51,
+			"ts": "src/rp/logout.ts",
+			"symbol": "oidccSignLogoutToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/OIDCCSignLogoutTokenWithAlgNone.java": {
+			"blob": "8ffe9779a7fd6268f1fdfe5bf2cfcbf07da67843",
+			"loc": 32,
+			"ts": "src/rp/logout.ts",
+			"symbol": "oidccSignLogoutTokenWithAlgNone"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/OIDCCSignLogoutTokenWithWrongAlgorithm.java": {
+			"blob": "34525f5bfb6bcb349c840710f22fdbd42b4de3de",
+			"loc": 44,
+			"ts": "src/rp/logout.ts",
+			"symbol": "oidccSignLogoutTokenWithWrongAlgorithm"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/RemoveEventsClaimFromLogoutToken.java": {
+			"blob": "302e08cc989c8cb19ad9a32bc49ceeef3b0068b0",
+			"loc": 28,
+			"ts": "src/rp/logout.ts",
+			"symbol": "removeEventsClaimFromLogoutToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/RemoveStateFromPostLogoutRedirectUriParams.java": {
+			"blob": "e120b79230ee5dd6108357e28a89051ac11509fb",
+			"loc": 30,
+			"ts": "src/rp/logout.ts",
+			"symbol": "removeStateFromPostLogoutRedirectUriParams"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/ValidateIdTokenHintInRPInitiatedLogoutRequest.java": {
+			"blob": "0a002ca25741d4d1e7e41d3432899d12b22aad20",
+			"loc": 23,
+			"ts": "src/rp/logout.ts",
+			"symbol": "validateIdTokenHintInRPInitiatedLogoutRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/as/logout/ValidatePostLogoutRedirectUri.java": {
+			"blob": "236ca35d72c9143761dd41445904d6729922d806",
+			"loc": 36,
+			"ts": "src/rp/logout.ts",
+			"symbol": "validatePostLogoutRedirectUri"
+		},
 		"src/main/java/net/openid/conformance/condition/as/OIDCCAddRequestObjectSigningAlgValuesSupportedToServerConfiguration.java": {
 			"blob": "42bc059c3ff302746324bc0b7a17557d6e12fe3c",
 			"loc": 32,
@@ -5188,6 +5380,12 @@
 			"loc": 14,
 			"ts": "src/rp/discovery.ts",
 			"symbol": "oidccGenerateServerConfigurationIdTokenSigningAlgRS256Only"
+		},
+		"src/main/java/net/openid/conformance/condition/as/OIDCCGenerateServerConfigurationWithSessionManagement.java": {
+			"blob": "f5320780b7573a0e64542ed241545c2c89b1c627",
+			"loc": 17,
+			"ts": "src/rp/discovery.ts",
+			"symbol": "oidccGenerateServerConfigurationWithSessionManagement"
 		},
 		"src/main/java/net/openid/conformance/condition/as/OIDCCGenerateServerJWKs.java": {
 			"blob": "de44556b0b965234c822b364bb48e45815b8c148",
@@ -6796,6 +6994,90 @@
 			"loc": 28,
 			"ts": "tests/rp/dynamic.spec.ts",
 			"symbol": "oidcc-client-test-signing-key-rotation-just-before-signing"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogout.java": {
+			"blob": "0cfb213f0f9dd15bcc9aeddfd4aec202d5e38ba2",
+			"loc": 30,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutAlgNone.java": {
+			"blob": "de5854507196b25bbfe75cf369884b23ea7eeda7",
+			"loc": 37,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-alg-none"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutNoEvent.java": {
+			"blob": "aec6ecd6ebc442894554ee52d25bb0af385bb1c5",
+			"loc": 37,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-no-event"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutWithNonce.java": {
+			"blob": "f6f0a7505ed7524a71972f9fedeb10cf7461dc20",
+			"loc": 37,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-with-nonce"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutWrongAlg.java": {
+			"blob": "d5aa1226ce6f2288b863d68f4d7f95c1ff8b1cb2",
+			"loc": 37,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-alg"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutWrongAud.java": {
+			"blob": "eec0f81cde4bb4b2265047d8900d4ce790d69428",
+			"loc": 37,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-aud"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutWrongEvent.java": {
+			"blob": "6a78924e66be3b95391c91520f77a1fb5e3046a5",
+			"loc": 37,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-event"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogoutWrongIssuer.java": {
+			"blob": "fbd65569fb7fc5d21c1843cb7aefe6c8ba8c3ce3",
+			"loc": 38,
+			"ts": "tests/rp/backchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-backchannel-rpinitlogout-wrong-iss"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestFrontChannelLogoutRPInitiated.java": {
+			"blob": "1c33669bab7e19dec615721591d02cd194602eb0",
+			"loc": 31,
+			"ts": "tests/rp/frontchannel-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-frontchannel-rpinitlogout"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestRPInitLogout.java": {
+			"blob": "f4dbb363c8dec904b6aaf6fa38ff6fb7d5481cde",
+			"loc": 103,
+			"ts": "tests/rp/rp-initiated-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-init-logout"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestRPInitLogoutInvalidState.java": {
+			"blob": "25ffd1872afb9565341ea72494c8442075d5af36",
+			"loc": 41,
+			"ts": "tests/rp/rp-initiated-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-init-logout-other-state"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestRPInitLogoutNoState.java": {
+			"blob": "450a96cfec21143fd7dd70f86ded7d1e2fd6aa95",
+			"loc": 40,
+			"ts": "tests/rp/rp-initiated-logout.spec.ts",
+			"symbol": "oidcc-client-test-rp-init-logout-no-state"
+		},
+		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestSessionManagement.java": {
+			"blob": "340b8c8aa54b4c852b97844707d383412ce59846",
+			"loc": 43,
+			"ts": "tests/rp/session-management.spec.ts",
+			"symbol": "oidcc-client-test-session-management"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClient3rdPartyInitiatedLoginTest.java": {
+			"blob": "26c8fc141e30b4e86597af54c43f7cf549f17d59",
+			"loc": 53,
+			"ts": "tests/rp/3rdparty-init-login.spec.ts",
+			"symbol": "oidcc-client-test-3rd-party-init-login"
 		},
 		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTest.java": {
 			"blob": "87b056cab71a92ab27cda2590a848a3173fb2a4b",

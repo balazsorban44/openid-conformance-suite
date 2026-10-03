@@ -32,6 +32,12 @@ import {
 import { oidccExtractServerSigningAlg, type IdTokenClaims } from "./id-token.ts";
 import { configureServerJwks, jwksResponse, type ServerKeys } from "./jwks.ts";
 import {
+	handleEndSessionRequest,
+	handleFrontChannelLogoutCallback,
+	type EndSessionEvent,
+	type LogoutOptions,
+} from "./logout.ts";
+import {
 	handleRegistrationRequest,
 	oidccGetStaticClientConfigurationForRPTests,
 	processAndValidateClientJwks,
@@ -43,6 +49,7 @@ import { configureRequestObjectSupport } from "./request-object.ts";
 import { handleTokenRequest, type IssuedTokens } from "./token.ts";
 import { handleUserinfoRequest, oidccLoadUserInfo, type UserInfo } from "./userinfo.ts";
 import { handleWebfingerRequest } from "./webfinger.ts";
+import { handleCheckSessionIframeRequest, handleGetSessionStateRequest } from "./session.ts";
 
 /** The variant parameters of the OIDCC RP test modules (upstream variant/*.java values) */
 export interface RpVariant {
@@ -130,9 +137,31 @@ export interface EmulatedOpOptions {
 	authorizationBlock?: (op: EmulatedOp) => string;
 	/** Checks the resource syntax of a webfinger request (upstream validateWebfingerRequestResource) */
 	validateWebfingerResource?: (resourcePrefix: "acct" | "https") => void;
+	/** Changes to the id_token claims right before signing (upstream addCustomValuesToIdToken) */
+	customIdTokenClaims?: (claims: IdTokenClaims, op: EmulatedOp) => void;
+	/** The client metadata checks instead of the default ones (upstream validateClientMetadata override) */
+	validateClientMetadata?: (client: Record<string, unknown>, server: ServerMetadata) => void | Promise<void>;
+	/** Runs when the RP sends an authorization request, before anything is checked (upstream handleAuthorizationEndpointRequest override) */
+	onAuthorizationRequest?: () => void;
+	/**
+	 * Serves the logout and session management endpoints (end_session_endpoint, check_session_iframe, ...) with the
+	 * module's behaviour (upstream AbstractOIDCCClientLogoutTest); built by logoutTestOptions() in src/rp/logout.ts
+	 */
+	logout?: LogoutOptions;
 }
 
-export type Endpoint = "discovery" | "jwks" | "registration" | "authorization" | "token" | "userinfo" | "webfinger";
+export type Endpoint =
+	| "discovery"
+	| "jwks"
+	| "registration"
+	| "authorization"
+	| "token"
+	| "userinfo"
+	| "webfinger"
+	| "end_session"
+	| "check_session_iframe"
+	| "get_session_state"
+	| "frontchannel_logout_callback";
 
 /** What expect()/waitFor() resolve with: the request and what the OP answered */
 export interface OpEvents {
@@ -149,6 +178,11 @@ export interface OpEvents {
 	userinfo: { request: IncomingRequest; response: UserInfo };
 	/** `response`: the webfinger response, null when the resource does not name this test */
 	webfinger: { request: IncomingRequest; response: Record<string, unknown> | null };
+	end_session: EndSessionEvent;
+	check_session_iframe: { request: IncomingRequest };
+	/** `afterLogout`: the request came after the end_session request (the OP iframe answers "changed") */
+	get_session_state: { request: IncomingRequest; afterLogout: boolean };
+	frontchannel_logout_callback: { request: IncomingRequest };
 }
 
 /** The emulated OP of one test: its state (upstream's environment) and the requests the RP sent */
@@ -177,6 +211,8 @@ export interface EmulatedOp {
 	signingAlg: string | null;
 	authorization: AuthorizationState | null;
 	tokens: IssuedTokens | null;
+	/** upstream "all_issued_id_tokens": the id_tokens OIDCCSignIdToken signed */
+	issuedIdTokens: string[];
 	/** The id_token signing algorithm for `client` (the signingAlg option or OIDCCExtractServerSigningAlg) */
 	chooseSigningAlg(client: RpClient): string;
 	/**
@@ -263,6 +299,7 @@ export async function startEmulatedOp(
 		signingAlg: null,
 		authorization: null,
 		tokens: null,
+		issuedIdTokens: [],
 		chooseSigningAlg: (client) =>
 			options.signingAlg ? options.signingAlg(client, op) : oidccExtractServerSigningAlg(client, op.keys.jwks),
 		expect(endpoint, opts = {}) {
@@ -342,9 +379,11 @@ export async function startEmulatedOp(
 		endpoint: Endpoint,
 		path: string,
 		handle: (req: IncomingRequest) => Promise<{ response: Response; event: unknown }>,
+		/** concurrent: handled without waiting for the lock (a read-only endpoint the RP calls while the OP waits for it) */
+		opts: { concurrent?: boolean } = {},
 	) {
 		server.on(path, (req) => {
-			const run = lock.then(async (): Promise<Response> => {
+			const run = (opts.concurrent ? Promise.resolve() : lock).then(async (): Promise<Response> => {
 				if (failure && endpoint !== "jwks" && endpoint !== "discovery") {
 					return Response.json({ error: "server_error", error_description: "The test has failed" }, { status: 500 });
 				}
@@ -372,7 +411,9 @@ export async function startEmulatedOp(
 					);
 				}
 			});
-			lock = run.catch(() => {});
+			if (!opts.concurrent) {
+				lock = run.catch(() => {});
+			}
 			return run;
 		});
 	}
@@ -393,10 +434,16 @@ export async function startEmulatedOp(
 			return { response: discoveryResponse(metadata), event: { request } };
 		});
 	}
-	serve("jwks", relative(metadata.jwks_uri, "jwks"), async (request) => {
-		await block("Jwks endpoint", () => {});
-		return { response: jwksResponse(op.keys), event: { request } };
-	});
+	// concurrent: the RP fetches the keys while the OP waits for its back-channel logout response
+	serve(
+		"jwks",
+		relative(metadata.jwks_uri, "jwks"),
+		async (request) => {
+			await block("Jwks endpoint", () => {});
+			return { response: jwksResponse(op.keys), event: { request } };
+		},
+		{ concurrent: true },
+	);
 	// upstream env "issuer": the issuer the configuration was generated with
 	const configuredIssuer = metadata.issuer as string;
 	serve("webfinger", "/.well-known/webfinger", async (request) => {
@@ -410,6 +457,7 @@ export async function startEmulatedOp(
 		});
 	}
 	serve("authorization", "authorize", async (request) => {
+		options.onAuthorizationRequest?.();
 		const { response, authorization, responseParams } = await handleAuthorizationRequest(op, request);
 		return { response, event: { request, authorization, response: responseParams } };
 	});
@@ -423,11 +471,31 @@ export async function startEmulatedOp(
 		return { response, event: { request, response: userinfo } };
 	});
 
+	const logout = options.logout;
+	if (logout) {
+		serve("end_session", "end_session_endpoint", async (request) => {
+			const { response, event } = await handleEndSessionRequest(op, request, logout);
+			return { response, event: { ...event, request } };
+		});
+		serve("check_session_iframe", "check_session_iframe", async (request) => {
+			const response = await handleCheckSessionIframeRequest(op.baseUrl);
+			return { response, event: { request } };
+		});
+		serve("get_session_state", "get_session_state", async (request) => {
+			const { response, afterLogout } = await handleGetSessionStateRequest(logout.session);
+			return { response, event: { request, afterLogout } };
+		});
+		serve("frontchannel_logout_callback", "frontchannel_logout_callback", async (request) => {
+			const response = await handleFrontChannelLogoutCallback();
+			return { response, event: { request } };
+		});
+	}
+
 	// the client: from the configuration (static_client) or registered by the RP later (dynamic_client)
 	if (variant.client_registration === "static_client") {
 		const client = oidccGetStaticClientConfigurationForRPTests(config);
 		op.clientPublicJwks = await processAndValidateClientJwks(client, clientAuthType, variant.request_type);
-		await validateClientMetadata(client, metadata);
+		await (options.validateClientMetadata ?? validateClientMetadata)(client, metadata);
 		options.checkClientMetadata?.(client);
 		op.client = client;
 		op.signingAlg = op.chooseSigningAlg(client);

@@ -109,6 +109,39 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 			"oidcc-client-test-userinfo-signed",
 		],
 	},
+	"oidcc-client-rp-initiated-logout-rp-basic": {
+		spec: "tests/rp/rp-initiated-logout.spec.ts",
+		modules: [
+			"oidcc-client-test-rp-init-logout",
+			"oidcc-client-test-rp-init-logout-other-state",
+			"oidcc-client-test-rp-init-logout-no-state",
+		],
+	},
+	"oidcc-client-back-channel-logout-rp-basic": {
+		spec: "tests/rp/backchannel-logout.spec.ts",
+		modules: [
+			"oidcc-client-test-rp-backchannel-rpinitlogout",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-alg-none",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-no-event",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-with-nonce",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-alg",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-aud",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-event",
+			"oidcc-client-test-rp-backchannel-rpinitlogout-wrong-iss",
+		],
+	},
+	"oidcc-client-front-channel-logout-rp-basic": {
+		spec: "tests/rp/frontchannel-logout.spec.ts",
+		modules: ["oidcc-client-test-rp-frontchannel-rpinitlogout"],
+	},
+	"oidcc-client-rp-session-management-rp-basic": {
+		spec: "tests/rp/session-management.spec.ts",
+		modules: ["oidcc-client-test-session-management"],
+	},
+	"oidcc-client-test-3rd-party-init-login-test-plan": {
+		spec: "tests/rp/3rdparty-init-login.spec.ts",
+		modules: ["oidcc-client-test-3rd-party-init-login"],
+	},
 };
 
 export interface ConformanceProject {

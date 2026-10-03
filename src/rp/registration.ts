@@ -6,7 +6,7 @@
 import { randomInt } from "node:crypto";
 import { checkDistinctKeyIdValueInClientJWKs, validateJwks } from "../op/jwks.ts";
 import { extractJWKsFromStaticClientConfiguration } from "../op/registration.ts";
-import { block, condition, skipped, soft, type Condition } from "../suite/conditions.ts";
+import { block, condition, logModule, skipped, soft, type Condition } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
 import { HttpError, request as httpRequest } from "../suite/http.ts";
 import type { Jwks } from "../suite/jose.ts";
@@ -1058,7 +1058,7 @@ export async function handleRegistrationRequest(
 		const request = oidccExtractDynamicRegistrationRequest(req);
 		// because the python suite requires this
 		soft(() => ensureRegistrationRequestContainsAtLeastOneContact(request), "info");
-		await validateClientMetadata(request, op.metadata);
+		await (op.options.validateClientMetadata ?? validateClientMetadata)(request, op.metadata);
 		op.options.checkClientMetadata?.(request);
 		await soft(() => validateClientRegistrationRequestSectorIdentifierUri(request, "OIDCR-2", "OIDCR-5"));
 
@@ -1072,4 +1072,48 @@ export async function handleRegistrationRequest(
 		setClientIdTokenSignedResponseAlgToServerSigningAlg(client, op.signingAlg);
 		return { response: Response.json(client, { status: 201 }), client };
 	});
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 3rd party initiated login
+
+/** upstream: condition/as/dynregistration/ValidateClientInitiateLoginUri.java */
+export function validateClientInitiateLoginUri(client: Record<string, unknown>, ...requirements: string[]): void {
+	const c: Condition = condition("ValidateClientInitiateLoginUri", ...requirements);
+	if (!("initiate_login_uri" in client)) {
+		c.failure("Client configuration does not contain required 'initiate_login_uri'");
+	}
+	const initiateLoginUri = client["initiate_login_uri"];
+	if (typeof initiateLoginUri !== "string") {
+		throw new Error("getString called on something that is not a string: " + JSON.stringify(initiateLoginUri));
+	}
+	let url: URL;
+	try {
+		url = new URL(initiateLoginUri);
+	} catch {
+		c.failure("initiate_login_uri does not contain a valid URL", { initiate_login_uri: initiateLoginUri });
+	}
+	if (url.protocol !== "https:") {
+		c.failure("initiate_login_uri does not use https", { initiate_login_uri: initiateLoginUri });
+	}
+	// Java's URL.toString() returns the original external form
+	c.success("valid initiate_login_uri", { initiate_login_uri: initiateLoginUri });
+}
+
+/**
+ * The client's initiate_login_uri with the OP's issuer (OIDCC-4: iss is required), where the OP sends the user to
+ * start a 3rd party initiated login; logged as upstream's module does before the user is sent there.
+ *
+ * (upstream OIDCCClient3rdPartyInitiatedLoginTest.validateClientMetadata's background task)
+ */
+export function initiateLoginRedirect(client: RpClient, issuer: string): string {
+	const builder = new URL(client["initiate_login_uri"] as string);
+	builder.searchParams.append("iss", issuer);
+	const redirectTo = builder.toString();
+	logModule({
+		msg: "Redirecting user to initiate_login_uri - press 'Proceed with test' to continue",
+		redirect_to: redirectTo,
+		http: "redirect",
+	});
+	return redirectTo;
 }
