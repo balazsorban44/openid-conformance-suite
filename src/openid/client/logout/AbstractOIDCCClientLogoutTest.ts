@@ -28,8 +28,6 @@ import { ValidateIdTokenHintInRPInitiatedLogoutRequest } from "../../../conditio
 import { ValidatePostLogoutRedirectUri } from "../../../condition/as/logout/ValidatePostLogoutRedirectUri.ts";
 import { ClientRegistration } from "../../../variant/ClientRegistration.ts";
 import { AbstractOIDCCClientTest } from "../AbstractOIDCCClientTest.ts";
-import "../../../framework/views/checkSessionIFrame.ts";
-import "../../../framework/views/oidccFrontChannelLogout.ts";
 
 /**
  * Port of org.apache.commons.text.StringEscapeUtils.escapeEcmaScript: escapes ' " \ / with a backslash,

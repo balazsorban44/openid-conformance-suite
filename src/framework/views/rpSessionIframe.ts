@@ -1,8 +1,8 @@
-import { escapeHtml, registerView } from "../views.ts";
+import { escapeHtml } from "./html.ts";
 
 // Port of templates/rpSessionIframe.html
 // Thymeleaf [[${x}]] text inlining (no th:inline="javascript") HTML-escapes the value -> escapeHtml()
-registerView("rpSessionIframe", (model) => {
+export function rpSessionIframe(model: Record<string, unknown>): string {
 	const clientId = escapeHtml(model["client_id"] ?? "");
 	const sessionState = escapeHtml(model["session_state"] ?? "");
 	const issuer = escapeHtml(model["issuer"] ?? "");
@@ -49,4 +49,4 @@ registerView("rpSessionIframe", (model) => {
 
 </body>
 </html>`;
-});
+}

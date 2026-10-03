@@ -14,8 +14,6 @@ import {
 	type JsonObject,
 	type PublishTestModule,
 } from "../framework/index.ts";
-import "../framework/views/rpSessionIframe.ts";
-import "../framework/views/sessionVerify.ts";
 import { AbstractOIDCCRpInitiatedLogout } from "./AbstractOIDCCRpInitiatedLogout.ts";
 
 // Corresponds to https://www.heenan.me.uk/~joseph/2020-06-05-test_desc_op.html#OP_Session_RpInitLogout

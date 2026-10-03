@@ -1,0 +1,621 @@
+exports[`view checkSessionIFrame renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Check session iframe</title>
+    <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <style>
+        #logsdiv div{
+            border-bottom:1px solid #ddd;
+            margin-top:0.2em;
+            margin-bottom:0.4em;
+        }
+        body{
+            font-family:sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <h1>Conformance Suite - OP check_session_iframe</h1>
+    <div>
+        Initial session_state: state.a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;
+    </div>
+
+
+    <h3>Script Logs</h3>
+    <div id="logsdiv">
+
+    </div>
+
+<script>
+    /*
+    PLEASE NOTE:
+    This script is only intended for conformance testing purposes,
+    and should not be used as a reference for real-life OP session management implementations.
+
+    For the purposes for conformance testing, this script passes the received message to the
+    suite via an ajax call and posts a changed/unchanged message based on the response it receives
+    from the conformance suite.
+
+    This is not how it should be implemented normally.
+    */
+    var checkSessionUrl = 'https://suite/test/x/check_session_ajax?a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;';
+    var logCounter = 0;
+    window.addEventListener("message", receiveMessage, false);
+    function receiveMessage(event){
+        console.log("check_session_iframe received message via postMessage");
+        console.log(event);
+        // UPSTREAM: the template splits on the first space, but a client_id may itself contain spaces (the
+        // suite's own RFC6749AppendixASyntaxUtils client ids do); session_state cannot, so split on the last one
+        var lastSpace = event.data.lastIndexOf(' ');
+        var clientIdInMessage = event.data.substring(0, lastSpace);
+        var splitStateAndSalt = event.data.substring(lastSpace + 1).split('.');
+        var sessionStateInMessage = splitStateAndSalt[0];
+        var saltInMessage = splitStateAndSalt[1];
+
+        const dataObj = {'receivedMessage':event.data, 'origin':event.origin};
+
+        const urlData = Object.keys(dataObj).map(function(key) {
+            return encodeURIComponent(key) + '=' + encodeURIComponent(dataObj[key]);
+        }).join('&');
+
+        let link = checkSessionUrl;
+        if (link.indexOf('?') != -1) {
+            link = link + '&' + urlData;
+        }
+        else {
+            link = link + '?' + urlData;
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', link, true);
+        xhr.responseType = "json";
+        xhr.onload = function () {
+            addLog('Ajax call succeeded. Response:' + JSON.stringify(this.response));
+            var opBrowserState = this.response.op_browser_state;
+            var saltOnServer = this.response.salt;
+            var originOnServer = this.response.origin;
+            var sessionStateOnServer = this.response.session_state;
+
+            if((sessionStateInMessage+'.'+saltInMessage) == sessionStateOnServer){
+                addLog('Posting message: unchanged');
+                event.source.postMessage('unchanged', event.origin);
+            }
+            else{
+                addLog('Posting message: changed. Expected session state:"' + sessionStateOnServer + '" Actual:"' + sessionStateInMessage + '"');
+                event.source.postMessage('changed', event.origin);
+            }
+        };
+        xhr.onerror = function (error) {
+            addLog('Error from ajax call to ' + checkSessionUrl);
+            event.source.postMessage('error', event.origin);
+        };
+        xhr.send();
+    }
+
+    //shows logs on the page
+    function addLog(msg){
+        logCounter++;
+        var logdiv = document.createElement("div");
+        logdiv.innerText = logCounter + ': ' +  msg;
+        document.getElementById('logsdiv').appendChild(logdiv);
+
+    }
+</script>
+
+</body>
+</html>
+`;
+
+exports[`view checkSessionIFrame without session_state renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Check session iframe</title>
+    <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <style>
+        #logsdiv div{
+            border-bottom:1px solid #ddd;
+            margin-top:0.2em;
+            margin-bottom:0.4em;
+        }
+        body{
+            font-family:sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <h1>Conformance Suite - OP check_session_iframe</h1>
+    <div>
+        Initial session_state: 
+    </div>
+
+
+    <h3>Script Logs</h3>
+    <div id="logsdiv">
+
+    </div>
+
+<script>
+    /*
+    PLEASE NOTE:
+    This script is only intended for conformance testing purposes,
+    and should not be used as a reference for real-life OP session management implementations.
+
+    For the purposes for conformance testing, this script passes the received message to the
+    suite via an ajax call and posts a changed/unchanged message based on the response it receives
+    from the conformance suite.
+
+    This is not how it should be implemented normally.
+    */
+    var checkSessionUrl = 'https://suite/ajax';
+    var logCounter = 0;
+    window.addEventListener("message", receiveMessage, false);
+    function receiveMessage(event){
+        console.log("check_session_iframe received message via postMessage");
+        console.log(event);
+        // UPSTREAM: the template splits on the first space, but a client_id may itself contain spaces (the
+        // suite's own RFC6749AppendixASyntaxUtils client ids do); session_state cannot, so split on the last one
+        var lastSpace = event.data.lastIndexOf(' ');
+        var clientIdInMessage = event.data.substring(0, lastSpace);
+        var splitStateAndSalt = event.data.substring(lastSpace + 1).split('.');
+        var sessionStateInMessage = splitStateAndSalt[0];
+        var saltInMessage = splitStateAndSalt[1];
+
+        const dataObj = {'receivedMessage':event.data, 'origin':event.origin};
+
+        const urlData = Object.keys(dataObj).map(function(key) {
+            return encodeURIComponent(key) + '=' + encodeURIComponent(dataObj[key]);
+        }).join('&');
+
+        let link = checkSessionUrl;
+        if (link.indexOf('?') != -1) {
+            link = link + '&' + urlData;
+        }
+        else {
+            link = link + '?' + urlData;
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', link, true);
+        xhr.responseType = "json";
+        xhr.onload = function () {
+            addLog('Ajax call succeeded. Response:' + JSON.stringify(this.response));
+            var opBrowserState = this.response.op_browser_state;
+            var saltOnServer = this.response.salt;
+            var originOnServer = this.response.origin;
+            var sessionStateOnServer = this.response.session_state;
+
+            if((sessionStateInMessage+'.'+saltInMessage) == sessionStateOnServer){
+                addLog('Posting message: unchanged');
+                event.source.postMessage('unchanged', event.origin);
+            }
+            else{
+                addLog('Posting message: changed. Expected session state:"' + sessionStateOnServer + '" Actual:"' + sessionStateInMessage + '"');
+                event.source.postMessage('changed', event.origin);
+            }
+        };
+        xhr.onerror = function (error) {
+            addLog('Error from ajax call to ' + checkSessionUrl);
+            event.source.postMessage('error', event.origin);
+        };
+        xhr.send();
+    }
+
+    //shows logs on the page
+    function addLog(msg){
+        logCounter++;
+        var logdiv = document.createElement("div");
+        logdiv.innerText = logCounter + ': ' +  msg;
+        document.getElementById('logsdiv').appendChild(logdiv);
+
+    }
+</script>
+
+</body>
+</html>
+`;
+
+exports[`view formPostResponseMode renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: form_post submission page</title>
+    <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+</head>
+<body onload="submitform()">
+    <div>
+        <form action="https://rp/cb?a=1&amp;b=a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;" method="post" enctype="application/x-www-form-urlencoded">
+            <div><input type="hidden" name="code" value="c0de"></div>
+            <div><input type="hidden" name="state" value="a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;"></div>
+            <div><input type="hidden" name="num" value="1"></div>
+            <div><input type="hidden" name="obj" value="{&quot;k&quot;:&quot;v&quot;}"></div>
+            <input type="submit" value="Click to submit the form manually">
+        </form>
+    </div>
+    <footer><div>OpenID Foundation conformance suite (TypeScript port)</div></footer>
+<script>
+    function submitform(){
+        document.forms[0].submit();
+    }
+</script>
+</body>
+</html>
+`;
+
+exports[`view formPostResponseMode without parameters renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: form_post submission page</title>
+    <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+</head>
+<body onload="submitform()">
+    <div>
+        <form action="https://rp/cb" method="post" enctype="application/x-www-form-urlencoded">
+            
+            <input type="submit" value="Click to submit the form manually">
+        </form>
+    </div>
+    <footer><div>OpenID Foundation conformance suite (TypeScript port)</div></footer>
+<script>
+    function submitform(){
+        document.forms[0].submit();
+    }
+</script>
+</body>
+</html>
+`;
+
+exports[`view implicitCallback renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Processing Implicit Callback</title>
+</head>
+<body>
+    <div>
+        <h1>Please wait...</h1>
+        <h2>Processing response from authorization server</h2>
+        <p id="complete" class="collapse">The response has been sent to the server for processing. You may return to <a href="">the test results page.</a></p>
+    </div>
+    <footer><div>OpenID Foundation conformance suite (TypeScript port)</div></footer>
+    <script type="text/javascript">
+        var submitComplete = false;
+        function assumeComplete() {
+            if (submitComplete) {
+                return;
+            }
+            console.log("assumeComplete workaround for https://gitlab.com/openid/conformance-suite/-/issues/766 activated - assuming post has completed as 5 seconds have elapsed")
+            document.getElementById('complete').insertAdjacentHTML('beforeend', '<span id="submission_complete" hidden></span>');
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            var hash = window.location.hash;
+            var returnUrl = "/log-detail.html?log=x";
+            var timeoutId = setTimeout(function(){ assumeComplete(); }, 5000);
+
+            function createxhr() {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', "https://suite/test/x/implicit/a<b>\\"c\\"&'d'<\\/script>", true);
+                xhr.setRequestHeader('Content-type', 'text/plain');
+                xhr.onload = function () {
+                    submitComplete = true;
+                    document.querySelector('#complete a').setAttribute("href", returnUrl);
+                    document.getElementById('complete').classList.add('show');
+                    document.getElementById('complete').insertAdjacentHTML('beforeend', '<span id="submission_complete" hidden></span>');
+                };
+                xhr.onabort = function () { console.log("implicit submit abort") };
+                xhr.ontimeout = function () { console.log("implicit submit timeout") };
+                return xhr;
+            }
+
+            var xhr = createxhr();
+            xhr.onerror = function () {
+                console.log("implicit submit error (trying again in 2 seconds): " + xhr.status + " " + xhr.responseText);
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(function(){ assumeComplete(); }, 5000);
+                setTimeout(function() {
+                    var newxhr = createxhr();
+                    newxhr.onerror = function () {
+                        console.log("second implicit submit error: " + xhr.status + " " + xhr.responseText);
+                    }
+                    newxhr.send(hash);
+                }, 2000);
+            };
+            xhr.send(hash);
+        });
+    </script>
+</body>
+</html>
+`;
+
+exports[`view oidccFrontChannelLogout OP initiated renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Check session iframe</title>
+    <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+</head>
+<body>
+    <h1>OP initiated front channel logout</h1>
+    <div>
+        RP frontchannel_logout_uri will be loaded below in an iframe
+    </div>
+
+    <div id="msgdiv"></div>
+    <style>
+
+        iframe{
+            width:90%;
+            height:400px;
+        }
+        #msgdiv{
+            color:red;
+            font-size:1.2em;
+        }
+    </style>
+
+    <script>
+    //OP init
+    var iframe = document.createElement('iframe');
+    iframe.onload = function(){
+        let url = 'https://suite/loaded?a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;';
+        const urlData = 'loaded=true';
+
+        if (url.indexOf('?') != -1) {
+            url = url + '&' + urlData;
+        }
+        else {
+            url = url + '?' + urlData;
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.onload = function () {
+            document.getElementById('msgdiv').innerHTML = 'Logout uri loaded and test marked as finished. You can close this window and go back to the test window.';
+        };
+        xhr.onerror = function (event) {
+            document.getElementById('msgdiv').innerHTML = 'Failed to mark test as finished! Please try again.';
+        };
+        xhr.send();
+    }
+    iframe.src = 'https://rp/fcl?a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;';
+    document.body.appendChild(iframe);
+    </script>
+
+</body>
+</html>
+`;
+
+exports[`view oidccFrontChannelLogout RP initiated renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Check session iframe</title>
+    <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+</head>
+<body>
+    <h1>OP initiated front channel logout</h1>
+    <div>
+        RP frontchannel_logout_uri will be loaded below in an iframe
+    </div>
+
+    <div id="msgdiv"></div>
+    <style>
+
+        iframe{
+            width:90%;
+            height:400px;
+        }
+        #msgdiv{
+            color:red;
+            font-size:1.2em;
+        }
+    </style>
+
+    <script>
+    //RP init
+    var iframe = document.createElement('iframe');
+    iframe.onload = function(){
+        let url = 'https://suite/loaded';
+        const urlData = 'loaded=true';
+
+        if (url.indexOf('?') != -1) {
+            url = url + '&' + urlData;
+        }
+        else {
+            url = url + '?' + urlData;
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.onload = function () {
+            document.getElementById('msgdiv').innerHTML = 'Logout uri loaded and test marked as finished. You will be redirected to post_logout_uri in 5 seconds.';
+            setTimeout(function(){window.location.href='https://rp/post-logout?a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;';}, 5000);
+        };
+        xhr.onerror = function (event) {
+            document.getElementById('msgdiv').innerHTML = 'Failed to mark test as finished! Please try again.';
+        };
+        xhr.send();
+    }
+    iframe.src = 'https://rp/fcl';
+    document.body.appendChild(iframe);
+    </script>
+
+</body>
+</html>
+`;
+
+exports[`view resultCaptured renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Result Captured</title>
+</head>
+<body>
+    <div>
+        <h1>Result captured</h1>
+        <p>The test suite has received the result. You may return to <a href="/log-detail.html?log=a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;">the test results page.</a></p>
+    </div>
+    <footer><div>OpenID Foundation conformance suite (TypeScript port)</div></footer>
+</body>
+</html>
+`;
+
+exports[`view resultCaptured without returnUrl renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OIDF Conformance: Result Captured</title>
+</head>
+<body>
+    <div>
+        <h1>Result captured</h1>
+        <p>The test suite has received the result. You may return to <a href="">the test results page.</a></p>
+    </div>
+    <footer><div>OpenID Foundation conformance suite (TypeScript port)</div></footer>
+</body>
+</html>
+`;
+
+exports[`view rpSessionIframe empty model renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+</head>
+<body>
+
+<script type="application/javascript">
+    var client_id = "";
+    var session_state = "";
+    console.log("RP session state: " + session_state);
+    var issuer = "";
+    console.log("issuer: " + issuer);
+    var targetOrigin = new URL(issuer).origin;
+
+    var mes = client_id + " " + session_state;
+
+    window.addEventListener("message", receiveMessage, false);
+
+    function checkSession() {
+        console.log("checkSession started")
+        var win = window.parent.document.getElementById("op_iframe").contentWindow;
+        win.postMessage(mes, "*");
+    }
+
+    function receiveMessage(e) {
+        // when using browser automation, the log statements here can be viewed in the frontend by enabling
+        // browser_verbose as per https://gitlab.com/openid/conformance-suite/-/wikis/Design/BrowserControl
+        console.log("receiveMessage: origin: " + e.origin + " expected: " + targetOrigin);
+        if (e.origin !== targetOrigin) {
+            console.log("origin & targetOrigin mismatch");
+            return;
+        }
+        console.log("setting window.parent.window.location.href to ?state="+e.data);
+        window.parent.window.location.href = "" + "?state=" + e.data;
+    }
+    setTimeout(checkSession, 500);
+</script>
+
+</body>
+</html>
+`;
+
+exports[`view rpSessionIframe renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+</head>
+<body>
+
+<script type="application/javascript">
+    var client_id = "client a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;";
+    var session_state = "ss.salt";
+    console.log("RP session state: " + session_state);
+    var issuer = "https://op/a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;";
+    console.log("issuer: " + issuer);
+    var targetOrigin = new URL(issuer).origin;
+
+    var mes = client_id + " " + session_state;
+
+    window.addEventListener("message", receiveMessage, false);
+
+    function checkSession() {
+        console.log("checkSession started")
+        var win = window.parent.document.getElementById("op_iframe").contentWindow;
+        win.postMessage(mes, "*");
+    }
+
+    function receiveMessage(e) {
+        // when using browser automation, the log statements here can be viewed in the frontend by enabling
+        // browser_verbose as per https://gitlab.com/openid/conformance-suite/-/wikis/Design/BrowserControl
+        console.log("receiveMessage: origin: " + e.origin + " expected: " + targetOrigin);
+        if (e.origin !== targetOrigin) {
+            console.log("origin & targetOrigin mismatch");
+            return;
+        }
+        console.log("setting window.parent.window.location.href to https://suite/s?state="+e.data);
+        window.parent.window.location.href = "https://suite/s" + "?state=" + e.data;
+    }
+    setTimeout(checkSession, 500);
+</script>
+
+</body>
+</html>
+`;
+
+exports[`view sessionVerify renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>OIDF Conformance Suite: Session verification</title>
+</head>
+<body>
+
+<h1>Session verification</h1>
+<h2>Checking that the session hasn't changed!</h2>
+<p>If you see this frame for more than a few seconds something has gone wrong.</p>
+<iframe id="op_iframe" src="https://op/check?a&lt;b&gt;&quot;c&quot;&amp;&#39;d&#39;&lt;/script&gt;" hidden></iframe>
+<iframe id="rp_iframe" src="https://suite/rp_iframe" hidden></iframe>
+
+</body>
+</html>
+`;
+
+exports[`view sessionVerify without urls renders unchanged 1`] = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>OIDF Conformance Suite: Session verification</title>
+</head>
+<body>
+
+<h1>Session verification</h1>
+<h2>Checking that the session hasn't changed!</h2>
+<p>If you see this frame for more than a few seconds something has gone wrong.</p>
+<iframe id="op_iframe" hidden></iframe>
+<iframe id="rp_iframe" hidden></iframe>
+
+</body>
+</html>
+`;

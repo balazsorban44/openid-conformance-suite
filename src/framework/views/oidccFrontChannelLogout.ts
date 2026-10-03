@@ -1,9 +1,9 @@
-import { escapeHtml, registerView } from "../views.ts";
+import { escapeHtml } from "./html.ts";
 
 // Port of templates/oidccFrontChannelLogout.html
 // Thymeleaf [[${x}]] text inlining (no th:inline="javascript") HTML-escapes the value -> escapeHtml().
 // Note: rp_frontchannel_logout_uri is already JavaScript-escaped by the module (StringEscapeUtils.escapeEcmaScript).
-registerView("oidccFrontChannelLogout", (model) => {
+export function oidccFrontChannelLogout(model: Record<string, unknown>): string {
 	const redirect = String(model["post_logout_redirect_uri_redirect"] ?? "");
 	const iframeLoadedCallbackUrl = escapeHtml(model["iframe_loaded_callback_url"] ?? "");
 	const rpFrontchannelLogoutUri = escapeHtml(model["rp_frontchannel_logout_uri"] ?? "");
@@ -93,4 +93,4 @@ ${script}
 
 </body>
 </html>`;
-});
+}

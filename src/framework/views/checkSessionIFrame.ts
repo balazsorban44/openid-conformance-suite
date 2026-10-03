@@ -1,9 +1,9 @@
-import { escapeHtml, registerView } from "../views.ts";
+import { escapeHtml } from "./html.ts";
 
 // Port of templates/checkSessionIFrame.html
 // Thymeleaf [[${x}]] text inlining (no th:inline="javascript") HTML-escapes the value -> escapeHtml().
 // A model key that is not supplied (session_state is not passed by AbstractOIDCCClientLogoutTest) renders empty.
-registerView("checkSessionIFrame", (model) => {
+export function checkSessionIFrame(model: Record<string, unknown>): string {
 	const sessionState = escapeHtml(model["session_state"] ?? "");
 	const checkSessionAjaxUrl = escapeHtml(model["check_session_ajax_url"] ?? "");
 	return `<!DOCTYPE html>
@@ -114,4 +114,4 @@ registerView("checkSessionIFrame", (model) => {
 
 </body>
 </html>`;
-});
+}

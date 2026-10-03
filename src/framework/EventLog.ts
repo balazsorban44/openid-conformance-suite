@@ -30,6 +30,7 @@ export class TestInstanceEventLog {
 	// a block identifier for a log entry
 	private blockId: string | null = null;
 
+	/** `sink` sees every entry as it is logged */
 	constructor(testId: string, sink?: LogSink) {
 		this.testId = testId;
 		this.sink = sink;
@@ -39,38 +40,26 @@ export class TestInstanceEventLog {
 	 * log(source, msg) or log(source, map)
 	 */
 	log(source: string, msgOrMap: string | LogArgs): void {
-		let map: LogArgs;
-		if (typeof msgOrMap === "string") {
-			map = { msg: msgOrMap };
-		} else {
-			map = { ...msgOrMap };
-		}
+		const map: LogArgs = typeof msgOrMap === "string" ? { msg: msgOrMap } : { ...msgOrMap };
 		if (this.blockId != null) {
 			map["blockId"] = this.blockId;
 		}
-		const entry: LogEntry = {
-			_id: `${this.testId}-${++seq}`,
-			testId: this.testId,
-			src: source,
-			time: Date.now(),
-			seq,
-			...sanitise(map),
-		};
+		seq++;
+		const entry: LogEntry = { _id: `${this.testId}-${seq}`, testId: this.testId, src: source, time: Date.now(), seq };
+		for (const [k, v] of Object.entries(map)) {
+			entry[k] = sanitise(v);
+		}
 		this.entries.push(entry);
 		this.sink?.(entry);
 	}
 
-	private newBlockId(): string {
+	/** Start a new log block and return its ID */
+	startBlock(message?: string | null): string {
 		// create a random six-character hex string that we can use as a CSS color code in the logs
 		this.blockId = randomInt(256 * 256 * 256)
 			.toString(16)
 			.padStart(6, "0");
-		return this.blockId;
-	}
-
-	/** Start a new log block and return its ID */
-	startBlock(message?: string | null): string {
-		const blockId = this.newBlockId();
+		const blockId = this.blockId;
 		if (message) {
 			this.log("-START-BLOCK-", { msg: message, startBlock: true });
 		}
@@ -83,35 +72,32 @@ export class TestInstanceEventLog {
 		this.blockId = null;
 		return oldBlock;
 	}
+
+	/** Wraps the given block in a startBlock()... endBlock() sequence. */
+	async runBlock(message: string | null, block: () => void | Promise<void>): Promise<string | null> {
+		this.startBlock(message);
+		let result: string | null;
+		try {
+			await block();
+		} finally {
+			result = this.endBlock();
+		}
+		return result;
+	}
 }
 
 /**
- * Make a log map JSON-safe: Sets become arrays, Errors become their message, Maps become objects.
+ * Make a logged value JSON-safe: Sets become arrays, Errors become their message, Maps and Headers become objects.
  */
-function sanitise(map: LogArgs): LogArgs {
-	const out: LogArgs = {};
-	for (const [k, v] of Object.entries(map)) {
-		out[k] = sanitiseValue(v);
+function sanitise(v: unknown): unknown {
+	if (v instanceof Set || Array.isArray(v)) {
+		return [...v].map(sanitise);
 	}
-	return out;
-}
-
-function sanitiseValue(v: unknown): unknown {
-	if (v instanceof Set) {
-		return [...v].map(sanitiseValue);
-	}
-	if (v instanceof Map) {
-		return sanitise(Object.fromEntries(v));
+	if (v instanceof Map || v instanceof Headers) {
+		return sanitiseObject(Object.fromEntries(v));
 	}
 	if (v instanceof Error) {
 		return v.message;
-	}
-	if (v instanceof Headers) {
-		const o: Record<string, string> = {};
-		v.forEach((value, key) => {
-			o[key] = value;
-		});
-		return o;
 	}
 	if (v instanceof URLSearchParams) {
 		return v.toString();
@@ -119,14 +105,19 @@ function sanitiseValue(v: unknown): unknown {
 	if (typeof v === "bigint") {
 		return Number(v);
 	}
-	if (Array.isArray(v)) {
-		return v.map(sanitiseValue);
-	}
 	if (typeof v === "object" && v !== null) {
 		if (typeof (v as { toJSON?: unknown }).toJSON === "function") {
 			return (v as { toJSON: () => unknown }).toJSON();
 		}
-		return sanitise(v as LogArgs);
+		return sanitiseObject(v as LogArgs);
 	}
 	return v;
+}
+
+function sanitiseObject(map: LogArgs): LogArgs {
+	const out: LogArgs = {};
+	for (const [k, v] of Object.entries(map)) {
+		out[k] = sanitise(v);
+	}
+	return out;
 }

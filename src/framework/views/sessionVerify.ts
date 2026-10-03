@@ -1,10 +1,10 @@
-import { escapeHtml, registerView } from "../views.ts";
+import { escapeHtml } from "./html.ts";
 
 // Port of templates/sessionVerify.html
 // th:src="${x}" -> an escaped src attribute (Thymeleaf omits the attribute when the value is null)
 const src = (v: unknown) => (v == null ? "" : ` src="${escapeHtml(v)}"`);
 
-registerView("sessionVerify", (model) => {
+export function sessionVerify(model: Record<string, unknown>): string {
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,4 +20,4 @@ registerView("sessionVerify", (model) => {
 
 </body>
 </html>`;
-});
+}

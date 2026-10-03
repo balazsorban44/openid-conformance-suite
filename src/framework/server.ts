@@ -3,9 +3,8 @@ import { createServer as createHttpsServer } from "node:https";
 import type { TLSSocket } from "node:tls";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { Readable } from "node:stream";
 import type { AbstractTestModule } from "./AbstractTestModule.ts";
-import { args, mapToJsonObject } from "./DataUtils.ts";
+import { mapToJsonObject } from "./DataUtils.ts";
 import { TestFailureException, TestInterruptedException } from "./exceptions.ts";
 import { parseJson, type JsonObject } from "./json.ts";
 import type { HttpSession, IncomingHttpRequest } from "./TestModule.ts";
@@ -13,6 +12,26 @@ import { jsonResponse } from "./views.ts";
 
 export const TEST_PATH = "/test/"; // path for incoming test requests
 export const TEST_MTLS_PATH = "/test-mtls/"; // path for incoming MTLS requests
+const WELL_KNOWN = "/.well-known/";
+const WEBFINGER_PATH = "/.well-known/webfinger";
+
+/** The module handler serving each path prefix (well-known paths go to the module registered with `wellKnown`) */
+const ROUTES = [
+	{ prefix: TEST_PATH, handler: "handleHttp" },
+	{ prefix: TEST_MTLS_PATH, handler: "handleHttpMtls" },
+] as const;
+
+type Handler = (typeof ROUTES)[number]["handler"] | "handleWellKnown";
+
+/** Implemented by the RP test modules (Java: AbstractOIDCCClientTest) */
+type WebfingerModule = AbstractTestModule & {
+	handleWebfingerRequest?: (
+		testName: string,
+		prefix: string,
+		resource: string,
+		parts: JsonObject,
+	) => Promise<JsonObject | Response | null>;
+};
 
 export interface SuiteServerOptions {
 	host?: string;
@@ -30,6 +49,7 @@ export interface SuiteServerOptions {
  *   /test/a/{alias}/{path}  -> module registered under alias
  *   /test-mtls/...          -> module.handleHttpMtls(...)
  *   /.well-known/{rest}     -> module.handleWellKnown(...) of the module registered with `wellKnown: true`
+ *   /.well-known/webfinger  -> handleWebfingerRequest(...) of the RP test module named in `resource`
  */
 export class SuiteServer {
 	private readonly server: Server;
@@ -131,89 +151,56 @@ export class SuiteServer {
 	private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
 		const url = new URL(req.url ?? "/", this.baseUrl);
 		const pathname = url.pathname;
-		let kind: "test" | "mtls" | "wellknown";
-		let rest: string;
-		if (pathname === "/.well-known/webfinger") {
-			await this.send(res, await this.handleWebfinger(req, url));
-			return;
+		if (pathname === WEBFINGER_PATH) {
+			return send(res, await this.handleWebfinger(req, url));
 		}
-		if (pathname.startsWith(TEST_PATH)) {
-			kind = "test";
-			rest = pathname.substring(TEST_PATH.length);
-		} else if (pathname.startsWith(TEST_MTLS_PATH)) {
-			kind = "mtls";
-			rest = pathname.substring(TEST_MTLS_PATH.length);
-		} else if (pathname.startsWith("/.well-known/")) {
-			kind = "wellknown";
-			rest = pathname;
-		} else {
-			await this.send(res, jsonResponse({ error: "not found" }, 404));
-			return;
+		const target = this.resolve(pathname);
+		if (target instanceof Response) {
+			return send(res, target);
 		}
-
-		let test: AbstractTestModule | undefined;
-		let restOfPath: string;
-		if (kind === "wellknown") {
-			test = this.wellKnownTestId ? this.tests.get(this.wellKnownTestId) : undefined;
-			restOfPath = rest;
-			if (!test) {
-				await this.send(res, jsonResponse({ error: "No running test serves " + pathname }, 404));
-				return;
-			}
-		} else {
-			const pathParts = rest.split("/");
-			let testId = pathParts.shift() ?? "";
-			if (testId === "a") {
-				const alias = decodeURIComponent(pathParts.shift() ?? "");
-				const id = this.aliases.get(alias);
-				if (!id) {
-					await this.send(res, jsonResponse({ error: "No test found with alias '" + alias + "'" }, 404));
-					return;
-				}
-				testId = id;
-			}
-			test = this.tests.get(testId);
-			if (!test) {
-				await this.send(res, jsonResponse({ error: "No running test with test id '" + testId + "'" }, 404));
-				return;
-			}
-			restOfPath = pathParts.join("/");
-		}
-
-		const body = await readBody(req);
-		const requestParts = buildRequestParts(req, url, body);
+		const { test, handler, path } = target;
+		const requestParts = buildRequestParts(req, url, await readBody(req));
 		const incoming = toIncomingRequest(req, url);
 		const session = this.session(req, res);
 		logIncomingHttpRequest(test, pathname, requestParts);
-
 		let response: Response;
 		try {
-			if (kind === "test") {
-				response = await test.handleHttp(restOfPath, incoming, null, session, requestParts);
-			} else if (kind === "mtls") {
-				response = await test.handleHttpMtls(restOfPath, incoming, null, session, requestParts);
-			} else {
-				response = await test.handleWellKnown(restOfPath, incoming, null, session, requestParts);
-			}
+			response = await test[handler](path, incoming, null, session, requestParts);
 		} catch (e) {
-			test.forceReleaseLock();
-			let error: TestInterruptedException;
-			if (e instanceof TestInterruptedException) {
-				error = e;
-			} else {
-				error = new TestFailureException(test.getId(), e);
-			}
-			// Java: TestDispatcher catches the exception, hands it to the test and returns an error response
-			await test.handleException(error, "incoming HTTP request");
-			const tfe = error instanceof TestFailureException ? error : null;
-			const errBody: JsonObject = { error: tfe?.getError() ?? error.message };
-			if (tfe?.getErrorDescription()) {
-				errBody["error_description"] = tfe.getErrorDescription();
-			}
-			response = jsonResponse(errBody, 400);
+			response = await errorResponse(test, e, "incoming HTTP request");
 		}
 		logOutgoingHttpResponse(test, pathname, response);
-		await this.send(res, response);
+		await send(res, response);
+	}
+
+	/** The module and handler serving a request path (the rest of the path is handed to the module), or a 404 */
+	private resolve(pathname: string): { test: AbstractTestModule; handler: Handler; path: string } | Response {
+		if (pathname.startsWith(WELL_KNOWN)) {
+			const test = this.wellKnownTestId ? this.tests.get(this.wellKnownTestId) : undefined;
+			if (!test) {
+				return jsonResponse({ error: "No running test serves " + pathname }, 404);
+			}
+			return { test, handler: "handleWellKnown", path: pathname };
+		}
+		const route = ROUTES.find((r) => pathname.startsWith(r.prefix));
+		if (!route) {
+			return jsonResponse({ error: "not found" }, 404);
+		}
+		const pathParts = pathname.substring(route.prefix.length).split("/");
+		let testId = pathParts.shift() ?? "";
+		if (testId === "a") {
+			const alias = decodeURIComponent(pathParts.shift() ?? "");
+			const id = this.aliases.get(alias);
+			if (!id) {
+				return jsonResponse({ error: "No test found with alias '" + alias + "'" }, 404);
+			}
+			testId = id;
+		}
+		const test = this.tests.get(testId);
+		if (!test) {
+			return jsonResponse({ error: "No running test with test id '" + testId + "'" }, 404);
+		}
+		return { test, handler: route.handler, path: pathParts.join("/") };
 	}
 
 	/** Port of TestDispatcher.handleWellKnownWebFingerRequest: routes webfinger to the RP test module named in `resource` */
@@ -223,36 +210,19 @@ export class SuiteServer {
 			// https://tools.ietf.org/html/rfc7033#section-4
 			return jsonResponse({ error: "resource parameter missing" }, 400);
 		}
-		let testName: string;
-		let alias: string;
-		let resourcePrefix: string;
 		const acct = /^acct:([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)@.*$/i.exec(resource);
-		const https = /^https?:\/\/.*\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)$/i.exec(resource);
-		if (acct) {
-			resourcePrefix = "acct";
-			alias = acct[1];
-			testName = acct[2];
-		} else if (https) {
-			resourcePrefix = "https";
-			alias = https[1];
-			testName = https[2];
-		} else {
+		const match = acct ?? /^https?:\/\/.*\/([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_-]+)$/i.exec(resource);
+		if (!match) {
 			return new Response(null, { status: 400 });
 		}
+		const resourcePrefix = acct ? "acct" : "https";
+		const [, alias, testName] = match;
 		const testId = this.aliases.get(alias) ?? alias;
-		const test = this.tests.get(testId);
+		const test = this.tests.get(testId) as WebfingerModule | undefined;
 		if (!test) {
 			return jsonResponse({ error: "no running test for test id '" + testId + "' from alias '" + alias + "'" }, 404);
 		}
-		const clientTest = test as AbstractTestModule & {
-			handleWebfingerRequest?: (
-				testName: string,
-				prefix: string,
-				resource: string,
-				parts: JsonObject,
-			) => Promise<JsonObject | Response | null>;
-		};
-		if (typeof clientTest.handleWebfingerRequest !== "function") {
+		if (typeof test.handleWebfingerRequest !== "function") {
 			return new Response(null, { status: 400 });
 		}
 		const requestParts: JsonObject = {
@@ -260,7 +230,7 @@ export class SuiteServer {
 			query_string_params: mapToJsonObject(convertQueryStringParamsToMap(url.search.substring(1)), false),
 			method: (req.method ?? "GET").toUpperCase(),
 		};
-		logIncomingHttpRequest(test, "/.well-known/webfinger", requestParts);
+		logIncomingHttpRequest(test, WEBFINGER_PATH, requestParts);
 		try {
 			if (test.getStatus() === "CREATED") {
 				throw new TestFailureException(
@@ -268,47 +238,42 @@ export class SuiteServer {
 					"Please wait for the test to be in WAITING state. The current status is CREATED",
 				);
 			}
-			const response = await clientTest.handleWebfingerRequest(testName, resourcePrefix, resource, requestParts);
+			const response = await test.handleWebfingerRequest(testName, resourcePrefix, resource, requestParts);
 			const out = response instanceof Response ? response : jsonResponse(response ?? {}, 200);
-			logOutgoingHttpResponse(test, "/.well-known/webfinger", out);
+			logOutgoingHttpResponse(test, WEBFINGER_PATH, out);
 			return out;
 		} catch (e) {
-			test.forceReleaseLock();
-			const error = e instanceof TestInterruptedException ? e : new TestFailureException(test.getId(), e);
-			await test.handleException(error, "incoming webfinger request");
-			return jsonResponse({ error: error.message }, 400);
+			return errorResponse(test, e, "incoming webfinger request");
 		}
 	}
+}
 
-	private async send(res: ServerResponse, response: Response): Promise<void> {
-		const headers: Record<string, string | string[]> = {};
-		response.headers.forEach((v, k) => {
-			headers[k] = v;
-		});
-		const setCookie = response.headers.getSetCookie();
-		if (setCookie.length > 0) {
-			headers["set-cookie"] = setCookie;
-		}
-		const existing = res.getHeader("set-cookie");
-		if (existing) {
-			headers["set-cookie"] = ([] as string[]).concat(
-				existing as string | string[],
-				(headers["set-cookie"] as string[] | undefined) ?? [],
-			);
-		}
-		res.writeHead(response.status, headers);
-		if (response.body) {
-			await new Promise<void>((resolve, reject) => {
-				Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
-					.on("error", reject)
-					.pipe(res)
-					.on("finish", resolve)
-					.on("error", reject);
-			});
-		} else {
-			res.end();
-		}
+/**
+ * Java: TestDispatcher's @ExceptionHandler. Releases the test's lock, hands the failure to the test and answers
+ * with an error response.
+ */
+async function errorResponse(test: AbstractTestModule, e: unknown, source: string): Promise<Response> {
+	test.forceReleaseLock();
+	const error = e instanceof TestInterruptedException ? e : new TestFailureException(test.getId(), e);
+	await test.handleException(error, source);
+	const tfe = error instanceof TestFailureException ? error : null;
+	const body: JsonObject = { error: tfe?.getError() ?? error.message };
+	if (tfe?.getErrorDescription()) {
+		body["error_description"] = tfe.getErrorDescription();
 	}
+	return jsonResponse(body, 400);
+}
+
+async function send(res: ServerResponse, response: Response): Promise<void> {
+	const body = response.body ? Buffer.from(await response.arrayBuffer()) : undefined;
+	const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
+	// the session cookie set by session() comes first, then the module's own cookies (one header each)
+	const setCookie = [res.getHeader("set-cookie") ?? [], response.headers.getSetCookie()].flat().map(String);
+	if (setCookie.length > 0) {
+		headers["set-cookie"] = setCookie;
+	}
+	res.writeHead(response.status, headers);
+	res.end(body);
 }
 
 async function readBody(req: IncomingMessage): Promise<string | null> {
@@ -339,21 +304,28 @@ function contentTypeIs(req: IncomingMessage, type: string): boolean {
 	return ct === type;
 }
 
+/** The request's socket when the suite terminated TLS for it */
+function tlsSocket(req: IncomingMessage): TLSSocket | null {
+	const socket = req.socket as TLSSocket;
+	return typeof socket.getCipher === "function" && socket.encrypted ? socket : null;
+}
+
 /** Build the `requestParts` JSON object handed to test modules (Java: TestDispatcher.handle) */
 export function buildRequestParts(req: IncomingMessage, url: URL, body: string | null): JsonObject {
-	const requestParts: JsonObject = {};
 	const headers = { ...(req.headers as Record<string, string | string[] | undefined>) };
 	// upstream runs behind an nginx/apache proxy that adds the TLS details as headers (see the x-ssl-* handling
 	// in TestDispatcher.logIncomingHttpRequest); the suite terminates TLS itself here, so it adds them
-	const socket = req.socket as TLSSocket;
-	if (typeof socket.getCipher === "function" && socket.encrypted) {
-		headers["x-ssl-protocol"] ??= socket.getProtocol() ?? undefined;
-		headers["x-ssl-cipher"] ??= socket.getCipher()?.name;
+	const tls = tlsSocket(req);
+	if (tls) {
+		headers["x-ssl-protocol"] ??= tls.getProtocol() ?? undefined;
+		headers["x-ssl-cipher"] ??= tls.getCipher()?.name;
 	}
-	requestParts["headers"] = mapToJsonObject(headers, true);
-	requestParts["query_string_params"] = mapToJsonObject(convertQueryStringParamsToMap(url.search.substring(1)), false);
-	requestParts["method"] = (req.method ?? "GET").toUpperCase();
-	requestParts["request_url"] = url.origin + url.pathname;
+	const requestParts: JsonObject = {
+		headers: mapToJsonObject(headers, true),
+		query_string_params: mapToJsonObject(convertQueryStringParamsToMap(url.search.substring(1)), false),
+		method: (req.method ?? "GET").toUpperCase(),
+		request_url: url.origin + url.pathname,
+	};
 	if (body != null) {
 		requestParts["body"] = body;
 		if (contentTypeIs(req, "application/json")) {
@@ -371,18 +343,18 @@ export function buildRequestParts(req: IncomingMessage, url: URL, body: string |
 }
 
 function toIncomingRequest(req: IncomingMessage, url: URL): IncomingHttpRequest {
-	const socket = req.socket as TLSSocket;
 	const out: IncomingHttpRequest = {
 		method: (req.method ?? "GET").toUpperCase(),
 		url: url.toString(),
 		headers: req.headers as Record<string, string | string[] | undefined>,
 		remoteAddress: req.socket.remoteAddress,
 	};
-	if (typeof socket.getCipher === "function" && socket.encrypted) {
-		const cert = socket.getPeerCertificate?.(true);
+	const tls = tlsSocket(req);
+	if (tls) {
+		const cert = tls.getPeerCertificate?.(true);
 		out.tls = {
-			cipher: socket.getCipher()?.name,
-			version: socket.getProtocol() ?? undefined,
+			cipher: tls.getCipher()?.name,
+			version: tls.getProtocol() ?? undefined,
 			clientCertificate: cert && cert.raw ? pem(cert.raw) : undefined,
 		};
 	}
@@ -396,55 +368,26 @@ function pem(der: Buffer): string {
 }
 
 function logIncomingHttpRequest(test: AbstractTestModule, path: string, requestParts: JsonObject): void {
-	test
-		.getEventLog()
-		.log(
-			test.getName(),
-			args(
-				"msg",
-				"Incoming HTTP request to test instance " + test.getId(),
-				"http",
-				"incoming",
-				"incoming_path",
-				path,
-				"incoming_query_string_params",
-				requestParts["query_string_params"],
-				"incoming_body_form_params",
-				requestParts["body_form_params"],
-				"incoming_method",
-				requestParts["method"],
-				"incoming_headers",
-				requestParts["headers"],
-				"incoming_body",
-				requestParts["body"],
-				"incoming_body_json",
-				requestParts["body_json"],
-				"incoming_body_json_parse_error",
-				requestParts["body_json_parse_error"],
-			),
-		);
+	test.getEventLog().log(test.getName(), {
+		msg: "Incoming HTTP request to test instance " + test.getId(),
+		http: "incoming",
+		incoming_path: path,
+		incoming_query_string_params: requestParts["query_string_params"],
+		incoming_body_form_params: requestParts["body_form_params"],
+		incoming_method: requestParts["method"],
+		incoming_headers: requestParts["headers"],
+		incoming_body: requestParts["body"],
+		incoming_body_json: requestParts["body_json"],
+		incoming_body_json_parse_error: requestParts["body_json_parse_error"],
+	});
 }
 
 function logOutgoingHttpResponse(test: AbstractTestModule, path: string, response: Response): void {
-	const headers: Record<string, string> = {};
-	response.headers.forEach((v, k) => {
-		headers[k] = v;
+	test.getEventLog().log(test.getName(), {
+		msg: "Response to HTTP request to test instance " + test.getId(),
+		http: "outgoing",
+		outgoing_path: path,
+		outgoing_status_code: response.status,
+		outgoing_headers: Object.fromEntries(response.headers),
 	});
-	test
-		.getEventLog()
-		.log(
-			test.getName(),
-			args(
-				"msg",
-				"Response to HTTP request to test instance " + test.getId(),
-				"http",
-				"outgoing",
-				"outgoing_path",
-				path,
-				"outgoing_status_code",
-				response.status,
-				"outgoing_headers",
-				headers,
-			),
-		);
 }
