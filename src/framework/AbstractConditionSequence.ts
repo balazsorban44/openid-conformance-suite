@@ -9,7 +9,7 @@ import {
 	type ConditionSequenceSupplier,
 } from "./ConditionSequence.ts";
 
-function actionToConditionClass(action: TestExecutionUnit): ConditionClass | null {
+export function actionToConditionClass(action: TestExecutionUnit): ConditionClass | null {
 	if (action instanceof ConditionCallBuilder) {
 		return action.getConditionClass();
 	}

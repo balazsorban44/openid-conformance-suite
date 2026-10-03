@@ -27,7 +27,8 @@ export abstract class AbstractCheckServerConfiguration extends AbstractCondition
 		try {
 			// UPSTREAM: URI.create(..).toURL() additionally requires a URL scheme with a registered handler
 			// (http, https, ftp, file, jar); new URL() accepts any absolute URL
-			new URL(string as string);
+			const url = new URL(string as string);
+			void url; // unused, only parsed to validate
 		} catch (e) {
 			throw this.error("Couldn't parse key as URL", e, args("key", path, "url", string));
 		}
