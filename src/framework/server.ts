@@ -346,7 +346,15 @@ function contentTypeIs(req: IncomingMessage, type: string): boolean {
 /** Build the `requestParts` JSON object handed to test modules (Java: TestDispatcher.handle) */
 export function buildRequestParts(req: IncomingMessage, url: URL, body: string | null): JsonObject {
 	const requestParts: JsonObject = {};
-	requestParts["headers"] = mapToJsonObject(req.headers as Record<string, string | string[] | undefined>, true);
+	const headers = { ...(req.headers as Record<string, string | string[] | undefined>) };
+	// upstream runs behind an nginx/apache proxy that adds the TLS details as headers (see the x-ssl-* handling
+	// in TestDispatcher.logIncomingHttpRequest); the suite terminates TLS itself here, so it adds them
+	const socket = req.socket as TLSSocket;
+	if (typeof socket.getCipher === "function" && socket.encrypted) {
+		headers["x-ssl-protocol"] ??= socket.getProtocol() ?? undefined;
+		headers["x-ssl-cipher"] ??= socket.getCipher()?.name;
+	}
+	requestParts["headers"] = mapToJsonObject(headers, true);
 	requestParts["query_string_params"] = mapToJsonObject(convertQueryStringParamsToMap(url.search.substring(1)), false);
 	requestParts["method"] = (req.method ?? "GET").toUpperCase();
 	requestParts["request_url"] = url.origin + url.pathname;
