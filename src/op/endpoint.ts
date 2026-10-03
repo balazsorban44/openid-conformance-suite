@@ -164,3 +164,14 @@ export function ensureHttpStatusCodeIs4xx(res: EndpointResponse, ...requirements
 		expected: "400 to 499",
 	});
 }
+
+/** upstream: condition/client/EnsureContentTypeApplicationJwt.java */
+export function ensureContentTypeApplicationJwt(res: EndpointResponse, ...requirements: string[]): void {
+	checkContentType(
+		"EnsureContentTypeApplicationJwt",
+		"endpoint_response",
+		res.headers["content-type"],
+		"application/jwt",
+		...requirements,
+	);
+}

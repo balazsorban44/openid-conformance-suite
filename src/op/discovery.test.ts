@@ -6,6 +6,7 @@ import {
 	checkServerConfiguration,
 	ensureServerConfigurationSupportsClientSecretBasic,
 	getDynamicServerConfiguration,
+	noneRequestObjectSigningAlgUnsupported,
 } from "./discovery.ts";
 import { loadServerKeys } from "./jwks.ts";
 
@@ -136,5 +137,17 @@ describe("loadServerKeys", () => {
 			"CheckForKeyIdInServerJWKs",
 			"CheckDistinctKeyIdValueInServerJWKs",
 		]);
+	});
+});
+
+describe("noneRequestObjectSigningAlgUnsupported", () => {
+	test("only a list without none skips the module", () => {
+		expect(noneRequestObjectSigningAlgUnsupported({})).toBeNull();
+		expect(
+			noneRequestObjectSigningAlgUnsupported({ request_object_signing_alg_values_supported: ["none", "RS256"] }),
+		).toBeNull();
+		expect(noneRequestObjectSigningAlgUnsupported({ request_object_signing_alg_values_supported: ["RS256"] })).toBe(
+			"'none' is not listed in request_object_signing_alg_values_supported - assuming it is not supported.",
+		);
 	});
 });

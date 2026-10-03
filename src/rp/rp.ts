@@ -11,7 +11,7 @@
  * its flow for the module (or gave up), so when it returns the RP will not send further requests.
  */
 import type { Browser } from "../suite/browser.ts";
-import { logModule } from "../suite/conditions.ts";
+import { logTestSkipped } from "../suite/conditions.ts";
 import type { ClientDriverConfig, TestConfig } from "../suite/config.ts";
 import type { EventLog } from "../suite/log.ts";
 import type { TestServer } from "../suite/server.ts";
@@ -98,7 +98,7 @@ export function createRp(ctx: {
 			return driving.finally(() => started.rpFinished());
 		},
 		skipTest(reason) {
-			logModule({ result: "SKIPPED", msg: "The test was skipped: " + reason });
+			logTestSkipped(reason);
 			return ctx.skip(reason);
 		},
 		async close() {

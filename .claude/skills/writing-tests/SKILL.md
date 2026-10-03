@@ -24,17 +24,20 @@ src/suite/            the engine (no OIDC knowledge)
   wait.ts             upstream's WaitFor* conditions (the only sleeps: the spec's timing is what is tested)
   random.ts, testing.ts (Vitest helpers: useTestLog(), useMswServer())
 src/op/               helpers for testing an OpenID Provider, one file per concern
-  op.ts               the Op / OpVariant types the `op` fixture provides
-  discovery.ts        server metadata (discovery / static) and its checks
+  op.ts               the Op / OpVariant types the `op` fixture provides (RegistrationOp: `registrationOp`)
+  discovery.ts        server metadata (discovery / static) and its checks (CheckDisc*, shared by the discovery
+                      verification modules)
+  discovery-endpoint.ts  the discovery endpoint verification: OIDCCDiscoveryEndpointVerification's checks of the
+                      metadata document, performEndpointVerification()
   jwks.ts             the OP's keys, validateJwks() (ValidateJwksSequence), kid checks
   registration.ts     dynamic registration, static clients, unregistration (Client, RegisteredClient)
   authorization.ts    request building, authorize() (browser + redirect_uri), response checks
   token.ts            code exchange + client authentication, token response checks, error checks
   id-token.ts         PerformStandardIdTokenChecks and the per-module id_token checks
-  userinfo.ts         callProtectedResource()
+  userinfo.ts         callProtectedResource(), the userinfo endpoint checks (signed userinfo, claims)
   endpoint.ts         checks shared by every endpoint response (status, content type, error fields)
   refresh-token.ts    the refresh_token grant (RefreshTokenRequestSteps, RefreshTokenRequestExpectingErrorSteps)
-  request-object.ts   unsigned request objects by value / by reference (request, request_uri)
+  request-object.ts   request objects by value / by reference (request, request_uri), unsigned or signed
   logout.ts           RP-initiated / back-channel / front-channel logout: end_session request, post logout redirect,
                       logout token and front-channel request checks, the first login of the logout modules
   session.ts          session management: session_state, the suite's session check pages (check_session_iframe)
@@ -51,10 +54,13 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
   userinfo.ts         the user, the userinfo endpoint (bearer token checks, claims filtered by scope, signing)
   request-object.ts   request objects (request_type request_object / request_uri): fetching, claim and signature checks
   webfinger.ts        WebFinger issuer discovery (/.well-known/webfinger on the test's server)
-tests/fixtures.ts     the `test` with the `op`, `client`, `client2`, `configureClient`, `rp`, `variant`, `plan` fixtures
+tests/fixtures.ts     the `test` with the `op`, `registrationOp`, `client`, `client2`, `configureClient`, `rp`, `variant`,
+                      `plan` fixtures, and `skipTest(reason)`
 tests/suite-target.ts suite-vs-suite: the emulated OP the `suiteTarget` fixture starts for an OP test (`suite_target`)
-tests/op/*.spec.ts    one file per OP plan (basic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
-                      session-management, 3rdparty-init-login so far)
+tests/op/*.spec.ts    one file per OP plan (basic, config, dynamic, rp-initiated-logout, backchannel-logout,
+                      frontchannel-logout, session-management, 3rdparty-init-login); tests/op/shared.ts: the
+                      bodies of modules that are in several plans (oidcc-server, oidcc-refresh-token, ...) and the
+                      code flow pieces of AbstractOIDCCServerTest (completeCodeFlow, userinfoEndpointTests)
 tests/rp/*.spec.ts    one file per RP plan (basic.spec.ts, dynamic.spec.ts); tests/rp/shared.ts: the bodies of
                       modules that are in several plans (each spec registers them with its title and upstream comment)
 tests/plan.spec.ts    the old framework, for the modules not rewritten yet (see "Transition")
@@ -143,6 +149,12 @@ test.describe("oidcc-basic-certification-test-plan", () => {
   plan fixes. The user's selection (CONFORMANCE_VARIANT or the CI project) fills in the rest (`variant` fixture).
 - **Not applicable** (upstream `@VariantNotApplicable`): a nested `test.describe` with
   `test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients")`.
+- **Skipped at run time** (upstream `fireTestSkipped(msg)`): `skipTest(msg)` from tests/fixtures.ts logs the SKIPPED
+  entry and ends the test (Playwright's skip); the expected skips of the configuration list such modules
+  (`rp.skipTest(msg)` in RP tests).
+- **Modules in several plans** (the same upstream class): the body is a function in tests/op/shared.ts taking the
+  fixtures (`export async function oidccServer({ op, client }) { ... }`); each spec registers it with its own title
+  and `// upstream:` comment: `test("oidcc-server: ...", oidccServer)`.
 - **Blocks** (`block(name, fn)`): upstream's `startBlock(...)`/`endBlock()` and a Playwright step. Use upstream's
   block names and boundaries: expected-failures entries match on `current-block`. Blocks do not nest upstream
   (a new block replaces the open one); write them one after the other.
@@ -233,14 +245,26 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
     createDynamicClientRegistrationRequest overrides: called after the OIDCC defaults, before it is sent; not for a
     static client);
   - `staticConfigKey`: the config key of a static client (e.g. `"client_secret_post"`; default `configKey`);
-  - `completeClientConfiguration(op, client)`: runs after SetScopeInClientConfigurationToOpenId (e.g. the scope);
+  - `completeClientConfiguration(op, client)`: the module's completeClientConfiguration, in place of the default
+    SetScopeInClientConfigurationToOpenId (e.g. the offline_access scope of the refresh token modules);
   - `configKey: "client2"`: the second client of the multiple client modules (config `client2`; its unregistration
-    block is prefixed "Second client: ").
+    block is prefixed "Second client: ");
+  - `redirectUri`, `jwksUri`, `generateKeys`: a module that registers another redirect_uri (a query added), its keys
+    by reference (the test serves them, `op.server.on("client1_jwks", ...)`) or other keys
+    (`generateRS256ClientJWKsWithKeyID`); only for a dynamic client;
+  - `checkClientAuthSupported: false`: the modules built on upstream's AbstractOIDCCDynamicRegistrationTest, whose
+    client is registered and its scope set without EnsureServerConfigurationSupports<auth type>.
 - `client` / `client2`: `configureClient()` / `configureClient({ configKey: "client2" })` run before the test body,
   for modules that use the default client(s). A `RegisteredClient` has `client` (upstream env "client"), `keys`
   (client_jwks: `{ jwks, publicJwks }` or null), `dynamic` and `registrationRequest` (the request sent, if dynamic).
+- `registrationOp: RegistrationOp`: the `op` without the OP's keys (CreateRedirectUri, the metadata,
+  CheckServerConfiguration), for the modules upstream builds on AbstractOIDCCDynamicRegistrationTest (logo_uri,
+  policy_uri, tos_uri, sector_identifier_uri, the registrations expected to fail). `op` builds on it
+  (ExtractTLSTestValuesFromServerConfiguration, the keys) and `configureClient` registers with it, so a test that
+  asks for `registrationOp` and `configureClient` never fetches the OP's keys.
 - `conformance` (testName, log, config, server, browser) without discovery or keys, for modules whose own flow
-  fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`).
+  fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`;
+  oidcc-discovery-endpoint-verification then runs `performEndpointVerification()` from src/op/discovery-endpoint.ts).
 - `rp: Rp` (src/rp/rp.ts): `testName`, `variant` (RpVariant), `config`, `waitTimeoutSeconds` (config
   `waitTimeoutSeconds`, default 5), `start(options)` -> `EmulatedOp` (also `rp.op`), `driveClient()`,
   `skipTest(reason)`. Uses the same per-test setup and after-test analysis as `op` (the `conformance` fixture);

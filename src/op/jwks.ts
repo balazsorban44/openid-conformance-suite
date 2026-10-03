@@ -2,10 +2,12 @@
  * The OP's JWK set (`jwks_uri`) and the checks upstream runs on it before a test starts, plus the generic JWK set
  * validation (upstream sequence/ValidateJwksSequence) used for any JWK set that enters the suite.
  */
+import { isDeepStrictEqual } from "node:util";
 import { block, condition, soft, type Condition } from "../suite/conditions.ts";
 import { HttpError, request } from "../suite/http.ts";
 import { parseJwksLenientlyLoggingSkips, ParseException, type Jwks } from "../suite/jose.ts";
 import { JWKUtil } from "../util/JWKUtil.ts";
+import { getRequiredParams } from "../util/nimbus/jwk.ts";
 import type { ServerMetadata } from "./discovery.ts";
 
 /** upstream: condition/client/FetchServerKeys.java */
@@ -223,4 +225,129 @@ export async function loadServerKeys(metadata: ServerMetadata): Promise<Jwks> {
 	soft(() => checkForKeyIdInServerJWKs(jwks, "OIDCC-10.1"));
 	soft(() => checkDistinctKeyIdValueInServerJWKs(jwks, "RFC7517-4.5"));
 	return jwks;
+}
+
+/** upstream: condition/client/TellUserToRotateOpKeys.java */
+export function tellUserToRotateOpKeys(): void {
+	condition("TellUserToRotateOpKeys").log(
+		"Please rotate the keys on the authorization server then press the 'Start' button.",
+	);
+}
+
+type JsonKey = Record<string, unknown>;
+
+/** Java Set<JsonObject>: no structurally equal duplicates */
+function addToSet(set: JsonKey[], o: JsonKey): void {
+	if (!set.some((x) => isDeepStrictEqual(x, o))) {
+		set.push(o);
+	}
+}
+
+function setContains(set: JsonKey[], o: JsonKey): boolean {
+	return set.some((x) => isDeepStrictEqual(x, o));
+}
+
+/**
+ * The keys that may sign: `use: sig` or no `use`.
+ *
+ * upstream: condition/client/AbstractCompareJwks.java filterJsonArrayToSetContainingSigningKeys
+ */
+function signingKeysOf(jwks: Jwks): JsonKey[] {
+	const filtered: JsonKey[] = [];
+	for (const key of jwks.keys as unknown as JsonKey[]) {
+		// 'use' attribute is completely optional, so we include use: sig or no use claim
+		if (key["use"] == null || key["use"] === "sig") {
+			addToSet(filtered, key);
+		}
+	}
+	return filtered;
+}
+
+/** The public key components, kty and kid of each key (so that key lists can be compared) */
+function pubKeysWithKeyId(c: Condition, inputKeys: JsonKey[]): JsonKey[] {
+	const out: JsonKey[] = [];
+	for (const key of inputKeys) {
+		try {
+			const jwk = JWKUtil.parseJWK(JSON.stringify(key));
+			const requiredParamsJson: JsonKey = getRequiredParams(jwk as never);
+			requiredParamsJson["kid"] = (jwk["kid"] as string | undefined) ?? null;
+			addToSet(out, requiredParamsJson);
+		} catch (e) {
+			if (e instanceof ParseException) {
+				c.failureFrom("Error parsing JWK key", e, { key });
+			}
+			throw e;
+		}
+	}
+	return out;
+}
+
+/**
+ * The rotated key set has a signing key the original did not: new kid and new key material.
+ *
+ * upstream: condition/client/VerifyNewJwksHasNewSigningKey.java (AbstractCompareJwks)
+ */
+export function verifyNewJwksHasNewSigningKey(originalJwks: Jwks, newJwks: Jwks, ...requirements: string[]): void {
+	const c: Condition = condition("VerifyNewJwksHasNewSigningKey", ...requirements);
+	// This condition would be a lot easier to write/more robust if we knew which key the OP was & now is using
+	// to sign id_tokens - but the python version of this test doesn't do an authentication
+	const originalSigningKeys = signingKeysOf(originalJwks);
+	const latestSigningKeys = signingKeysOf(newJwks);
+	const origSigningPubKeys = pubKeysWithKeyId(c, originalSigningKeys);
+	const latestSigningPubKeys = pubKeysWithKeyId(c, latestSigningKeys);
+	const keysOnlyInNew = latestSigningPubKeys.filter((k) => !setContains(origSigningPubKeys, k));
+	if (keysOnlyInNew.length === 0) {
+		c.failure("No new keys with 'use':'sig' (or no 'use') found", {
+			original_signing_keys: originalSigningKeys,
+			latest_signing_keys: latestSigningKeys,
+		});
+	}
+	// for each new key, verify it is actually new
+	for (const newKeyToCheck of keysOnlyInNew) {
+		const kid = String(newKeyToCheck["kid"]);
+		if (originalSigningKeys.some((mk) => String(mk["kid"]) === kid)) {
+			c.failure("One of the new keys uses the same kid as one of the original keys", {
+				original_signing_keys: originalSigningKeys,
+				latest_signing_keys: latestSigningKeys,
+				bad_kid: kid,
+			});
+		}
+		const kty = String(newKeyToCheck["kty"]);
+		let field: string;
+		switch (kty) {
+			case "RSA":
+				field = "n";
+				break;
+			case "EC":
+				// it seems sufficient for 'x' to be the same, no need to check 'y'
+				field = "x";
+				break;
+			default:
+				return c.failure("unknown key type '" + kty + "' found", { jwk: newKeyToCheck });
+		}
+		const exponent = String(newKeyToCheck[field]);
+		if (originalSigningKeys.some((mk) => mk[field] != null && String(mk[field]) === exponent)) {
+			c.failure("One of the new keys uses the same exponent as one of the original keys", {
+				original_signing_keys: originalSigningKeys,
+				latest_signing_keys: latestSigningKeys,
+				["bad_" + field]: exponent,
+			});
+		}
+	}
+	c.success("Found new keys", { new_signing_keys: keysOnlyInNew });
+}
+
+/** upstream: condition/client/VerifyNewJwksStillHasOldSigningKey.java (AbstractCompareJwks) */
+export function verifyNewJwksStillHasOldSigningKey(originalJwks: Jwks, newJwks: Jwks, ...requirements: string[]): void {
+	const c: Condition = condition("VerifyNewJwksStillHasOldSigningKey", ...requirements);
+	const originalSigningKeys = signingKeysOf(originalJwks);
+	const latestSigningKeys = signingKeysOf(newJwks);
+	const keysInBoth = originalSigningKeys.filter((k) => setContains(latestSigningKeys, k));
+	if (keysInBoth.length === 0) {
+		c.failure(
+			"None of the previous present keys (with 'use':'sig' or no 'use') are still present. The specification says 'The JWK Set document at the jwks_uri SHOULD retain recently decommissioned signing keys for a reasonable period of time to facilitate a smooth transition.'.",
+			{ original_signing_keys: originalSigningKeys, latest_signing_keys: latestSigningKeys },
+		);
+	}
+	c.success("Some keys are in both the old and new JWKS", { signing_keys_in_both: keysInBoth });
 }

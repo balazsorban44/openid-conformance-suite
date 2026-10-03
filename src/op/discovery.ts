@@ -153,13 +153,15 @@ export function extractTLSTestValuesFromServerConfiguration(metadata: ServerMeta
 }
 
 /** upstream: condition/client/AbstractValidateJsonArray.java */
-function validateJsonArray(
+export function validateJsonArray(
 	c: Condition,
 	metadata: ServerMetadata,
 	key: string,
 	expected: string[],
 	minimumMatchesRequired: number,
-	errorMessageNotEnough: string,
+	errorMessageNotEnough: string | null,
+	/** upstream elementsEqual (AbstractValidateResponseTypesArray compares response types as sets) */
+	elementsEqual: (expected: string, actual: string) => boolean = (a, b) => a === b,
 ): void {
 	const actual = metadata[key];
 	let error: string | null = null;
@@ -167,7 +169,9 @@ function validateJsonArray(
 		error = key + ": not found";
 	} else if (!Array.isArray(actual)) {
 		error = "'" + key + "' should be an array";
-	} else if (expected.filter((v) => actual.includes(v)).length < minimumMatchesRequired) {
+	} else if (
+		expected.filter((v) => actual.some((a) => elementsEqual(v, a as string))).length < minimumMatchesRequired
+	) {
 		error = errorMessageNotEnough;
 	}
 	if (error != null) {
@@ -375,7 +379,7 @@ export function checkDiscoveryEndpointReturnedJsonContentType(
  *
  * upstream: condition/client/AbstractJsonUriIsValidAndHttps.java (validate)
  */
-function validateJsonUriIsHttps(c: Condition, metadata: ServerMetadata, key: string): void {
+export function validateJsonUriIsHttps(c: Condition, metadata: ServerMetadata, key: string): void {
 	const value = metadata[key];
 	if (value == null) {
 		c.failure(key + ": URL not found");
@@ -423,7 +427,7 @@ export function checkDiscCheckSessionIframe(metadata: ServerMetadata, ...require
 }
 
 /** upstream: condition/client/AbstractValidateJsonBoolean.java */
-function validateJsonBoolean(
+export function validateJsonBoolean(
 	c: Condition,
 	metadata: ServerMetadata,
 	key: string,

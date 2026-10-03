@@ -160,6 +160,16 @@ export function skipped(
 	missing: { object: string } | { element: [string, string] } | { string: string },
 	...requirements: string[]
 ): void {
+	skippedWithResult("INFO", name, missing, ...requirements);
+}
+
+/** skipped() for a call whose `onSkip` is not INFO (upstream `.onSkip(ConditionResult.WARNING)`) */
+export function skippedWithResult(
+	result: "INFO" | "WARNING",
+	name: string,
+	missing: { object: string } | { element: [string, string] } | { string: string },
+	...requirements: string[]
+): void {
 	const fields: LogFields =
 		"object" in missing
 			? { msg: "Skipped evaluation due to missing required object: " + missing.object, expected: missing.object }
@@ -170,7 +180,7 @@ export function skipped(
 						object: missing.element[0],
 						path: missing.element[1],
 					};
-	fields["result"] = "INFO";
+	fields["result"] = result;
 	// upstream logs the requirements of a skipped call even when there are none
 	fields["requirements"] = requirements;
 	currentContext().log.log(name, fields);
@@ -183,8 +193,8 @@ export function logModule(fields: LogFields | string): void {
 }
 
 /**
- * Upstream's fireTestSkipped(msg): logs the SKIPPED entry under the module's name. The test then calls
- * `test.skip(true, reason)` (Playwright's own skip, which ends the test).
+ * Upstream's fireTestSkipped(msg): logs the SKIPPED entry under the module's name. The test then ends with
+ * Playwright's own skip (`skipTest(reason)` in tests/fixtures.ts, `rp.skipTest(reason)`).
  */
 export function logTestSkipped(reason: string): void {
 	logModule({ result: "SKIPPED", msg: "The test was skipped: " + reason });

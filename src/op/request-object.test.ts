@@ -64,3 +64,11 @@ describe("request object by reference", () => {
 		]);
 	});
 });
+
+describe("serializeRequestObjectWithNullAlgorithm", () => {
+	test("claims with null values are left out (JWTClaimsSet.toJSONObject())", () => {
+		const jwt = serializeRequestObjectWithNullAlgorithm({ a: "b", gone: null });
+		const [, claims] = jwt.split(".");
+		expect(JSON.parse(Buffer.from(claims, "base64url").toString())).toEqual({ a: "b" });
+	});
+});

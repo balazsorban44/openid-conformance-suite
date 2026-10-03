@@ -7,7 +7,8 @@
  *   });
  *
  * - `op`: the OP under test, discovered (or configured), its keys fetched and checked, plus the suite's server,
- *   scripted browser and event log for this test. One per test.
+ *   scripted browser and event log for this test. One per test. `registrationOp` is the same OP without the keys
+ *   (the modules that only register clients, upstream AbstractOIDCCDynamicRegistrationTest).
  * - `client` / `client2`: the client(s), dynamically registered or taken from the configuration (per the
  *   client_registration variant); a registered client is unregistered after the test.
  * - `configureClient(setup?)`: the same client set up where the test calls it, with what the module changes about it
@@ -16,6 +17,7 @@
  * - `rp`: for RP tests, the emulated OP (`rp.start(options)`, on the test's own server; its issuer is the server's
  *   base url) and the client driver that makes the RP under test log in against it (`rp.driveClient()`).
  * - `variant`: the variant (the plan's fixed values + the selection from CONFORMANCE_VARIANT / the project).
+ * - `skipTest(reason)` (a function, not a fixture): upstream's fireTestSkipped.
  * - `suiteTarget` (suite-vs-suite, the config's `suite_target`): this suite's emulated OP, started per test on a
  *   server and log of its own, as the OP the `op` fixture discovers (tests/suite-target.ts); null otherwise.
  *
@@ -34,12 +36,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as discovery from "../src/op/discovery.ts";
 import { loadServerKeys } from "../src/op/jwks.ts";
-import type { Op, OpVariant } from "../src/op/op.ts";
+import type { Op, OpVariant, RegistrationOp } from "../src/op/op.ts";
 import * as registration from "../src/op/registration.ts";
 import type { ClientSetup, RegisteredClient } from "../src/op/registration.ts";
 import { projects } from "../src/runner/projects.ts";
 import { createBrowser } from "../src/suite/browser.ts";
-import { block, condition, soft } from "../src/suite/conditions.ts";
+import { block, condition, logTestSkipped, soft } from "../src/suite/conditions.ts";
 import { loadConfig, moduleConfig, readConfig, type LoadedConfig, type TestConfig } from "../src/suite/config.ts";
 import { analyzeResultLogs, describeProblems } from "../src/suite/expected.ts";
 import { createLog, renderLogHtml, resultOf, useLog, type EventLog, type LogEntry } from "../src/suite/log.ts";
@@ -83,6 +85,7 @@ interface Fixtures {
 	variant: OpVariant;
 	conformance: Conformance;
 	suiteTarget: SuiteTarget | null;
+	registrationOp: RegistrationOp;
 	op: Op;
 	client: RegisteredClient;
 	client2: RegisteredClient;
@@ -98,6 +101,16 @@ interface Fixtures {
  * Registered clients are unregistered after the test, in the order they were set up.
  */
 export type ConfigureClient = (setup?: ClientSetup) => Promise<RegisteredClient>;
+
+/**
+ * Ends the test as skipped, as upstream's fireTestSkipped does: the SKIPPED entry in the module's log (the module
+ * result is SKIPPED, compared with the expected skips of the configuration) and Playwright's skip.
+ */
+export function skipTest(reason: string): never {
+	logTestSkipped(reason);
+	test.skip(true, reason);
+	throw new Error("unreachable: test.skip() ends the test");
+}
 
 /** "[k=v][k2=v2]" -> { k: v, k2: v2 } */
 export function parseVariant(s: string): Record<string, string> {
@@ -224,7 +237,8 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 		}
 	},
 
-	op: async ({ conformance, variant, suiteTarget: _suiteTarget }, use) => {
+	// the emulated OP (suite-vs-suite) must be up before discovery
+	registrationOp: async ({ conformance, variant, suiteTarget: _suiteTarget }, use) => {
 		const { config, log, server, browser, testName } = conformance;
 		// upstream: condition/client/CreateRedirectUri.java
 		const redirectUri = server.baseUrl + "/callback";
@@ -236,15 +250,12 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 				: (await discovery.getDynamicServerConfiguration(config)).metadata;
 		// make sure the server configuration passes some basic sanity checks
 		discovery.checkServerConfiguration(metadata);
-		discovery.extractTLSTestValuesFromServerConfiguration(metadata);
-		const jwks = await loadServerKeys(metadata);
 		await use({
 			testName,
 			testId: log.testId,
 			config,
 			variant,
 			metadata,
-			jwks,
 			baseUrl: server.baseUrl,
 			redirectUri,
 			server,
@@ -253,7 +264,14 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 		});
 	},
 
-	configureClient: async ({ op }, use) => {
+	op: async ({ registrationOp }, use) => {
+		discovery.extractTLSTestValuesFromServerConfiguration(registrationOp.metadata);
+		const jwks = await loadServerKeys(registrationOp.metadata);
+		await use({ ...registrationOp, jwks });
+	},
+
+	// the OP without keys is enough to register a client, so modules on `registrationOp` can configure clients too
+	configureClient: async ({ registrationOp: op }, use) => {
 		const configured: { registered: RegisteredClient; setup: ClientSetup }[] = [];
 		try {
 			await use(async (setup = {}) => {
@@ -289,11 +307,12 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 		}
 	},
 
-	client: async ({ configureClient }, use) => {
+	// the OP (and its keys) is set up before the client, as upstream's configure does
+	client: async ({ op: _op, configureClient }, use) => {
 		await use(await configureClient());
 	},
 
-	client2: async ({ configureClient }, use) => {
+	client2: async ({ op: _op, configureClient }, use) => {
 		await use(await configureClient({ configKey: "client2" }));
 	},
 });
@@ -303,9 +322,9 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
  * authentication.
  *
  * upstream: AbstractOIDCCServerTest.configureClient / completeClientConfiguration (AbstractOIDCCMultipleClient for
- * client2)
+ * client2; AbstractOIDCCDynamicRegistrationTest.configureDynamicClient with `checkClientAuthSupported: false`)
  */
-async function setUpClient(op: Op, setup: ClientSetup): Promise<RegisteredClient> {
+async function setUpClient(op: RegistrationOp, setup: ClientSetup): Promise<RegisteredClient> {
 	const configKey = setup.configKey ?? "client";
 	let registered: RegisteredClient;
 	if (op.variant.client_registration === "static_client") {
@@ -319,13 +338,18 @@ async function setUpClient(op: Op, setup: ClientSetup): Promise<RegisteredClient
 			configKey,
 			responseType: op.variant.response_type,
 			clientAuthType: op.variant.client_auth_type,
-			redirectUri: op.redirectUri,
+			redirectUri: setup.redirectUri ?? op.redirectUri,
+			generateKeys: setup.generateKeys,
+			jwksUri: setup.jwksUri,
 			customize: setup.customize,
 		});
 	}
-	registration.setScopeInClientConfigurationToOpenId(registered.client);
-	setup.completeClientConfiguration?.(op, registered.client);
-	if (op.variant.server_metadata === "discovery") {
+	if (setup.completeClientConfiguration) {
+		setup.completeClientConfiguration(op, registered.client);
+	} else {
+		registration.setScopeInClientConfigurationToOpenId(registered.client);
+	}
+	if (op.variant.server_metadata === "discovery" && setup.checkClientAuthSupported !== false) {
 		soft(() => discovery.ensureServerConfigurationSupportsClientAuth(op.metadata, op.variant.client_auth_type));
 	}
 	return registered;

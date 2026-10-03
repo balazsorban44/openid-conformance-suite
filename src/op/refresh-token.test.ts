@@ -3,7 +3,11 @@ import { ConditionFailed } from "../suite/conditions.ts";
 import type { ParsedJwt } from "../suite/jose.ts";
 import { useTestLog } from "../suite/testing.ts";
 import { compareIdTokenClaims } from "./id-token.ts";
-import { checkTokenEndpointCacheHeaders, ensureAccessTokenValuesAreDifferent } from "./refresh-token.ts";
+import {
+	checkTokenEndpointCacheHeaders,
+	createRefreshTokenRequest,
+	ensureAccessTokenValuesAreDifferent,
+} from "./refresh-token.ts";
 import type { TokenResponse } from "./token.ts";
 
 const t = useTestLog();
@@ -49,7 +53,11 @@ describe("compareIdTokenClaims (OIDCC-12.2)", () => {
 
 	test("same iss, sub, aud, auth_time and a later iat pass", () => {
 		compareIdTokenClaims(idToken(base), idToken(refreshed), "OIDCC-12.2");
-		expect(t.entries().at(-1)).toMatchObject({ result: "SUCCESS", msg: "Validated id token claims successfully" });
+		expect(t.entries().at(-1)).toMatchObject({
+			result: "SUCCESS",
+			msg: "Validated id token claims successfully",
+			azp: "Id tokens do not contain azp claims",
+		});
 	});
 
 	test.each([
@@ -72,5 +80,14 @@ describe("compareIdTokenClaims (OIDCC-12.2)", () => {
 		expect(() =>
 			compareIdTokenClaims(idToken({ ...base, aud: ["a", "b"] }), idToken({ ...refreshed, aud: ["a"] })),
 		).toThrow(ConditionFailed);
+	});
+});
+
+describe("createRefreshTokenRequest", () => {
+	test("starts a new request without headers", () => {
+		expect(createRefreshTokenRequest("rt")).toEqual({
+			form: { grant_type: "refresh_token", refresh_token: "rt" },
+			headers: {},
+		});
 	});
 });

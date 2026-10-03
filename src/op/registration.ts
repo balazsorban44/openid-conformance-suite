@@ -2,10 +2,12 @@
  * The client the suite uses against the OP: dynamically registered (OpenID Connect Dynamic Client Registration)
  * or taken from the test configuration, and unregistered after the test.
  */
+import { calculateJwkThumbprint } from "jose";
 import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
 import { endpointResponse, HttpError, jsonBody, request, type EndpointResponse } from "../suite/http.ts";
 import { generateRsaJwk, privateJwks, publicJwks, type Jwks } from "../suite/jose.ts";
+import { randomAlphanumeric } from "../suite/random.ts";
 import { JWKUtil } from "../util/JWKUtil.ts";
 import { ParseException } from "../util/nimbus/errors.ts";
 import type { ServerMetadata } from "./discovery.ts";
@@ -102,6 +104,13 @@ export interface RegistrationRequestOptions {
 	clientAuthType: string;
 	redirectUri: string;
 	publicJwks: Jwks;
+	/**
+	 * Register the keys by reference instead of by value: upstream's modules replace AddPublicJwksToDynamicRegistrationRequest
+	 * with AddJwksUriToDynamicRegistrationRequest (the suite serves the keys at this URL)
+	 */
+	jwksUri?: string;
+	/** What the module adds to the request after the OIDCC defaults (upstream createDynamicClientRegistrationRequest overrides) */
+	customize?: (registrationRequest: Record<string, unknown>) => void;
 }
 
 /**
@@ -138,13 +147,20 @@ export function createDynamicRegistrationRequest(
 		addGrantType("AddImplicitGrantTypeToDynamicRegistrationRequest", "implicit");
 	}
 
-	req["jwks"] = opts.publicJwks;
-	condition("AddPublicJwksToDynamicRegistrationRequest", "RFC7591-2").log(
-		"Added client public JWKS to dynamic registration request",
-		{
+	if (opts.jwksUri != null) {
+		req["jwks_uri"] = opts.jwksUri;
+		condition("AddJwksUriToDynamicRegistrationRequest").log("Added jwks_uri to dynamic registration request", {
 			dynamic_registration_request: req,
-		},
-	);
+		});
+	} else {
+		req["jwks"] = opts.publicJwks;
+		condition("AddPublicJwksToDynamicRegistrationRequest", "RFC7591-2").log(
+			"Added client public JWKS to dynamic registration request",
+			{
+				dynamic_registration_request: req,
+			},
+		);
+	}
 
 	req["token_endpoint_auth_method"] = opts.clientAuthType;
 	condition("AddTokenEndpointAuthMethodToDynamicRegistrationRequestFromEnvironment").log(
@@ -170,6 +186,7 @@ export function createDynamicRegistrationRequest(
 	condition("AddContactsToDynamicRegistrationRequest").log("Added contacts array to dynamic registration request", {
 		dynamic_registration_request: req,
 	});
+	opts.customize?.(req);
 	return req;
 }
 
@@ -310,23 +327,26 @@ export async function registerClient(opts: {
 	responseType: string;
 	clientAuthType: string;
 	redirectUri: string;
-	/** What the module adds to the registration request (upstream createDynamicClientRegistrationRequest overrides) */
+	/** The client's keys, when a module does not use GenerateRS256ClientJWKs (e.g. GenerateRS256ClientJWKsWithKeyID) */
+	generateKeys?: () => ClientKeys | Promise<ClientKeys>;
+	/** See {@link RegistrationRequestOptions.jwksUri} */
+	jwksUri?: string;
+	/** See {@link RegistrationRequestOptions.customize} */
 	customize?: (registrationRequest: Record<string, unknown>) => void;
 }): Promise<RegisteredClient> {
 	const original = storeOriginalClientConfiguration(opts.config, opts.configKey);
 	const clientName = extractClientNameFromStoredConfig(original);
 	const initialAccessToken = extractInitialAccessTokenFromStoredConfig(original);
 
-	const keys = generateRS256ClientJWKs();
-	soft(() => checkDistinctKeyIdValueInClientJWKs(keys.jwks, "RFC7517-4.5"));
-	const registrationRequest = createDynamicRegistrationRequest(opts.testId, {
+	const { request: registrationRequest, keys } = await createDynamicClientRegistrationRequest(opts.testId, {
 		clientName,
 		responseType: opts.responseType,
 		clientAuthType: opts.clientAuthType,
 		redirectUri: opts.redirectUri,
-		publicJwks: keys.publicJwks,
+		generateKeys: opts.generateKeys,
+		jwksUri: opts.jwksUri,
+		customize: opts.customize,
 	});
-	opts.customize?.(registrationRequest);
 
 	const response = await callDynamicRegistrationEndpoint(
 		opts.metadata,
@@ -638,16 +658,14 @@ export function checkRegistrationClientEndpointContentType(
 	c.success("registration_client_endpoint_response Content-Type: header is " + expected);
 }
 
-/**
- * upstream: condition/client/CheckErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata.java
- * (AbstractCheckErrorFromDynamicRegistrationEndpoint)
- */
-export function checkErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata(
+/** upstream: condition/client/AbstractCheckErrorFromDynamicRegistrationEndpoint.java */
+function checkErrorFromDynamicRegistrationEndpoint(
+	name: string,
 	response: EndpointResponse,
-	...requirements: string[]
+	permitted: string[],
+	requirements: string[],
 ): void {
-	const c: Condition = condition("CheckErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata", ...requirements);
-	const permitted = ["invalid_client_metadata"];
+	const c: Condition = condition(name, ...requirements);
 	const error = (response.body_json as Record<string, unknown> | undefined)?.["error"];
 	if (typeof error !== "string" || !error) {
 		c.failure("'error' field not found in response from dynamic registration endpoint");
@@ -656,6 +674,32 @@ export function checkErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata
 		c.failure("'error' field has unexpected value", { permitted, actual: error });
 	}
 	c.success("Dynamic registration endpoint returned 'error'", { permitted, error });
+}
+
+/** upstream: condition/client/CheckErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata.java */
+export function checkErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromDynamicRegistrationEndpoint(
+		"CheckErrorFromDynamicRegistrationEndpointIsInvalidClientMetadata",
+		response,
+		["invalid_client_metadata"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/CheckErrorFromDynamicRegistrationEndpointIsInvalidRedirectUriOrInvalidClientMetadata.java */
+export function checkErrorFromDynamicRegistrationEndpointIsInvalidRedirectUriOrInvalidClientMetadata(
+	response: EndpointResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromDynamicRegistrationEndpoint(
+		"CheckErrorFromDynamicRegistrationEndpointIsInvalidRedirectUriOrInvalidClientMetadata",
+		response,
+		["invalid_redirect_uri", "invalid_client_metadata"],
+		requirements,
+	);
 }
 
 /**
@@ -710,8 +754,22 @@ export interface ClientSetup {
 	 * (upstream createDynamicClientRegistrationRequest overrides; not called for a static client)
 	 */
 	customize?: (registrationRequest: Record<string, unknown>) => void;
-	/** Runs after SetScopeInClientConfigurationToOpenId (upstream completeClientConfiguration, e.g. the scope) */
+	/**
+	 * The module's completeClientConfiguration (e.g. the scope), in place of the default
+	 * SetScopeInClientConfigurationToOpenId
+	 */
 	completeClientConfiguration?: (op: Pick<Op, "metadata" | "variant">, client: Client) => void;
+	/**
+	 * False for the modules built on upstream's AbstractOIDCCDynamicRegistrationTest: their client is registered and
+	 * its scope set, without the EnsureServerConfigurationSupports<client authentication> check. Default true.
+	 */
+	checkClientAuthSupported?: boolean;
+	/** The redirect_uri to register (default: the suite's, `op.redirectUri`) */
+	redirectUri?: string;
+	/** See registerClient(): keys other than GenerateRS256ClientJWKs' (e.g. generateRS256ClientJWKsWithKeyID) */
+	generateKeys?: () => ClientKeys | Promise<ClientKeys>;
+	/** See createDynamicRegistrationRequest(): the keys are registered by reference, served by the suite at this URL */
+	jwksUri?: string;
 }
 
 /** upstream: condition/client/AddIdTokenSigningAlgNoneToDynamicRegistrationRequest.java */
@@ -784,4 +842,270 @@ export function setScopeInClientConfigurationToOpenIdOfflineAccessIfServerSuppor
 		return;
 	}
 	setScopeInClientConfiguration(c, client, "openid offline_access", "as 'scope_supported' contains 'offline_access'");
+}
+
+/** upstream: condition/client/GenerateRS256ClientJWKsWithKeyID.java (the kid is the key's thumbprint) */
+export async function generateRS256ClientJWKsWithKeyID(): Promise<ClientKeys> {
+	const key = generateRsaJwk("RS256", "sig");
+	key["kid"] = await calculateJwkThumbprint(key as never, "sha256");
+	const jwks = privateJwks({ keys: [key] });
+	const pub = publicJwks({ keys: [key] });
+	condition("GenerateRS256ClientJWKsWithKeyID").success("Generated client JWKs", {
+		client_jwks: jwks,
+		public_client_jwks: pub,
+	});
+	return { jwks, publicJwks: pub };
+}
+
+/**
+ * The client_name and initial access token of the configuration's `client` (or `client2`) object, as the modules
+ * that register a client themselves take them.
+ *
+ * upstream: AbstractOIDCCServerTest.configureClient / AbstractOIDCCDynamicRegistrationTest.configure:
+ * StoreOriginalClientConfiguration, ExtractClientNameFromStoredConfig, ExtractInitialAccessTokenFromStoredConfig
+ */
+export function extractDynamicRegistrationSettings(
+	config: TestConfig,
+	configKey = "client",
+): { clientName: string | null; initialAccessToken: string | null } {
+	const original = storeOriginalClientConfiguration(config, configKey);
+	return {
+		clientName: extractClientNameFromStoredConfig(original),
+		initialAccessToken: extractInitialAccessTokenFromStoredConfig(original),
+	};
+}
+
+/**
+ * The registration request of the OIDCC tests with freshly generated keys (GenerateRS256ClientJWKs unless
+ * `generateKeys`, CheckDistinctKeyIdValueInClientJWKs, createDynamicRegistrationRequest), without calling the endpoint:
+ * registerClient() sends it, the modules that expect the registration to fail send it themselves.
+ */
+export async function createDynamicClientRegistrationRequest(
+	testId: string,
+	opts: Omit<RegistrationRequestOptions, "publicJwks"> & { generateKeys?: () => ClientKeys | Promise<ClientKeys> },
+): Promise<{ request: Record<string, unknown>; keys: ClientKeys }> {
+	const keys = await (opts.generateKeys ?? generateRS256ClientJWKs)();
+	soft(() => checkDistinctKeyIdValueInClientJWKs(keys.jwks, "RFC7517-4.5"));
+	const registrationRequest = createDynamicRegistrationRequest(testId, { ...opts, publicJwks: keys.publicJwks });
+	return { request: registrationRequest, keys };
+}
+
+/** What a `dynamic_registration_request` entry logs */
+function logRegistrationRequest(name: string, msg: string, req: Record<string, unknown>): void {
+	condition(name).log(msg, { dynamic_registration_request: req });
+}
+
+/** A URL on the suite's host (scheme, host and port of `baseUrl`) */
+function suiteHostUrl(c: Condition, baseUrl: string, path: string, what: string): string {
+	try {
+		const base = new URL(baseUrl);
+		// new URI(scheme, null, host, port, path, null, null)
+		return base.protocol + "//" + base.hostname + (base.port !== "" ? ":" + base.port : "") + path;
+	} catch (e) {
+		return c.failureFrom("Failed to generate " + what + " URI", e);
+	}
+}
+
+/** upstream: condition/client/CreateLogoUri.java */
+export function createLogoUri(baseUrl: string): string {
+	const c: Condition = condition("CreateLogoUri");
+	const logoUri = suiteHostUrl(c, baseUrl, "/images/openid.png", "logo");
+	c.log("Generated logo URI", { logo_uri: logoUri });
+	return logoUri;
+}
+
+/** upstream: condition/client/AddLogoUriToDynamicRegistrationRequest.java */
+export function addLogoUriToDynamicRegistrationRequest(req: Record<string, unknown>, logoUri: string): void {
+	req["logo_uri"] = logoUri;
+	logRegistrationRequest(
+		"AddLogoUriToDynamicRegistrationRequest",
+		"Added logo_uri to dynamic registration request",
+		req,
+	);
+}
+
+/**
+ * As per https://openid.net/specs/openid-connect-registration-1_0.html#Impersonation the policy_uri should have the
+ * same host as the redirect_uris, so it is a page on the suite's host.
+ *
+ * upstream: condition/client/CreatePolicyUri.java
+ */
+export function createPolicyUri(baseUrl: string): string {
+	const c: Condition = condition("CreatePolicyUri");
+	// UPSTREAM: the failure message says "logo URI" although this condition generates the policy URI
+	const policyUri = suiteHostUrl(c, baseUrl, "/login.html", "logo");
+	c.log("Generated policy URI", { policy_uri: policyUri });
+	return policyUri;
+}
+
+/** upstream: condition/client/AddPolicyUriToDynamicRegistrationRequest.java */
+export function addPolicyUriToDynamicRegistrationRequest(req: Record<string, unknown>, policyUri: string): void {
+	req["policy_uri"] = policyUri;
+	logRegistrationRequest(
+		"AddPolicyUriToDynamicRegistrationRequest",
+		"Added policy_uri to dynamic registration request",
+		req,
+	);
+}
+
+/** upstream: condition/client/CreateTosUri.java */
+export function createTosUri(): string {
+	const tosUri = "https://openid.net";
+	condition("CreateTosUri").log("Generated TOS URI", { tos_uri: tosUri });
+	return tosUri;
+}
+
+/** upstream: condition/client/AddTosUriToDynamicRegistrationRequest.java */
+export function addTosUriToDynamicRegistrationRequest(req: Record<string, unknown>, tosUri: string): void {
+	req["tos_uri"] = tosUri;
+	logRegistrationRequest("AddTosUriToDynamicRegistrationRequest", "Added tos_uri to dynamic registration request", req);
+}
+
+/** A REVIEW entry asking for a screenshot; the browser automation fills the placeholder ("update-image-placeholder") */
+function browserInteractionPlaceholder(name: string, msg: string, requirements: string[]): string {
+	const placeholder = randomAlphanumeric(10);
+	condition(name, ...requirements).review(msg, { upload: placeholder });
+	return placeholder;
+}
+
+/** upstream: condition/client/ExpectLoginPageWithLogo.java; returns the placeholder to wait for */
+export function expectLoginPageWithLogo(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectLoginPageWithLogo",
+		"The login page should show the OpenID logo (as displayed on this server) - upload a screenshot of the login page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectLoginPageWithPolicyLink.java; returns the placeholder to wait for */
+export function expectLoginPageWithPolicyLink(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectLoginPageWithPolicyLink",
+		"The login page should show a link to a policy document - upload a screenshot of the login page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectLoginPageWithTosLink.java; returns the placeholder to wait for */
+export function expectLoginPageWithTosLink(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectLoginPageWithTosLink",
+		"The login page should show a link to a TOS document - upload a screenshot of the login page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/CreateJwksUri.java: the suite serves the client's public keys at `<base url>/client1_jwks` */
+export function createJwksUri(baseUrl: string): string {
+	const c: Condition = condition("CreateJwksUri");
+	if (baseUrl.length === 0) {
+		c.failure("Base URL is empty");
+	}
+	// see https://gitlab.com/openid/conformance-suite/wikis/Developers/Build-&-Run#ciba-notification-endpoint
+	const jwksUri = baseUrl + "/client1_jwks";
+	c.success("Created JWKs URI", { jwks_uri: jwksUri });
+	return jwksUri;
+}
+
+/** upstream: condition/client/CreateSectorRedirectUris.java */
+export function createSectorRedirectUris(redirectUri: string): string[] {
+	const value = [redirectUri];
+	condition("CreateSectorRedirectUris").log("Created sector redirect URIs", { sector_redirect_uris: { value } });
+	return value;
+}
+
+/** upstream: condition/client/CreateInvalidSectorRedirectUris.java */
+export function createInvalidSectorRedirectUris(): string[] {
+	const value = ["https://example.com/op"];
+	condition("CreateInvalidSectorRedirectUris").log("Created invalid sector redirect URIs", {
+		sector_redirect_uris: { value },
+	});
+	return value;
+}
+
+/** upstream: condition/client/AddSubjectTypePairwiseToDynamicRegistrationRequest.java */
+export function addSubjectTypePairwiseToDynamicRegistrationRequest(req: Record<string, unknown>): void {
+	req["subject_type"] = "pairwise";
+	logRegistrationRequest(
+		"AddSubjectTypePairwiseToDynamicRegistrationRequest",
+		"Added pairwise subject_type to dynamic registration request",
+		req,
+	);
+}
+
+/** upstream: condition/client/AddSectorIdentifierUriToDynamicRegistrationRequest.java */
+export function addSectorIdentifierUriToDynamicRegistrationRequest(
+	req: Record<string, unknown>,
+	baseUrl: string,
+): void {
+	// the sector_identifier_uri must be reachable by the OP: it is served by the suite
+	req["sector_identifier_uri"] = baseUrl + "/redirect_uris.json";
+	logRegistrationRequest(
+		"AddSectorIdentifierUriToDynamicRegistrationRequest",
+		"Added sector_identifier_uri to dynamic registration request",
+		req,
+	);
+}
+
+/** upstream: condition/client/AddFragmentToRedirectUri.java */
+export function addFragmentToRedirectUri(redirectUri: string): string {
+	const url = new URL(redirectUri);
+	url.hash = "foobar";
+	const withFragment = url.toString();
+	condition("AddFragmentToRedirectUri").log("Updated redirect_uri", { redirect_uri: withFragment });
+	return withFragment;
+}
+
+/** upstream: condition/client/AddQueryToRedirectUri.java */
+export function addQueryToRedirectUri(redirectUri: string): string {
+	const url = new URL(redirectUri);
+	url.searchParams.append("bar", "foo");
+	const withQuery = url.toString();
+	condition("AddQueryToRedirectUri").log("Updated redirect_uri", { redirect_uri: withQuery });
+	return withQuery;
+}
+
+/** upstream: condition/client/AddMultipleRedirectUriToDynamicRegistrationRequest.java */
+export function addMultipleRedirectUriToDynamicRegistrationRequest(
+	req: Record<string, unknown>,
+	redirectUri: string,
+): void {
+	const c: Condition = condition("AddMultipleRedirectUriToDynamicRegistrationRequest");
+	if (!redirectUri) {
+		c.failure("No redirect_uri found");
+	}
+	req["redirect_uris"] = [redirectUri, "https://example.org/redirect"];
+	c.log("Added redirect_uris array to dynamic registration request", { dynamic_registration_request: req });
+}
+
+/** upstream: condition/client/AddIdTokenSigningAlgRS256ToDynamicRegistrationRequest.java */
+export function addIdTokenSigningAlgRS256ToDynamicRegistrationRequest(req: Record<string, unknown>): void {
+	req["id_token_signed_response_alg"] = "RS256";
+	logRegistrationRequest(
+		"AddIdTokenSigningAlgRS256ToDynamicRegistrationRequest",
+		"Added id_token_signed_response_alg to dynamic registration request",
+		req,
+	);
+}
+
+/** upstream: condition/client/AddUserinfoSignedResponseAlgRS256ToDynamicRegistrationRequest.java */
+export function addUserinfoSignedResponseAlgRS256ToDynamicRegistrationRequest(
+	req: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	req["userinfo_signed_response_alg"] = "RS256";
+	condition("AddUserinfoSignedResponseAlgRS256ToDynamicRegistrationRequest", ...requirements).log(
+		"Added userinfo_signed_response_alg=RS256 to dynamic registration request",
+		{ dynamic_registration_request: req },
+	);
+}
+
+/** upstream: condition/client/AddRequestObjectSigningAlgRS256ToDynamicRegistrationRequest.java */
+export function addRequestObjectSigningAlgRS256ToDynamicRegistrationRequest(req: Record<string, unknown>): void {
+	req["request_object_signing_alg"] = "RS256";
+	logRegistrationRequest(
+		"AddRequestObjectSigningAlgRS256ToDynamicRegistrationRequest",
+		"Added request_object_signing_alg to dynamic registration request",
+		req,
+	);
 }

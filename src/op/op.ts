@@ -25,6 +25,13 @@ export interface OpVariant {
 	[parameter: string]: string;
 }
 
+/**
+ * The OP without its keys (the `registrationOp` fixture): the redirect_uri, the metadata and CheckServerConfiguration,
+ * as upstream's AbstractOIDCCDynamicRegistrationTest.configure sets it up for the modules that only register clients.
+ * The `op` fixture builds on it (ExtractTLSTestValuesFromServerConfiguration, the OP's keys).
+ */
+export type RegistrationOp = Omit<Op, "jwks">;
+
 export interface Op {
 	/** The test module name (upstream testName), e.g. "oidcc-server" */
 	testName: string;

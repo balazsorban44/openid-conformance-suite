@@ -103,6 +103,8 @@ export async function addClientAssertionToRequest(
 	op: Pick<Op, "metadata">,
 	req: TokenRequest,
 	client: RegisteredClient,
+	/** `updateClaims`: what a module changes in the claims before they are signed (upstream: a condition inserted after CreateClientAuthenticationAssertionClaims) */
+	opts: { updateClaims?: (claims: Record<string, unknown>) => void } = {},
 ): Promise<void> {
 	const create: Condition = condition("CreateClientAuthenticationAssertionClaims");
 	const clientId = client.client.client_id;
@@ -124,6 +126,7 @@ export async function addClientAssertionToRequest(
 		exp: iat + 60,
 	};
 	create.success("Created client assertion claims", claims);
+	opts.updateClaims?.(claims);
 
 	const sign: Condition = condition("SignClientAuthenticationAssertion");
 	if (client.keys == null) {
@@ -466,9 +469,16 @@ export async function requestAuthorizationCode(
 	op: Pick<Op, "metadata">,
 	client: RegisteredClient,
 	req: TokenRequest,
+	/**
+	 * For modules that look at the response first (upstream overrides requestAuthorizationCode): the response of a
+	 * callTokenEndpoint() already made, and whether it must have status 200 (CheckTokenEndpointHttpStatus200)
+	 */
+	opts: { response?: TokenResponse; checkStatus?: boolean } = {},
 ): Promise<Tokens> {
-	const response = await callTokenEndpoint(op, req);
-	checkTokenEndpointHttpStatus200(response);
+	const response = opts.response ?? (await callTokenEndpoint(op, req));
+	if (opts.checkStatus !== false) {
+		checkTokenEndpointHttpStatus200(response);
+	}
 	checkIfTokenEndpointResponseError(response);
 	checkForAccessTokenValue(response);
 	const accessToken = extractAccessTokenFromTokenResponse(response);
@@ -610,4 +620,63 @@ export function addCodeVerifierToTokenEndpointRequest(
 	}
 	req.form["code_verifier"] = codeVerifier;
 	c.log({ ...req.form });
+}
+
+/**
+ * The audience of the client assertion is the OP's issuer instead of the token endpoint.
+ *
+ * upstream: condition/client/UpdateClientAuthenticationAssertionClaimsWithISSAud.java
+ */
+export function updateClientAuthenticationAssertionClaimsWithISSAud(
+	claims: Record<string, unknown>,
+	metadata: Pick<Op["metadata"], "issuer">,
+): void {
+	const c: Condition = condition("UpdateClientAuthenticationAssertionClaimsWithISSAud");
+	delete claims["aud"];
+	const audience = metadata.issuer;
+	if (!audience) {
+		c.failure("Couldn't find required configuration element", { issuer: audience });
+	}
+	claims["aud"] = audience;
+	c.success("Updated audience in client assertion claims", claims);
+}
+
+/** upstream: condition/client/CheckTokenEndpointHttpStatusIs400Allowing401ForInvalidClientError.java */
+export function checkTokenEndpointHttpStatusIs400Allowing401ForInvalidClientError(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckTokenEndpointHttpStatusIs400Allowing401ForInvalidClientError", ...requirements);
+	const httpStatus = res.status;
+	if (httpStatus == null) {
+		c.failure("Http status can not be null.");
+	}
+	const error = str(res.json, "error");
+	if (!error) {
+		c.failure("Couldn't find error field");
+	}
+	if (error === "invalid_client") {
+		if (httpStatus !== 400 && httpStatus !== 401) {
+			c.failure("Invalid http status for error invalid_client", { actual: httpStatus, expected: "400 or 401" });
+		}
+	} else if (httpStatus !== 400) {
+		c.failure("Http status must be 400 for token endpoint errors other than invalid_client", {
+			actual: httpStatus,
+			expected: 400,
+		});
+	}
+	c.success("Token endpoint http status code was " + httpStatus + " for error '" + error + "'");
+}
+
+/** upstream: condition/client/CheckErrorFromTokenEndpointResponseErrorInvalidClient.java */
+export function checkErrorFromTokenEndpointResponseErrorInvalidClient(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromTokenEndpointResponseError(
+		"CheckErrorFromTokenEndpointResponseErrorInvalidClient",
+		res,
+		["invalid_client"],
+		...requirements,
+	);
 }

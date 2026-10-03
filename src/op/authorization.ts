@@ -1360,3 +1360,61 @@ export async function authorizeWithinSeconds(
 		throw e;
 	}
 }
+
+/** upstream: condition/client/ExpectRedirectUriMissingErrorPage.java; returns the placeholder to wait for */
+export function expectRedirectUriMissingErrorPage(...requirements: string[]): string {
+	const placeholder = randomAlphanumeric(10);
+	condition("ExpectRedirectUriMissingErrorPage", ...requirements).review(
+		"Show an error page saying the redirect uri is missing from the request.",
+		{ upload: placeholder },
+	);
+	return placeholder;
+}
+
+/** upstream: condition/client/RemoveRedirectUriFromAuthorizationEndpointRequest.java */
+export function removeRedirectUriFromAuthorizationEndpointRequest(params: Record<string, unknown>): void {
+	delete params["redirect_uri"];
+	// upstream logs nothing: the framework notes that the condition ran
+	condition("RemoveRedirectUriFromAuthorizationEndpointRequest").log("Condition ran but did not log anything");
+}
+
+/** upstream: condition/client/AddQueryToRedirectUriInAuthorizationRequest.java */
+export function addQueryToRedirectUriInAuthorizationRequest(params: Record<string, unknown>): void {
+	const c: Condition = condition("AddQueryToRedirectUriInAuthorizationRequest");
+	if (!("redirect_uri" in params)) {
+		c.failure("redirect_uri was not found in authorization_endpoint_request");
+	}
+	const url = new URL(String(params["redirect_uri"]));
+	url.searchParams.append("foo", "bar");
+	const redirectUri = url.toString();
+	delete params["redirect_uri"];
+	params["redirect_uri"] = redirectUri;
+	c.log("Updated redirect_uri in authorization endpoint request", { redirect_uri: redirectUri });
+}
+
+/** upstream: condition/client/ReplaceRedirectUriQueryInAuthorizationRequest.java */
+export function replaceRedirectUriQueryInAuthorizationRequest(params: Record<string, unknown>): void {
+	const c: Condition = condition("ReplaceRedirectUriQueryInAuthorizationRequest");
+	if (!("redirect_uri" in params)) {
+		c.failure("redirect_uri was not found in authorization_endpoint_request");
+	}
+	// UPSTREAM: Spring's DefaultUriBuilderFactory does not normalise the URI; WHATWG URL does (e.g. an empty
+	// path of an http(s) URL becomes "/"), so the resulting string can differ slightly for such redirect URIs.
+	const url = new URL(String(params["redirect_uri"]));
+	url.search = "";
+	url.searchParams.append("foo", "bar");
+	const redirectUri = url.toString();
+	delete params["redirect_uri"];
+	params["redirect_uri"] = redirectUri;
+	c.log("Updated redirect_uri in authorization endpoint request", { redirect_uri: redirectUri });
+}
+
+/**
+ * The authorization endpoint answered with the redirect to the redirect_uri although the request was one it must
+ * not accept (upstream: AuthorizationEndpointRedirectedBackUnexpectedly).
+ */
+export function authorizationEndpointRedirectedBackUnexpectedly(): never {
+	return condition("AuthorizationEndpointRedirectedBackUnexpectedly").failure(
+		"Authorization server redirected back in a case where it should not",
+	);
+}

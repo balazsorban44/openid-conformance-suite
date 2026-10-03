@@ -7,8 +7,9 @@
  */
 import { condition, soft, type Condition } from "../suite/conditions.ts";
 import { endpointResponse, HttpError, request, type EndpointResponse } from "../suite/http.ts";
-import type { ParsedJwt } from "../suite/jose.ts";
+import { parseJwt, ParseException, verifyJwsSignature, type Jwks, type ParsedJwt } from "../suite/jose.ts";
 import type { AuthorizationRequest } from "./authorization.ts";
+import type { ServerMetadata } from "./discovery.ts";
 import {
 	objectValidator,
 	SCOPE_STANDARD_CLAIMS,
@@ -20,6 +21,7 @@ import {
 	type ElementValidator,
 } from "./id-token.ts";
 import type { Op } from "./op.ts";
+import type { Client } from "./registration.ts";
 import type { AccessToken } from "./token.ts";
 
 /**
@@ -431,4 +433,142 @@ export function validateReturnedClaimsUserInfoResponse(
 	validateExtractedUserInfoResponse(userinfo);
 	soft(() => verifyUserInfoAndIdTokenInTokenEndpointSameSub(userinfo, tokenEndpointIdToken, "OIDCC-5.3.2"));
 	soft(() => verifyScopesReturnedInUserInfoClaims(userinfo, authorizationRequest, "OIDCC-5.4"), "warning");
+}
+
+/** upstream: condition/client/ValidateUserInfoResponseSignature.java (AbstractVerifyJwsSignature) */
+export async function validateUserInfoResponseSignature(
+	res: EndpointResponse,
+	serverJwks: Jwks,
+	...requirements: string[]
+): Promise<void> {
+	const c: Condition = condition("ValidateUserInfoResponseSignature", ...requirements);
+	await verifyJwsSignature(c, res.body as string, serverJwks, "userinfo_endpoint_response_full", false, "server");
+}
+
+/**
+ * The parsed signed userinfo response (upstream env "userinfo_object") and the claims that are userinfo claims
+ * (env "userinfo": the JWT claims other than `sub` are removed).
+ *
+ * upstream: condition/client/ExtractSignedUserInfoFromUserInfoEndpointResponse.java
+ */
+export async function extractSignedUserInfoFromUserInfoEndpointResponse(
+	res: EndpointResponse,
+): Promise<{ userinfoObject: ParsedJwt; userinfo: Record<string, unknown> }> {
+	const c: Condition = condition("ExtractSignedUserInfoFromUserInfoEndpointResponse");
+	try {
+		// UPSTREAM: a missing body is not checked for (Java throws a NullPointerException)
+		const userinfoObject = await parseJwt(res.body as string);
+		const userinfo = structuredClone(userinfoObject.claims);
+		// the JWT standard claims aren't part of the userinfo response (apart from 'sub'), so remove them
+		for (const claim of ["iss", "aud", "exp", "nbf", "iat", "jti"]) {
+			delete userinfo[claim];
+		}
+		c.success("Found and parsed the userinfo from userinfo_endpoint_response_full", { ...userinfoObject });
+		return { userinfoObject, userinfo };
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse the userinfo_endpoint_response_full as a JWT", e, {
+				userinfo_endpoint_response_full: res.body,
+			});
+		}
+		throw e;
+	}
+}
+
+/** upstream: condition/client/ValidateUserInfoSigningAlgIsRS256.java */
+export function validateUserInfoSigningAlgIsRS256(userinfoObject: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("ValidateUserInfoSigningAlgIsRS256", ...requirements);
+	const alg = userinfoObject.header["alg"];
+	if (alg !== "RS256") {
+		c.failure("userinfo response must be signed with RS256 as requested in the client registration", { alg });
+	}
+	c.success("userinfo response is signed with RS256", { alg });
+}
+
+const DAY_MILLIS = 24 * 60 * 60 * 1000;
+
+/**
+ * iss and aud of a signed userinfo response, and exp, iat and nbf when present.
+ *
+ * upstream: condition/client/ValidateSignedUserInfoResponseStandardJWTClaims.java
+ */
+export function validateSignedUserInfoResponseStandardJWTClaims(
+	userinfoObject: ParsedJwt,
+	metadata: Pick<ServerMetadata, "issuer">,
+	client: Pick<Client, "client_id">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateSignedUserInfoResponseStandardJWTClaims", ...requirements);
+	const timeSkewMillis = 5 * 60 * 1000;
+	const clientId = client.client_id;
+	const issuer = metadata.issuer;
+	const now = Date.now();
+	// check all our testable values
+	if (!clientId || !issuer) {
+		c.failure("Couldn't find values to test ID token against");
+	}
+	const claims = userinfoObject.claims;
+	if (claims["iss"] == null) {
+		c.failure("Missing issuer");
+	}
+	if (issuer !== claims["iss"]) {
+		c.failure("Issuer mismatch", { expected: issuer, actual: claims["iss"] });
+	}
+	// sub is checked in AbstractVerifyUserInfoAndIdTokenSameSub
+	const aud = claims["aud"];
+	if (aud == null) {
+		c.failure("Missing audience");
+	}
+	if (Array.isArray(aud)) {
+		if (!aud.includes(clientId)) {
+			c.failure("Audience not found", { expected: clientId, actual: aud });
+		}
+	} else if (typeof aud === "string") {
+		if (clientId !== aud) {
+			c.failure("Audience mismatch", { expected: clientId, actual: aud });
+		}
+	} else {
+		c.failure("'aud' is neither a string nor an array");
+	}
+	const exp = typeof claims["exp"] === "number" ? Math.trunc(claims["exp"]) : null;
+	if (exp != null) {
+		if (now - timeSkewMillis > exp * 1000) {
+			c.failure("response expired", { expiration: new Date(exp * 1000), now: new Date(now) });
+		}
+		if (exp * 1000 > now + 50 * 365 * DAY_MILLIS) {
+			c.failure(
+				"'exp' is unreasonably far in the future (more than 50 years), this may indicate the value was incorrectly specified in milliseconds instead of seconds",
+				{ exp: new Date(exp * 1000), now: new Date(now) },
+			);
+		}
+	}
+	const iat = typeof claims["iat"] === "number" ? Math.trunc(claims["iat"]) : null;
+	if (iat != null) {
+		if (now + timeSkewMillis < iat * 1000) {
+			c.failure("response issued in the future", { "issued-at": new Date(iat * 1000), now: new Date(now) });
+		}
+		if (now - DAY_MILLIS > iat * 1000) {
+			c.failure("'iat' is more than 1 day in the past", { "issued-at": new Date(iat * 1000), now: new Date(now) });
+		}
+	}
+	const nbf = typeof claims["nbf"] === "number" ? Math.trunc(claims["nbf"]) : null;
+	if (nbf != null && now + timeSkewMillis < nbf * 1000) {
+		c.failure("response has future not-before", { "not-before": new Date(nbf * 1000), now: new Date(now) });
+	}
+	// jti - also not mentioned in spec (but defined in JWT); not currently checked
+	c.success(
+		"Signed userinfo response iss and aud claims passed validation checks. If present, exp, iat and nbf are also valid.",
+	);
+}
+
+/** upstream: condition/client/EnsureUserInfoDoesNotContainNonce.java */
+export function ensureUserInfoDoesNotContainNonce(userinfo: Record<string, unknown>, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureUserInfoDoesNotContainNonce", ...requirements);
+	const nonce = typeof userinfo["nonce"] === "string" ? userinfo["nonce"] : null;
+	if (nonce != null) {
+		c.failure(
+			"The signed userinfo response contains 'nonce'. Nonce is not listed in section 5.1 of the OpenID Connect Core specification, and hence should not be returned in the userinfo response. A signed userinfo response that contains nonce is potentially a security issue, as it may be mistaken for an id_token - particularly if it also contains the 'iat' and 'exp' claims.",
+		);
+	}
+	c.success("userinfo response does not contain 'nonce' and hence cannot be confused with an id_token.", { nonce });
 }

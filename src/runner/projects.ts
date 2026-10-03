@@ -160,6 +160,38 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 		spec: "tests/rp/3rdparty-init-login.spec.ts",
 		modules: ["oidcc-client-test-3rd-party-init-login"],
 	},
+	"oidcc-config-certification-test-plan": {
+		spec: "tests/op/config.spec.ts",
+		modules: ["oidcc-discovery-endpoint-verification"],
+	},
+	"oidcc-dynamic-certification-test-plan": {
+		spec: "tests/op/dynamic.spec.ts",
+		modules: [
+			"oidcc-discovery-endpoint-verification",
+			"oidcc-server",
+			"oidcc-ensure-client-assertion-with-iss-aud-succeeds",
+			"oidcc-ensure-redirect-uri-in-authorization-request",
+			"oidcc-ensure-request-object-with-redirect-uri",
+			"oidcc-idtoken-rs256",
+			"oidcc-idtoken-unsigned",
+			"oidcc-redirect-uri-query-OK",
+			"oidcc-redirect-uri-query-added",
+			"oidcc-redirect-uri-query-mismatch",
+			"oidcc-redirect-uri-regfrag",
+			"oidcc-refresh-token",
+			"oidcc-refresh-token-rp-key-rotation",
+			"oidcc-registration-jwks-uri",
+			"oidcc-registration-logo-uri",
+			"oidcc-registration-policy-uri",
+			"oidcc-registration-sector-bad",
+			"oidcc-registration-sector-uri",
+			"oidcc-registration-tos-uri",
+			"oidcc-request-uri-signed-rs256",
+			"oidcc-request-uri-unsigned",
+			"oidcc-server-rotate-keys",
+			"oidcc-userinfo-rs256",
+		],
+	},
 };
 
 export interface ConformanceProject {

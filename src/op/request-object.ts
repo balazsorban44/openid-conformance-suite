@@ -1,6 +1,6 @@
 /**
- * Request objects (OIDCC-6): the authorization request as an unsigned JWT, passed by value (`request`) or by
- * reference (`request_uri`, served by the suite's own server).
+ * Request objects (OIDCC-6): the authorization request as a JWT (unsigned, or signed with the client's key), passed by
+ * value (`request`) or by reference (`request_uri`, served by the suite's own server).
  *
  *   const request = authz.createAuthorizationRequest(op, client.client);
  *   const claims = requestObject.convertAuthorizationEndpointRequestToRequestObject(request.params);
@@ -9,10 +9,13 @@
  */
 import { createHash } from "node:crypto";
 import { condition, type Condition } from "../suite/conditions.ts";
+import { signJwt } from "../suite/jose.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { toUriString } from "../util/UriComponentsBuilder.ts";
 import { JWTUtil, ParseException } from "../util/JWTUtil.ts";
+import type { ServerMetadata } from "./discovery.ts";
 import type { Op } from "./op.ts";
+import type { Client, ClientKeys } from "./registration.ts";
 
 /** A request_uri the suite serves: the path below the suite's base url and the full url (with its fragment) */
 export interface RequestUri {
@@ -70,6 +73,62 @@ export function serializeRequestObjectWithNullAlgorithm(requestObjectClaims: Rec
 		}
 		throw e;
 	}
+}
+
+/** upstream: condition/client/AddAudToRequestObject.java */
+export function addAudToRequestObject(
+	claims: Record<string, unknown>,
+	metadata: Pick<ServerMetadata, "issuer">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddAudToRequestObject", ...requirements);
+	if (metadata.issuer != null) {
+		claims["aud"] = metadata.issuer;
+		c.success("Added aud to request object claims", { aud: metadata.issuer });
+	} else {
+		// Only a "should" requirement
+		c.log("Request object contains no audience and server issuer URL not found");
+	}
+}
+
+/** upstream: condition/client/AddIssToRequestObject.java */
+export function addIssToRequestObject(
+	claims: Record<string, unknown>,
+	client: Pick<Client, "client_id">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddIssToRequestObject", ...requirements);
+	if (client.client_id != null) {
+		claims["iss"] = client.client_id;
+		c.success("Added iss to request object claims", { iss: client.client_id });
+	} else {
+		// Only a "should" requirement
+		c.log("Request object contains no issuer and client ID not found");
+	}
+}
+
+/**
+ * The claims signed with the client's (single) signing key.
+ *
+ * upstream: condition/client/SignRequestObject.java (AbstractSignJWT)
+ */
+export async function signRequestObject(
+	claims: Record<string, unknown>,
+	client: { keys: ClientKeys | null },
+	...requirements: string[]
+): Promise<string> {
+	const c: Condition = condition("SignRequestObject", ...requirements);
+	if (client.keys == null) {
+		c.failure("Couldn't find jwks");
+	}
+	const { jws, verifiable } = await signJwt(c, claims, client.keys.jwks);
+	const [header] = jws.split(".");
+	c.success("Signed the request object", {
+		request_object: verifiable,
+		header: JSON.parse(Buffer.from(header, "base64url").toString()),
+		claims,
+	});
+	return jws;
 }
 
 /**
