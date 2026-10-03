@@ -3,11 +3,12 @@
 ## Setup
 
 ```bash
-npm ci
-npx playwright install --with-deps chromium
-npm run check        # typecheck + lint + format
-npm run test:unit    # framework unit tests (node --test)
-node bin/openid-conformance.ts ci --project op-basic-dynamic   # one CI project locally
+npm i -g pnpm      # pnpm 12 (or the standalone installer, https://pnpm.io/installation)
+pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium
+pnpm check        # typecheck + lint + format
+pnpm test:unit    # unit tests (Vitest, src/**/*.test.ts)
+node bin/cli.ts ci --project op-basic-dynamic   # one CI project locally
 ```
 
 Node.js 24+. Sources run as native TypeScript; keep to erasable syntax (no enums, namespaces, decorators,
@@ -22,10 +23,10 @@ The whole point of this repository is to stay a faithful, file-by-file port of t
 2. `port-conditions` / `port-test-module` - workflows
 3. `sync-upstream` - how `upstream.lock.json` tracks upstream and how to add a new plan
 
-Adding a plan in short: `npm run sync-upstream -- --fetch`, `--closure net.openid.conformance.<Plan>` to list
+Adding a plan in short: `pnpm sync-upstream --fetch`, `--closure net.openid.conformance.<Plan>` to list
 what is missing, `--add` to register it, port, `node scripts/gen-registry.ts`, add a CI target config under
 `configs/` and a project in `src/runner/projects.ts` (the CI matrix is read from it via
-`node bin/openid-conformance.ts projects --json`).
+`node bin/cli.ts projects --json`).
 
 ## Framework changes
 
@@ -36,11 +37,11 @@ rely on: the status machine and lock (`setStatus`), the event log entry shape (`
 A change to `src/framework`, `src/runner`, `src/util` or `targets` must not change any log entry the ported tests
 produce. Before merging it, pass these gates:
 
-1. Unit tests: `npm run test:unit` (`node:test`, `src/**/*.test.ts`). They pin the framework's own messages
+1. Unit tests: `pnpm test:unit` (`node:test`, `src/**/*.test.ts`). They pin the framework's own messages
    (pre/post environment checks, skips, status machine, HTTP log entries), the rendered views and the scripted
    browser's log entries (snapshots; regenerate deliberately with `node --test --test-update-snapshots <file>`) and the
    Nimbus/JDK emulation in `src/util/{nimbus,jdk}`.
-2. Suite-vs-suite: `node bin/openid-conformance.ts ci --project suite-vs-suite` stays green (the OP tests run
+2. Suite-vs-suite: `node bin/cli.ts ci --project suite-vs-suite` stays green (the OP tests run
    against the suite's own RP test module acting as OP, so both sides of the framework are exercised).
 3. Log fingerprint diff: record `scripts/log-fingerprint.ts` fingerprints of the affected projects before and after
    the change and `--diff` them; it must report no added, removed or changed entries (workflow in

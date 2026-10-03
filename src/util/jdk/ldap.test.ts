@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { InvalidNameException, parseLdapName, rdnEquals } from "./ldap.ts";
 
 // The comparison ValidateClientCertificateForTlsClientAuth performs: same number of RDNs, and every actual RDN

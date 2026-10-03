@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { IllegalArgumentException, isBlank, javaBase64Decode, toUsAscii, urlEncode } from "./strings.ts";
 
 // Expected values were produced with OpenJDK 21.

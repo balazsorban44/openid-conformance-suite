@@ -28,7 +28,7 @@ ported: ..."`, `"dropped"`).
 ## Commands
 
 ```bash
-npm run sync-upstream -- --fetch              # partial clone/update of upstream master into .upstream/ ($UPSTREAM)
+pnpm sync-upstream --fetch              # partial clone/update of upstream master into .upstream/ ($UPSTREAM)
 npm run sync-upstream -- --status             # list ported files whose Java source changed since the pin (default)
 npm run sync-upstream -- --diff <ts-path>     # show the Java diff (pinned -> current) for one ported file
 npm run sync-upstream -- --closure <JavaFQN>...    # list Java files a plan transitively needs that are not in the lock
@@ -59,7 +59,7 @@ file or a condition.
 `src/util/nimbus/`, `src/util/jdk/` and `src/util/UriComponentsBuilder.ts` are **not** in the lock (there is no
 upstream Java file for them), so `--status` never reports them. Re-check them when upstream bumps
 `nimbus-jose-jwt` in its `pom.xml` (the emulated version is noted in `src/util/nimbus/algorithms.ts`) or its JDK,
-and run `npm run test:unit` after touching them.
+and run `pnpm test:unit` after touching them.
 
 ## Adding a new plan to the port
 

@@ -8,29 +8,30 @@ description: How to run the ported OpenID conformance test plans locally and in 
 ## Local quick start
 
 ```bash
-npm ci
-npx playwright install --with-deps chromium   # once
+npm i -g pnpm      # pnpm 12 (or the standalone installer, https://pnpm.io/installation)
+pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium   # once
 
-node bin/openid-conformance.ts projects       # the CI projects: name, plan, variant, config
+node bin/cli.ts projects       # the CI projects: name, plan, variant, config
 # OP plan against the bundled panva oidc-provider (started automatically by the config)
-node bin/openid-conformance.ts ci --project op-basic-dynamic
+node bin/cli.ts ci --project op-basic-dynamic
 # RP plan: the suite emulates the OP, the bundled openid-client RP is driven through it
-node bin/openid-conformance.ts ci --project rp-basic
+node bin/cli.ts ci --project rp-basic
 # extra Playwright args after `--`, e.g. one module
-node bin/openid-conformance.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["
+node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["
 
 # Any plan/config:
-node bin/openid-conformance.ts run --plan oidcc-basic-certification-test-plan \
+node bin/cli.ts run --plan oidcc-basic-certification-test-plan \
   --variant server_metadata=discovery --variant client_registration=dynamic_client \
   --config configs/oidc-provider/oidcc-basic-dynamic.json [--module 'oidcc-server*'] [--tls] [--headed]
-node bin/openid-conformance.ts list [--plans|--modules|--variants]
+node bin/cli.ts list [--plans|--modules|--variants]
 ```
 
 `ci` and `run` spawn `playwright test tests/plan.spec.ts` with the `CONFORMANCE_*` environment below (`ci` also
-sets `CONFORMANCE_TLS=1` unless already set). `npm run test` is plain `playwright test`: it runs whatever the
+sets `CONFORMANCE_TLS=1` unless already set). `pnpm test` is plain `playwright test`: it runs whatever the
 environment selects (`CONFORMANCE_PROJECT=<name>`, or `CONFORMANCE_PLAN` + `CONFORMANCE_CONFIG`) and otherwise
 reports a single skipped test. The Playwright project is named after `CONFORMANCE_PROJECT` (default
-`conformance`), so `--project=<name>` does not select a plan. `npm run test:unit` runs the `node:test` unit tests.
+`conformance`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs the `node:test` unit tests.
 
 One Playwright test = one test module instance (`<plan> › <module>[variants]`). Each test writes into its
 `test-results/<test>/` directory (and attaches to the HTML report): `log.json` (the full event log), `log.html`
@@ -88,8 +89,8 @@ started right away, as upstream's `run-test-plan.py` does in CI.
 ## CI matrix
 
 `src/runner/projects.ts` is the matrix: each entry (name, plan, variant, config, optional `skipModules`) is one
-GitHub Actions job running `node bin/openid-conformance.ts ci --project <name>`; `.github/workflows/ci.yml` reads
-the names from `node bin/openid-conformance.ts projects --json`. Adding a project there adds the CI job.
+GitHub Actions job running `node bin/cli.ts ci --project <name>`; `.github/workflows/ci.yml` reads
+the names from `node bin/cli.ts projects --json`. Adding a project there adds the CI job.
 
 ## Reading the CI summary
 
@@ -106,10 +107,10 @@ random strings and timestamps masked), keyed by `<testName><variantString>` from
 
 ```bash
 # before the change; Playwright empties test-results/ on every run, so fingerprint right after each one
-CONFORMANCE_VIDEO=off node bin/openid-conformance.ts ci --project suite-vs-suite
+CONFORMANCE_VIDEO=off node bin/cli.ts ci --project suite-vs-suite
 node scripts/log-fingerprint.ts --out /tmp/baseline.json test-results
 # after the change: the same projects/configs
-CONFORMANCE_VIDEO=off node bin/openid-conformance.ts ci --project suite-vs-suite
+CONFORMANCE_VIDEO=off node bin/cli.ts ci --project suite-vs-suite
 node scripts/log-fingerprint.ts --out /tmp/current.json test-results
 node scripts/log-fingerprint.ts --diff /tmp/baseline.json /tmp/current.json [--allow allowed.json] [--strict-order]
 ```
@@ -119,7 +120,7 @@ entries per module, and modules found on one side only (`!!!`); any of these exi
 of regexes; a changed message that matches one (old or new text) is accepted. Entries that only moved (`>`) are
 listed but accepted: the scripted browser and the test module log concurrently, so two runs of unchanged code
 interleave some entries differently (`--strict-order` fails on moves too). The framework messages themselves are
-pinned by the unit tests (`npm run test:unit`: `src/framework/*.test.ts`, `src/runner/*.test.ts`,
+pinned by the unit tests (`pnpm test:unit`: `src/framework/*.test.ts`, `src/runner/*.test.ts`,
 `src/util/{nimbus,jdk}/*.test.ts`).
 
 ## Debugging a failing module

@@ -11,7 +11,7 @@ Prerequisite: read `.claude/skills/java-to-ts-porting/SKILL.md` (the rulebook) f
 
 - The list of target TS paths (keys of `upstream.lock.json` `files`, e.g. `src/condition/client/ValidateAtHash.ts`).
   Each entry names the Java source (`java`) relative to the upstream checkout.
-- An upstream checkout: `$UPSTREAM` if given, otherwise run `npm run sync-upstream -- --fetch` which clones the
+- An upstream checkout: `$UPSTREAM` if given, otherwise run `pnpm sync-upstream --fetch` which clones the
   pinned commit into `.upstream/`.
 
 ## Steps
@@ -24,10 +24,10 @@ Prerequisite: read `.claude/skills/java-to-ts-porting/SKILL.md` (the rulebook) f
    `src/util/jdk` with a unit test, never inside the condition (see the porting rulebook).
 3. Write the TS file following the skeleton and mapping tables. Keep the Java javadoc and inline comments.
 4. Before moving on, re-read the Java and TS side by side against the fidelity checklist.
-5. After the batch: `npx tsc --noEmit -p tsconfig.json 2>&1 | grep '<your paths>'` must be empty for your files
+5. After the batch: `pnpm exec tsc --noEmit -p tsconfig.json 2>&1 | grep '<your paths>'` must be empty for your files
    (errors in files other agents are still writing are expected: missing imports of not-yet-ported classes are
-   fine ONLY if the import path matches the lock file's target path exactly). Run `npx oxfmt <files>` and
-   `npx oxlint <files>`.
+   fine ONLY if the import path matches the lock file's target path exactly). Run `pnpm exec oxfmt <files>` and
+   `pnpm exec oxlint <files>`.
 6. Do not commit; the orchestrator commits batches. Do not edit files outside your list except `src/util/*`
    additions (append-only, including `src/util/nimbus` / `src/util/jdk`) and brand-new helper files.
 
@@ -71,5 +71,5 @@ c.setProperties("t1", log, ConditionResult.FAILURE, []);
 await c.execute(env);
 ```
 
-Run with `node scratch.ts` (Node 24 strips types natively). For anything worth keeping, write a `node:test` file
-next to the code instead (`npm run test:unit` runs `src/**/*.test.ts`).
+Run with `node scratch.ts` (Node 24 strips types natively). For anything worth keeping, write a Vitest file
+next to the code instead (`pnpm test:unit` runs `src/**/*.test.ts`).

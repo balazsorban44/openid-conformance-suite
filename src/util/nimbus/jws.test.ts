@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createPrivateKey, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { test } from "vitest";
 import { CompactSign, exportJWK, generateKeyPair, importJWK } from "jose";
 import type { JsonObject } from "../../framework/json.ts";
 import { JOSEException, KeyLengthException } from "./errors.ts";

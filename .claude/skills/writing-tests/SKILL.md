@@ -32,7 +32,7 @@ id_token claim check).
    met. Every failure must point at the OP/RP behaviour that violates the spec, never at suite internals. Checks
    therefore state the spec intention in their message and cite the requirement (`OIDCC-3.1.3.7`).
 2. **Intent over implementation**: a test describes what the OP/RP must do (`"oidcc-codereuse: a second token
-   request with the same code is rejected with invalid_grant"`), not how the suite does it.
+request with the same code is rejected with invalid_grant"`), not how the suite does it.
 3. **Explicit over implicit**: the test body shows the flow (discover, register, authorize, exchange, verify).
    No hidden state in `beforeEach`, no conditional logic in tests, no helper that silently asserts something the
    reader cannot see. Helpers return values the test uses; fixtures declare what the test depends on.

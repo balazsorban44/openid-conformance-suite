@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { curvesForJWSAlgorithm, EC_CURVE_ALGORITHM, keyTypeForAlgorithm, requireAlgorithmName } from "./algorithms.ts";
 
 // Expected values checked against nimbus-jose-jwt 10.9 (KeyType.forAlgorithm, Curve.forJWSAlgorithm).

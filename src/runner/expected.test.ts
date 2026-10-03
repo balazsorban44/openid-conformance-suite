@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import type { LogEntry } from "../framework/EventLog.ts";
 import type { ExpectedFailure, ExpectedSkip } from "./config.ts";
 import { analyzeResultLogs, describeProblems, emptyAnalysis } from "./expected.ts";

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { JavaHashMap } from "./HashMap.ts";
 
 // Expected orders are what `new HashMap<>()` + put + keySet() prints on JDK 21.0.11.

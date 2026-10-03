@@ -29,7 +29,7 @@ upstream commit (`src/framework` entries are tracked for change detection althou
 `file.ts::Name` maps a further Java class into an existing TS file). The library emulation in `src/util/nimbus`,
 `src/util/jdk` and `src/util/UriComponentsBuilder.ts` has no Java counterpart and is not in the lock. The
 upstream checkout used for porting is at `$UPSTREAM` (see the task prompt) or can be fetched with
-`npm run sync-upstream -- --fetch`.
+`pnpm sync-upstream --fetch`.
 
 ## File skeleton
 
@@ -67,7 +67,7 @@ Rules:
 - Node runs the TypeScript directly (type stripping). **Do not use** enums, namespaces, parameter
   properties (`constructor(private x)`), decorators, or `import x = require()`. Use `import type` for types.
   tsconfig has `erasableSyntaxOnly` + `verbatimModuleSyntax` + `noImplicitOverride` to catch this.
-- Tabs for indentation, double quotes (oxfmt). Run `npx oxfmt <files>` after writing.
+- Tabs for indentation, double quotes (oxfmt). Run `pnpm exec oxfmt <files>` after writing.
 - Keep Java comments, including spec citations and links.
 
 ## Framework API equivalents (conditions)
@@ -160,7 +160,7 @@ inputs, JSON member order), the port emulates that library:
 
 **Rule: Nimbus or JDK behaviour lives only in `src/util/nimbus` / `src/util/jdk`; never define it inside a
 condition or a ported util class.** Look there first; if something is missing, extend it there (one copy,
-faithful to the library source, the decision documented in a comment) and give it a `node:test` unit test next to
+faithful to the library source, the decision documented in a comment) and give it a Vitest unit test next to
 it (`src/util/{nimbus,jdk}/*.test.ts`) that pins the result and the exception message. Exception messages end up
 in the test log, so check them against the real library when you can (`java -cp nimbus-jose-jwt.jar Foo.java`;
 the jdk tests were produced with OpenJDK 21).
@@ -331,4 +331,4 @@ Everything else is 1:1; these are the known, intentional differences (each is co
 - [ ] Null/empty semantics match (`Strings.isNullOrEmpty` -> `!s`; missing vs JSON null).
 - [ ] No behaviour added, removed or "fixed"; questionable upstream behaviour gets an `// UPSTREAM:` comment.
 - [ ] No Nimbus/JDK emulation defined in the file: it imports it from `src/util/nimbus` / `src/util/jdk`.
-- [ ] `npx tsc --noEmit` passes for the file's imports; `npx oxlint` and `npx oxfmt` clean.
+- [ ] `pnpm exec tsc --noEmit` passes for the file's imports; `pnpm exec oxlint` and `pnpm exec oxfmt` clean.

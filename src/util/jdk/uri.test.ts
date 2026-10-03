@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { parseJavaURI, URISyntaxException, type JavaURI } from "./uri.ts";
 
 // Expected values were produced with `new java.net.URI(s)` on OpenJDK 21 (getScheme(), getHost(), getPort(),

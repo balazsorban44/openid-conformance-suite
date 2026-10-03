@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { ParseException } from "./errors.ts";
 import { parseClaimsSet, parseJWEObject, parseJWT, parseSignedJWT } from "./jwt.ts";
 

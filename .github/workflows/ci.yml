@@ -20,17 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run fmt:check
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm fmt:check
       - name: registry is up to date
         run: node scripts/gen-registry.ts && git diff --exit-code -- src/registry.ts
-      - run: npm run test:unit
+      - run: pnpm test:unit
 
   matrix:
     name: list projects
@@ -39,12 +40,15 @@ jobs:
       projects: ${{ steps.list.outputs.projects }}
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      # the matrix is src/runner/projects.ts; listing it needs no dependencies
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # the matrix is src/runner/projects.ts
       - id: list
-        run: echo "projects=$(node bin/openid-conformance.ts projects --json)" >> "$GITHUB_OUTPUT"
+        run: echo "projects=$(node bin/cli.ts projects --json)" >> "$GITHUB_OUTPUT"
 
   conformance:
     name: ${{ matrix.project }}
@@ -56,15 +60,16 @@ jobs:
         project: ${{ fromJSON(needs.matrix.outputs.projects) }}
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
       - name: Run ${{ matrix.project }}
-        run: node bin/openid-conformance.ts ci --project ${{ matrix.project }}
+        run: node bin/cli.ts ci --project ${{ matrix.project }}
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v5
@@ -83,10 +88,12 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: latest
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npx playwright install --with-deps chromium
-      - run: node bin/openid-conformance.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["

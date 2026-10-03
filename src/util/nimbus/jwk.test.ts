@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { errors } from "jose";
 import { isJOSEException, JOSEException, KeyLengthException, ParseException } from "./errors.ts";
 import { getRequiredParams, isPrivate, parseJWK, parseJWKSet, toPublicJWK } from "./jwk.ts";

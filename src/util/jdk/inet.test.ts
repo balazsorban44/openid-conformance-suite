@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { inetAddressBytes } from "./inet.ts";
 
 // Expected equality as InetAddress.equals() reports it on OpenJDK 21.

@@ -114,11 +114,11 @@ implementation built on [`openid-client`](https://github.com/panva/openid-client
 ## CLI
 
 ```bash
-npm install -D @balazsorban44/openid-conformance-suite
-npx playwright install --with-deps chromium
+pnpm add -D @balazsorban44/openid-conformance-suite   # or npm i -D
+pnpm exec playwright install --with-deps chromium
 
-npx openid-conformance list                        # plans, their variants
-npx openid-conformance run --plan oidcc-basic-certification-test-plan \
+pnpm exec openid-conformance list                        # plans, their variants
+pnpm exec openid-conformance run --plan oidcc-basic-certification-test-plan \
    --variant server_metadata=discovery --variant client_registration=static_client \
    --config ./conformance/my-op.json [--module 'oidcc-server*'] [--headed]
 ```
@@ -145,7 +145,7 @@ against the suite's own emulated OP (suite-vs-suite), on every push to `main` an
 ## Maintaining
 
 Everything is ported 1:1 from upstream at the commit pinned in `upstream.lock.json`, which also records the
-blob hash of every ported Java file. `npm run sync-upstream` reports which ported files changed upstream, shows
+blob hash of every ported Java file. `pnpm sync-upstream` reports which ported files changed upstream, shows
 the Java diffs, and finds the files a new plan needs. The porting rules live in `.claude/skills/` and are written
 for both humans and coding agents:
 
@@ -154,7 +154,7 @@ for both humans and coding agents:
 - `sync-upstream` - keeping up with upstream
 - `run-conformance` - running and debugging plans
 
-Framework changes are checked for fidelity by the unit tests (`npm run test:unit`), the suite-vs-suite project
+Framework changes are checked for fidelity by the unit tests (`pnpm test:unit`), the suite-vs-suite project
 and a before/after diff of every module's log with `scripts/log-fingerprint.ts` (see `CONTRIBUTING.md`).
 
 ## License

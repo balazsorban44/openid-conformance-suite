@@ -48,16 +48,23 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # pnpm/action-setup reads the version from the suite's own package.json (`packageManager`)
+    - uses: pnpm/action-setup@v4
+      with:
+        package_json_file: ${{ github.action_path }}/package.json
     - uses: actions/setup-node@v5
       with:
         node-version: ${{ inputs.node-version }}
+        cache: pnpm
+        cache-dependency-path: ${{ github.action_path }}/pnpm-lock.yaml
 
     - name: Install the conformance suite
       shell: bash
+      working-directory: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        npm ci --prefix "${{ github.action_path }}"
-        npx --prefix "${{ github.action_path }}" playwright install --with-deps chromium
+        pnpm install --frozen-lockfile
+        pnpm exec playwright install --with-deps chromium
 
     - name: Run conformance plan
       id: run
@@ -74,7 +81,7 @@ runs:
       run: |
         set -uo pipefail
         STATUS=0
-        node "${{ github.action_path }}/bin/openid-conformance.ts" run --plan "$CONFORMANCE_PLAN" \
+        node "${{ github.action_path }}/bin/cli.ts" run --plan "$CONFORMANCE_PLAN" \
           --config "$(realpath "${{ inputs.config }}")" || STATUS=$?
         echo "results=${CONFORMANCE_REPORT_DIR}/results.json" >> "$GITHUB_OUTPUT"
         echo "summary=${CONFORMANCE_REPORT_DIR}/summary.md" >> "$GITHUB_OUTPUT"
