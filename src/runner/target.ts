@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
+import { Agent, fetch as undiciFetch } from "undici";
 import type { TargetConfig } from "./config.ts";
+
+// targets commonly use self-signed certificates
+const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
 
 /**
  * Starts an implementation under test (`target` in the config) and waits until its ready URL answers.
@@ -61,7 +65,10 @@ export class Target {
 
 	private async isReady(): Promise<boolean> {
 		try {
-			const res = await fetch(this.cfg.readyUrl, { signal: AbortSignal.timeout(2000) });
+			const res = await undiciFetch(this.cfg.readyUrl, {
+				signal: AbortSignal.timeout(2000),
+				dispatcher: insecureAgent,
+			});
 			return res.status < 500;
 		} catch {
 			return false;

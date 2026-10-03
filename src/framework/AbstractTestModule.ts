@@ -113,6 +113,7 @@ export abstract class AbstractTestModule {
 	private statusUpdated = new Date();
 	private finalError: TestInterruptedException | null = null;
 	private cleanupCalled = false;
+	private cleanupInProgress = false;
 	protected imageService!: ImageService;
 	private testLockManager!: TestLockManager;
 	private hooks: TestModuleHooks = {};
@@ -320,8 +321,9 @@ export abstract class AbstractTestModule {
 	 * Call the condition as specified in the builder (see Java doc for the order of checks).
 	 */
 	protected async callCondition(builder: ConditionCallBuilder): Promise<void> {
-		if (this.getStatus() !== Status.CREATED) {
-			// We don't run this check for 'CREATED' as the lock is currently not held during 'configure'
+		if (this.getStatus() !== Status.CREATED && !this.cleanupInProgress) {
+			// We don't run this check for 'CREATED' as the lock is currently not held during 'configure'; cleanup()
+			// runs inside the FINISHED/INTERRUPTED transition with the lock held (Java: isHeldByCurrentThread)
 			if (this.getStatus() !== Status.RUNNING) {
 				throw new TestFailureException(
 					this.getId(),
@@ -970,6 +972,7 @@ export abstract class AbstractTestModule {
 
 	protected async performFinalCleanup(): Promise<void> {
 		if (!this.cleanupCalled) {
+			this.cleanupInProgress = true;
 			try {
 				await this.cleanup();
 			} catch (e) {
@@ -980,6 +983,7 @@ export abstract class AbstractTestModule {
 				}
 			} finally {
 				this.cleanupCalled = true;
+				this.cleanupInProgress = false;
 			}
 		}
 	}

@@ -18,6 +18,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import * as querystring from "node:querystring";
@@ -239,7 +240,19 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 		(process.env["OIDC_PROVIDER_JWKS"] ? JSON.parse(process.env["OIDC_PROVIDER_JWKS"]) : null) ??
 		(await generateJwks());
 
-	const issuer = (opts.issuer ?? process.env["ISSUER"] ?? `http://localhost:${port}`).replace(/\/$/, "");
+	// OIDC_PROVIDER_TLS_CERT / OIDC_PROVIDER_TLS_KEY (PEM file paths) serve https (the suite requires https for
+	// registration_client_uri, initiate_login_uri, sector_identifier_uri ...)
+	const tls =
+		process.env["OIDC_PROVIDER_TLS_CERT"] && process.env["OIDC_PROVIDER_TLS_KEY"]
+			? {
+					cert: readFileSync(process.env["OIDC_PROVIDER_TLS_CERT"], "utf8"),
+					key: readFileSync(process.env["OIDC_PROVIDER_TLS_KEY"], "utf8"),
+				}
+			: null;
+	const issuer = (opts.issuer ?? process.env["ISSUER"] ?? `${tls ? "https" : "http"}://localhost:${port}`).replace(
+		/\/$/,
+		"",
+	);
 
 	// ML-DSA is filtered out like upstream's CI (conformance-suite#1598); everything else oidc-provider implements is
 	// enabled so the suite can register clients with any id_token/userinfo/request object alg it wants to test
@@ -538,7 +551,9 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	});
 
 	const server: Server = await new Promise((resolve, reject) => {
-		const s = provider.listen(port, host, () => resolve(s));
+		const s = tls
+			? createHttpsServer(tls, provider.callback()).listen(port, host, () => resolve(s))
+			: provider.listen(port, host, () => resolve(s));
 		s.once("error", reject);
 	});
 	return {

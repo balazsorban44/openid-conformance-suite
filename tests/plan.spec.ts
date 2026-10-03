@@ -1,5 +1,7 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { SuiteServer } from "../src/framework/server.ts";
 import { VariantSelection } from "../src/framework/variants.ts";
@@ -22,6 +24,7 @@ import { runModule } from "../src/runner/TestRunner.ts";
  *   CONFORMANCE_MODULE    optional: only run modules whose testName matches this glob
  */
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectName = process.env["CONFORMANCE_PROJECT"];
 const project = projectName ? projects.find((p) => p.name === projectName) : undefined;
 const planName = process.env["CONFORMANCE_PLAN"] ?? project?.plan;
@@ -59,10 +62,26 @@ if (!planName || !configPath) {
 				target = new Target(loaded.target);
 				await target.start();
 			}
+			// CONFORMANCE_TLS=1 serves the suite over https with the bundled localhost certificate (or
+			// CONFORMANCE_TLS_CERT / CONFORMANCE_TLS_KEY); the specs require https for several suite-hosted URLs
+			const tls =
+				process.env["CONFORMANCE_TLS"] && process.env["CONFORMANCE_TLS"] !== "0"
+					? {
+							cert: readFileSync(
+								process.env["CONFORMANCE_TLS_CERT"] ?? resolve(__dirname, "../configs/certs/localhost.crt"),
+								"utf8",
+							),
+							key: readFileSync(
+								process.env["CONFORMANCE_TLS_KEY"] ?? resolve(__dirname, "../configs/certs/localhost.key"),
+								"utf8",
+							),
+						}
+					: undefined;
 			server = new SuiteServer({
 				port: Number(process.env["CONFORMANCE_PORT"] ?? 0),
 				host: process.env["CONFORMANCE_HOST"],
 				externalUrl: process.env["CONFORMANCE_EXTERNAL_URL"],
+				tls,
 			});
 			await server.start();
 		});

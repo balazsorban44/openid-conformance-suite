@@ -47,6 +47,12 @@ export interface ModuleRunResult {
 	nested?: { testName: string; result: Result; status: Status; entries: LogEntry[] };
 }
 
+/** The "logged in user" owning the tests (Java: the OIDC subject/issuer of the suite user) */
+const OWNER: Record<string, string> = {
+	sub: process.env["CONFORMANCE_OWNER"] ?? "ci",
+	iss: "openid-conformance-suite",
+};
+
 function newTestId(): string {
 	return randomBytes(6).toString("hex");
 }
@@ -85,7 +91,7 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 		imageService,
 		async () => opts.context,
 	);
-	module.setProperties(testId, null, eventLog, browser, executionManager, imageService, {});
+	module.setProperties(testId, OWNER, eventLog, browser, executionManager, imageService, {});
 
 	const alias = typeof config["alias"] === "string" && config["alias"] ? config["alias"] : null;
 	const { url, mtlsUrl } = opts.server.register(module, { alias });
@@ -209,7 +215,7 @@ async function startEmulatedOp(
 		imageService,
 		async () => opts.context,
 	);
-	module.setProperties(testId, null, eventLog, browser, executionManager, imageService, {});
+	module.setProperties(testId, OWNER, eventLog, browser, executionManager, imageService, {});
 	const alias = target.alias ?? "emulated-op";
 	const { url, mtlsUrl } = opts.server.register(module, { alias });
 	eventLog.log(

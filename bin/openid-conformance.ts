@@ -24,7 +24,7 @@ function usage(code = 0): never {
 
 Usage:
   openid-conformance list [--plans | --modules | --variants]
-  openid-conformance run --plan <plan> --config <file> [--variant k=v]... [--module <glob>] [--headed] [--report-dir <dir>] [-- <playwright args>]
+  openid-conformance run --plan <plan> --config <file> [--variant k=v]... [--module <glob>] [--tls] [--headed] [--report-dir <dir>] [-- <playwright args>]
   openid-conformance ci --project <name> [-- <playwright args>]
   openid-conformance projects
 
@@ -147,6 +147,9 @@ async function main(): Promise<void> {
 			if (typeof opts["module"] === "string") {
 				env["CONFORMANCE_MODULE"] = opts["module"];
 			}
+			if (opts["tls"]) {
+				env["CONFORMANCE_TLS"] = "1";
+			}
 			if (typeof opts["report-dir"] === "string") {
 				env["CONFORMANCE_REPORT_DIR"] = resolve(process.cwd(), opts["report-dir"]);
 			}
@@ -173,6 +176,7 @@ async function main(): Promise<void> {
 						CONFORMANCE_VARIANT: p.variant,
 						CONFORMANCE_CONFIG: resolve(root, p.config),
 						CONFORMANCE_SUMMARY_TITLE: `OpenID conformance: ${p.name}`,
+						CONFORMANCE_TLS: process.env["CONFORMANCE_TLS"] ?? "1",
 					},
 					rest,
 				),

@@ -15,7 +15,9 @@
 	"target": {
 		"command": "node targets/openid-client-rp/server.ts",
 		"readyUrl": "http://localhost:4000/ready",
-		"env": {}
+		"env": {
+			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt"
+		}
 	},
 	"client_driver": {
 		"startUrl": "http://localhost:4000/start"
