@@ -2,10 +2,52 @@
 import type { AbstractTestModule } from "./framework/AbstractTestModule.ts";
 import type { TestPlanClass } from "./framework/plan.ts";
 import type { TestModuleClass } from "./framework/TestModule.ts";
+import { OIDCCServerTest } from "./openid/OIDCCServerTest.ts";
+import { OIDCCClientTestBackChannelLogout } from "./openid/client/logout/OIDCCClientTestBackChannelLogout.ts";
+import { OIDCCClientTestBackChannelLogoutAlgNone } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutAlgNone.ts";
+import { OIDCCClientTestBackChannelLogoutNoEvent } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutNoEvent.ts";
+import { OIDCCClientTestBackChannelLogoutWithNonce } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutWithNonce.ts";
+import { OIDCCClientTestBackChannelLogoutWrongAlg } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutWrongAlg.ts";
+import { OIDCCClientTestBackChannelLogoutWrongAud } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutWrongAud.ts";
+import { OIDCCClientTestBackChannelLogoutWrongEvent } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutWrongEvent.ts";
+import { OIDCCClientTestBackChannelLogoutWrongIssuer } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutWrongIssuer.ts";
+import { OIDCCClientTestFrontChannelLogoutOPInitiated } from "./openid/client/logout/OIDCCClientTestFrontChannelLogoutOPInitiated.ts";
+import { OIDCCClientTestFrontChannelLogoutRPInitiated } from "./openid/client/logout/OIDCCClientTestFrontChannelLogoutRPInitiated.ts";
+import { OIDCCClientTestRPInitLogout } from "./openid/client/logout/OIDCCClientTestRPInitLogout.ts";
+import { OIDCCClientTestRPInitLogoutInvalidState } from "./openid/client/logout/OIDCCClientTestRPInitLogoutInvalidState.ts";
+import { OIDCCClientTestRPInitLogoutNoState } from "./openid/client/logout/OIDCCClientTestRPInitLogoutNoState.ts";
+import { OIDCCClientTestSessionManagement } from "./openid/client/logout/OIDCCClientTestSessionManagement.ts";
+import { OIDCCClientBackChannelLogoutRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientBackChannelLogoutRPBasicTestPlan.ts";
+import { OIDCCClientFrontChannelLogoutRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientFrontChannelLogoutRPBasicTestPlan.ts";
+import { OIDCCClientLogoutTestPlan } from "./openid/client/logout/plan/OIDCCClientLogoutTestPlan.ts";
+import { OIDCCClientRPInitiatedLogoutRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientRPInitiatedLogoutRPBasicTestPlan.ts";
+import { OIDCCClientSessionManagementRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientSessionManagementRPBasicTestPlan.ts";
 
-export const modules: TestModuleClass<AbstractTestModule>[] = [];
+export const modules: TestModuleClass<AbstractTestModule>[] = [
+	OIDCCServerTest, // oidcc-server
+	OIDCCClientTestBackChannelLogout, // oidcc-client-test-rp-backchannel-rpinitlogout
+	OIDCCClientTestBackChannelLogoutAlgNone, // oidcc-client-test-rp-backchannel-rpinitlogout-alg-none
+	OIDCCClientTestBackChannelLogoutNoEvent, // oidcc-client-test-rp-backchannel-rpinitlogout-no-event
+	OIDCCClientTestBackChannelLogoutWithNonce, // oidcc-client-test-rp-backchannel-rpinitlogout-with-nonce
+	OIDCCClientTestBackChannelLogoutWrongAlg, // oidcc-client-test-rp-backchannel-rpinitlogout-wrong-alg
+	OIDCCClientTestBackChannelLogoutWrongAud, // oidcc-client-test-rp-backchannel-rpinitlogout-wrong-aud
+	OIDCCClientTestBackChannelLogoutWrongEvent, // oidcc-client-test-rp-backchannel-rpinitlogout-wrong-event
+	OIDCCClientTestBackChannelLogoutWrongIssuer, // oidcc-client-test-rp-backchannel-rpinitlogout-wrong-iss
+	OIDCCClientTestFrontChannelLogoutOPInitiated, // oidcc-client-test-rp-frontchannel-opinitlogout
+	OIDCCClientTestFrontChannelLogoutRPInitiated, // oidcc-client-test-rp-frontchannel-rpinitlogout
+	OIDCCClientTestRPInitLogout, // oidcc-client-test-rp-init-logout
+	OIDCCClientTestRPInitLogoutInvalidState, // oidcc-client-test-rp-init-logout-other-state
+	OIDCCClientTestRPInitLogoutNoState, // oidcc-client-test-rp-init-logout-no-state
+	OIDCCClientTestSessionManagement, // oidcc-client-test-session-management
+];
 
-export const plans: TestPlanClass[] = [];
+export const plans: TestPlanClass[] = [
+	OIDCCClientBackChannelLogoutRPBasicTestPlan, // oidcc-client-back-channel-logout-rp-basic
+	OIDCCClientFrontChannelLogoutRPBasicTestPlan, // oidcc-client-front-channel-logout-rp-basic
+	OIDCCClientLogoutTestPlan, // oidcc-client-logout-test-plan
+	OIDCCClientRPInitiatedLogoutRPBasicTestPlan, // oidcc-client-rp-initiated-logout-rp-basic
+	OIDCCClientSessionManagementRPBasicTestPlan, // oidcc-client-rp-session-management-rp-basic
+];
 
 export function findModule(testName: string): TestModuleClass<AbstractTestModule> | undefined {
 	return modules.find((m) => m.meta?.testName === testName);
