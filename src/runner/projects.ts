@@ -11,7 +11,8 @@ export interface ConformanceProject {
 	variant: string;
 	config: string;
 	/** Modules in the plan to skip in CI (known untestable in this setup), by testName */
-	skipModules?: string[];
+	/** modules not run in this project: testName -> why (shown as the Playwright skip reason) */
+	skipModules?: Record<string, string>;
 }
 
 export const projects: ConformanceProject[] = [
@@ -130,5 +131,23 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-basic-certification-test-plan",
 		variant: "[server_metadata=discovery][client_registration=dynamic_client]",
 		config: "configs/suite-vs-suite/oidcc-basic.json",
+		// the emulated OP is upstream's single-flow RP test module (oidcc-client-test); what it cannot do is skipped
+		// here, what it does differently is in configs/expected-failures/suite-vs-suite.json
+		skipModules: {
+			"oidcc-prompt-login": "the emulated OP serves one authorization flow; a second token request fails",
+			"oidcc-prompt-none-logged-in": "the emulated OP serves one authorization flow; a second token request fails",
+			"oidcc-max-age-1": "the emulated OP serves one authorization flow; a second token request fails",
+			"oidcc-max-age-10000": "the emulated OP serves one authorization flow; a second token request fails",
+			"oidcc-id-token-hint": "the emulated OP serves one authorization flow; a second token request fails",
+			"oidcc-refresh-token": "the emulated OP knows one registered client; this module registers a second one",
+			"oidcc-response-type-missing":
+				"the emulated OP answers an invalid request with a 400 page instead of an error redirect",
+			"oidcc-ensure-registered-redirect-uri":
+				"the emulated OP answers an invalid request with a 400 page instead of an error page",
+			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported":
+				"the emulated OP (request_type=plain_http_request) answers request objects with a 400 page",
+			"oidcc-ensure-request-object-with-redirect-uri":
+				"the emulated OP (request_type=plain_http_request) answers request objects with a 400 page",
+		},
 	},
 ];

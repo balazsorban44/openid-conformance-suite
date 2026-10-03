@@ -26,15 +26,13 @@
 		"module": "oidcc-client-test",
 		"alias": "emulated-op",
 		"variant": {
-			"client_auth_type": "client_secret_basic",
-			"response_type": "code",
-			"response_mode": "default",
 			"request_type": "plain_http_request",
 			"client_registration": "dynamic_client"
 		},
 		"config": {
 			"waitTimeoutSeconds": 10
-		}
+		},
+		"_comment": "variant parameters left out here (client_auth_type, response_type, response_mode) follow the module under test"
 	},
 	"expectedFailures": "../expected-failures/suite-vs-suite.json"
 }

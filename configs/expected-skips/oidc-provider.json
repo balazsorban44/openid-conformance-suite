@@ -22,5 +22,11 @@
 		"variant": "*",
 		"configuration-filename": "*",
 		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+	},
+	{
+		"test-name": "oidcc-request-uri-unsigned",
+		"variant": "*",
+		"configuration-filename": "*",
+		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
 	}
 ]

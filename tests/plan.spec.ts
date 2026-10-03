@@ -31,7 +31,7 @@ const planName = process.env["CONFORMANCE_PLAN"] ?? project?.plan;
 const variantString = process.env["CONFORMANCE_VARIANT"] ?? project?.variant ?? "";
 const configPath = process.env["CONFORMANCE_CONFIG"] ?? project?.config;
 const moduleFilter = process.env["CONFORMANCE_MODULE"];
-const skipModules = project?.skipModules ?? [];
+const skipModules = project?.skipModules ?? {};
 
 if (!planName || !configPath) {
 	test("conformance plan selection", () => {
@@ -98,7 +98,7 @@ if (!planName || !configPath) {
 			const vs = m.variant.toBracketString();
 			const title = `${m.testName}${vs}`;
 			test(title, async ({ context }, testInfo) => {
-				test.skip(skipModules.includes(m.testName), "skipped in this CI project");
+				test.skip(m.testName in skipModules, skipModules[m.testName]);
 				testInfo.annotations.push({ type: "plan", description: planName });
 				testInfo.annotations.push({ type: "variant", description: vs });
 

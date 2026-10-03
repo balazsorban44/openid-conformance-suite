@@ -21,8 +21,9 @@ export default class ConformanceReporter implements Reporter {
 
 	onTestEnd(test: TestCase, result: TestResult): void {
 		const att = result.attachments.find((a) => a.name === "module-report.json");
-		if (att?.body) {
-			const r = JSON.parse(att.body.toString("utf8")) as ModuleReport;
+		const body = att?.body ?? (att?.path && existsSync(att.path) ? readFileSync(att.path) : undefined);
+		if (body) {
+			const r = JSON.parse(body.toString("utf8")) as ModuleReport;
 			r.title = test.titlePath().slice(1).join(" › ");
 			if (result.status !== "passed" && result.status !== "skipped" && !r.error && result.error?.message) {
 				r.error = result.error.message;
