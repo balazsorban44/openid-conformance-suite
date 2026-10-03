@@ -328,6 +328,8 @@ export const projects: ConformanceProject[] = [
 		// do is skipped here, what it does differently is in configs/expected-failures/suite-vs-suite.json
 		skipModules: {
 			"oidcc-refresh-token": "the emulated OP knows one registered client; this module registers a second one",
+			"oidcc-max-age-10000":
+				"the emulated OP has no session: every authorization sets auth_time to the current time, so two logins a second apart get different auth_time values",
 			"oidcc-response-type-missing": INVALID_REQUEST_500 + " instead of an error redirect",
 			"oidcc-ensure-registered-redirect-uri": INVALID_REQUEST_500 + " instead of an error page",
 			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported": REQUEST_OBJECT_500,
