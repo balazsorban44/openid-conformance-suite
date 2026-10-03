@@ -33,6 +33,19 @@ what is missing, `--add` to register it, port, `node scripts/gen-registry.ts`, a
 rely on: the status machine and lock (`setStatus`), the event log entry shape (`src`, `msg`, `result`, `blockId`,
 `requirements`), `requestParts` for incoming requests, and the HTTP request/response log entries.
 
+A change to `src/framework`, `src/runner`, `src/util` or `targets` must not change any log entry the ported tests
+produce. Before merging it, pass these gates:
+
+1. Unit tests: `npm run test:unit` (`node:test`, `src/**/*.test.ts`). They pin the framework's own messages
+   (pre/post environment checks, skips, status machine, HTTP log entries), the rendered views and the scripted
+   browser's log entries (snapshots; regenerate deliberately with `node --test --test-update-snapshots <file>`) and the
+   Nimbus/JDK emulation in `src/util/{nimbus,jdk}`.
+2. Suite-vs-suite: `node bin/openid-conformance.ts ci --project suite-vs-suite` stays green (the OP tests run
+   against the suite's own RP test module acting as OP, so both sides of the framework are exercised).
+3. Log fingerprint diff: record `scripts/log-fingerprint.ts` fingerprints of the affected projects before and after
+   the change and `--diff` them; it must report no added, removed or changed entries (workflow in
+   `.claude/skills/run-conformance`).
+
 ## Pull requests
 
 CI runs typecheck/lint/format, the unit tests, and every conformance project against the bundled targets. A

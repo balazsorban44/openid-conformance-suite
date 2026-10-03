@@ -8,6 +8,11 @@ description: How to port an upstream Java test module (AbstractOIDCCServerTest, 
 Prerequisite: `.claude/skills/java-to-ts-porting/SKILL.md`. The framework base classes are in `src/framework/`
 (`AbstractTestModule`, `AbstractRedirectServerTestModule`): read them once, they document every method.
 
+Lifecycle (driven by `src/runner/TestRunner.ts`): `newInstance(moduleClass, variant)` (runs the `@VariantSetup`
+methods), `module.attach({ id, owner, eventLog, browser, executionManager, imageService, hooks? })` (Java:
+`setProperties`; status becomes CREATED), then `configure(...)` and `start()` in a background task. The runner
+waits with `module.whenStatus(...)` / `whenFinished()`; modules never call `attach` or wait on their own status.
+
 ## Module skeleton
 
 ```ts
@@ -106,7 +111,8 @@ export class OIDCCServerTest extends AbstractOIDCCServerTest {
 | `throw new TestFailureException(getId(), "msg")`                                                         | `throw new TestFailureException(this.getId(), "msg")`                                                     |
 | `new TestFailureException(getId(), "error", "error_description")`                                        | `TestFailureException.oauthError(this.getId(), "error", "error_description")`                             |
 | `getTestExecutionManager().runInBackground(() -> {...; return "done";})`                                 | `this.getTestExecutionManager().runInBackground(async () => {...; return "done";})`                       |
-| `Thread.sleep(ms)` inside background tasks                                                               | `await sleep(ms, this.getTestExecutionManager().signal)`                                                  |
+| `getTestExecutionManager().scheduleInBackground(callable, delay, unit)`                                  | `this.getTestExecutionManager().scheduleInBackground(async () => {...}, delayMillis)`                     |
+| `Thread.sleep(ms)` inside background tasks                                                               | `await sleep(ms, this.getTestExecutionManager().signal)` (`sleep` from the barrel)                        |
 | `browser.goToUrl(url)` / `(url, placeholder)` / `(url, placeholder, method)`                             | `this.browser.goToUrl(url, placeholder, method)`                                                          |
 | `imageService.getRemainingPlaceholders(getId(), true)`                                                   | `this.imageService.getRemainingPlaceholders(this.getId(), true)`                                          |
 | `handleHttp(path, req, res, session, requestParts)` returning `Object`                                   | `override async handleHttp(path, req, res, session, requestParts): Promise<Response>`                     |
@@ -114,7 +120,7 @@ export class OIDCCServerTest extends AbstractOIDCCServerTest {
 | `new ResponseEntity<>(body, headers, HttpStatus.X)`                                                      | `jsonResponse(body, status, headersObject)` or `responseEntity(...)`                                      |
 | `new ResponseEntity<Object>("", HttpStatus.NO_CONTENT)`                                                  | `noContent()`                                                                                             |
 | `new RedirectView(url, false, false, false)`                                                             | `redirectView(url)`                                                                                       |
-| `new ModelAndView("name", ImmutableMap.of("k", v))`                                                      | `modelAndView("name", { k: v })` (port missing templates to `src/framework/views/`, list in `views.ts`)   |
+| `new ModelAndView("name", ImmutableMap.of("k", v))`                                                      | `modelAndView("name", { k: v })` (`name` is a typed `ViewName`, see [Views](#views))                      |
 | `@UserFacing`                                                                                            | drop (comment)                                                                                            |
 | `HttpServletRequest req` uses (TLS info)                                                                 | `req.tls?.cipher` etc. (`IncomingHttpRequest`)                                                            |
 | `ResponseType.CODE.includesCode()`                                                                       | `ResponseType.CODE.includesCode()` (enum methods are kept)                                                |
@@ -126,11 +132,22 @@ awaits them. Hooks that Java leaves empty (`onConfigure`, `onPostAuthorizationFl
 subclasses can override them.
 
 **Background tasks and HTTP handlers**: anything Java runs via `runInBackground` keeps that shape; the task's
-errors are routed to `handleException` by the framework exactly like Java's BackgroundTask.
+errors are routed to `handleException` by the framework exactly like Java's BackgroundTask. Cancellation is
+cooperative: `TestExecutionManager.signal` aborts when the test stops, which makes a pending `sleep(ms, signal)`
+reject; the error of a cancelled task is swallowed (like a cancelled Java `Future`).
 
 **Status/lock**: `setStatus(RUNNING)` acquires the module's async mutex, `WAITING` releases it. Keep every
 `setStatus` call where Java has it (incoming HTTP handlers start with `await this.setStatus(Status.RUNNING)` and
 end with `await this.setStatus(Status.WAITING)` unless they finish the test).
+
+## Views
+
+Each Thymeleaf template the modules use (`src/main/resources/templates/<name>.html`) is a module
+`src/framework/views/<name>.ts` exporting a renderer `(model: Record<string, unknown>) => string` (escape with
+`escapeHtml` / `jsLiteral` from `views/html.ts`). To add one, port the template there, add the renderer to the
+`views` table in `src/framework/views.ts` (that makes the name a valid `ViewName` for `modelAndView`), add a case
+to `src/framework/views.test.ts` and regenerate its snapshot with
+`node --test --test-update-snapshots src/framework/views.test.ts`.
 
 ## Variant enums (`src/variant/*.ts`)
 
@@ -187,5 +204,6 @@ Keep the comments naming the python test ids (`// OP-Response-code`).
 
 ## Registration
 
-Every module and plan must be exported from `src/registry.ts` (modules in `modules`, plans in `plans`) so the
-runner and CLI can find them by `testName` / `testPlanName`. Add yours there.
+`src/registry.ts` (the `modules` / `plans` tables the runner and CLI look up by `testName` / `testPlanName`) is
+generated: run `node scripts/gen-registry.ts` after adding a module or plan under `src/openid/` (CI fails when it
+is out of date).

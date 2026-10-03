@@ -8,24 +8,28 @@ description: The rulebook for porting a Java class (condition, sequence, test mo
 The port is **1:1**: one Java class = one TS file with the same name, same relative path, same public
 behaviour, same log messages, same spec requirement tags. This is what keeps syncing with upstream cheap
 (`.claude/skills/sync-upstream`). Do not "improve" logic, messages, or severities while porting. If upstream
-is wrong, port it as is and leave a `// UPSTREAM:` comment.
+is wrong, port it as is and mark it (see [Marking differences](#marking-differences-from-upstream)).
 
 ## Where things live
 
-| Java (`src/main/java/net/openid/conformance/...`)                                                               | TypeScript                                         |
-| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `condition/client/Foo.java`                                                                                     | `src/condition/client/Foo.ts`                      |
-| `condition/as/Foo.java`, `common/`, `rs/`, `util/`                                                              | `src/condition/as/Foo.ts`, ...                     |
-| `sequence/client/Foo.java`, `sequence/as/`, `sequence/Foo.java`                                                 | `src/sequence/client/Foo.ts`, ...                  |
-| `util/JWKUtil.java`                                                                                             | `src/util/JWKUtil.ts`                              |
-| Nimbus JOSE+JWT / JDK library behaviour (not upstream code)                                                     | `src/util/nimbus/*.ts`, `src/util/jdk/*.ts`        |
-| `variant/ClientAuthType.java`                                                                                   | `src/variant/ClientAuthType.ts`                    |
-| `openid/OIDCCServerTest.java`, `openid/client/...`                                                              | `src/openid/OIDCCServerTest.ts`, ...               |
-| `testmodule/*`, `condition/AbstractCondition`, `sequence/AbstractConditionSequence`, `frontchannel/*`, `plan/*` | `src/framework/*` (already ported, do not re-port) |
+| Java (`src/main/java/net/openid/conformance/...`)                                                               | TypeScript                                                                      |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `condition/client/Foo.java`                                                                                     | `src/condition/client/Foo.ts`                                                   |
+| `condition/as/Foo.java`, `common/`, `rs/`, `util/`                                                              | `src/condition/as/Foo.ts`, ...                                                  |
+| `sequence/client/Foo.java`, `sequence/as/`, `sequence/Foo.java`                                                 | `src/sequence/client/Foo.ts`, ...                                               |
+| `util/JWKUtil.java`                                                                                             | `src/util/JWKUtil.ts`                                                           |
+| `variant/ClientAuthType.java`                                                                                   | `src/variant/ClientAuthType.ts`                                                 |
+| `openid/OIDCCServerTest.java`, `openid/client/...`                                                              | `src/openid/OIDCCServerTest.ts`, ...                                            |
+| `testmodule/*`, `condition/AbstractCondition`, `sequence/AbstractConditionSequence`, `frontchannel/*`, `plan/*` | `src/framework/*` (already ported, do not re-port)                              |
+| `src/main/resources/templates/foo.html` (Thymeleaf)                                                             | `src/framework/views/foo.ts` (see `port-test-module`)                           |
+| Nimbus JOSE+JWT / JDK / Spring library behaviour (not upstream code)                                            | `src/util/nimbus/*.ts`, `src/util/jdk/*.ts`, `src/util/UriComponentsBuilder.ts` |
 
-`upstream.lock.json` lists every file in scope with its Java source path and the blob hash at the pinned
-upstream commit. The upstream checkout used for porting is at `$UPSTREAM` (see the task prompt) or can be
-fetched with `npm run sync-upstream -- --fetch`.
+`upstream.lock.json` lists every lock-tracked file with its Java source path and the blob hash at the pinned
+upstream commit (`src/framework` entries are tracked for change detection although the TS is not 1:1; a key
+`file.ts::Name` maps a further Java class into an existing TS file). The library emulation in `src/util/nimbus`,
+`src/util/jdk` and `src/util/UriComponentsBuilder.ts` has no Java counterpart and is not in the lock. The
+upstream checkout used for porting is at `$UPSTREAM` (see the task prompt) or can be fetched with
+`npm run sync-upstream -- --fetch`.
 
 ## File skeleton
 
@@ -57,9 +61,9 @@ Rules:
 - `evaluate` is `override evaluate(env: Environment): Environment` when synchronous, or
   `override async evaluate(env: Environment): Promise<Environment>` when it awaits (HTTP calls, jose).
   Abstract base conditions declare `abstract` members in the same way as Java.
-- `static override pre` / `static override post` replace the method annotations. Omit when absent in Java.
-  Values are arrays even for a single Java string. `@PreEnvironment(required = {"a","b"}, strings = "c")` ->
-  `{ required: ["a", "b"], strings: ["c"] }`.
+- `static override pre` / `static override post` replace the method annotations (`required`, `strings`,
+  `integers`). Omit when absent in Java. Values are arrays even for a single Java string.
+  `@PreEnvironment(required = {"a","b"}, strings = "c")` -> `{ required: ["a", "b"], strings: ["c"] }`.
 - Node runs the TypeScript directly (type stripping). **Do not use** enums, namespaces, parameter
   properties (`constructor(private x)`), decorators, or `import x = require()`. Use `import type` for types.
   tsconfig has `erasableSyntaxOnly` + `verbatimModuleSyntax` + `noImplicitOverride` to catch this.
@@ -68,44 +72,34 @@ Rules:
 
 ## Framework API equivalents (conditions)
 
-| Java                                                                          | TypeScript                                                             |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `throw error("msg")`                                                          | `throw this.error("msg")`                                              |
-| `throw error("msg", args("k", v))`                                            | `throw this.error("msg", args("k", v))`                                |
-| `throw error("msg", e)` / `error(e)` / `error("msg", e, args(...))`           | same shapes on `this.error(...)`                                       |
-| `logSuccess("msg")`, `logSuccess("msg", args(...))`, `logSuccess(jsonObject)` | `this.logSuccess(...)` (same overloads)                                |
-| `log("msg")`, `log("msg", args(...))`, `log(map)`                             | `this.log(...)`                                                        |
-| `logFailure(...)`                                                             | `this.logFailure(...)`                                                 |
-| `args("a", 1, "b", 2)`                                                        | `args("a", 1, "b", 2)` (imported from the barrel)                      |
-| `ex(e)`, `ex(e, map)`                                                         | `ex(e)`, `ex(e, map)`                                                  |
-| `getRequirements()`                                                           | `this.getRequirements()` (a `Set<string>`)                             |
-| `getStringFromEnvironment(env, key, path, name)`                              | `this.getStringFromEnvironment(env, key, path, name)`                  |
-| `getJsonObjectFromEnvironment(...)`, `getJsonArrayFromEnvironment(...)`       | same                                                                   |
-| `createBrowserInteractionPlaceholder(msg)`                                    | `this.createBrowserInteractionPlaceholder(msg)`                        |
-| `Condition.ConditionResult.FAILURE`                                           | `ConditionResult.FAILURE`                                              |
-| `getMessage()`                                                                | `this.getMessage()`                                                    |
-| `RandomStringUtils.secure().nextAlphanumeric(n)`                              | `RandomStringUtils.nextAlphanumeric(n)`                                |
-| `Strings.isNullOrEmpty(s)`                                                    | `!s` (for `string \| null`)                                            |
-| `Strings.nullToEmpty(s)`                                                      | `s ?? ""`                                                              |
-| `Instant.now().getEpochSecond()`                                              | `Math.floor(Date.now() / 1000)`                                        |
-| `String.format(...)` / `"%s".formatted(x)`                                    | template literal                                                       |
-| `Objects.equals(a, b)`                                                        | `a === b`                                                              |
-| `List.of(...)` / `Set.of(...)`                                                | arrays / `new Set([...])`                                              |
-| `BaseEncoding.base64Url()...`                                                 | `Buffer.from(x).toString("base64url")` / `Buffer.from(s, "base64url")` |
-| `URI`/`URL` parsing                                                           | `new URL(s)` (throws on invalid), `URL.canParse(s)`                    |
-| `UriComponentsBuilder.fromUriString(u).queryParam(k, v)`                      | `const url = new URL(u); url.searchParams.append(k, v)`                |
-| `URLEncodedUtils.parse(s, charset, '&')`                                      | `[...new URLSearchParams(s).entries()]`                                |
-| `MessageDigest.getInstance("SHA-256").digest(b)`                              | `createHash("sha256").update(b).digest()` from `node:crypto`           |
-| `new URI(s)` (accept/reject, host, port matter), `URISyntaxException`         | `parseJavaURI(s)`, `URISyntaxException` in `src/util/jdk/uri.ts`       |
-| `new LdapName(dn).getRdns()`, `Rdn.equals`, `InvalidNameException`            | `parseLdapName`, `rdnEquals`, `InvalidNameException` in `jdk/ldap.ts`  |
-| `InetAddresses.forString(s)` compared with `InetAddress.equals`               | `inetAddressBytes(s)` in `src/util/jdk/inet.ts`                        |
-| `s.getBytes(US_ASCII)`                                                        | `Buffer.from(toUsAscii(s), "latin1")`, `src/util/jdk/strings.ts`       |
-| `s.isBlank()`, `URLEncoder.encode(s, UTF_8)`                                  | `isBlank(s)`, `urlEncode(s)` in `src/util/jdk/strings.ts`              |
-| `Base64.getDecoder().decode(s)`, its `IllegalArgumentException`               | `javaBase64Decode(s)`, `IllegalArgumentException` in `jdk/strings.ts`  |
-| `CertificateFactory.generateCertificates`, `CertificateException`             | `generateCertificates`, `CertificateException` in `jdk/x509.ts`        |
-| `publicKey.getAlgorithm()`                                                    | `javaKeyAlgorithm(key)` in `src/util/jdk/x509.ts`                      |
-| `cert.getSubjectX500Principal().getName()`                                    | `getSubjectX500PrincipalName(cert)` in `src/util/jdk/x509.ts`          |
-| `cert.getSubjectAlternativeNames()`                                           | `getSubjectAlternativeNames(cert)` in `src/util/jdk/x509.ts`           |
+| Java                                                                          | TypeScript                                                                    |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `throw error("msg")`                                                          | `throw this.error("msg")`                                                     |
+| `throw error("msg", args("k", v))`                                            | `throw this.error("msg", args("k", v))`                                       |
+| `throw error("msg", e)` / `error(e)` / `error("msg", e, args(...))`           | same shapes on `this.error(...)`                                              |
+| `logSuccess("msg")`, `logSuccess("msg", args(...))`, `logSuccess(jsonObject)` | `this.logSuccess(...)` (same overloads)                                       |
+| `log("msg")`, `log("msg", args(...))`, `log(map)`                             | `this.log(...)`                                                               |
+| `logFailure(...)`                                                             | `this.logFailure(...)`                                                        |
+| `args("a", 1, "b", 2)`                                                        | `args("a", 1, "b", 2)` (imported from the barrel)                             |
+| `ex(e)`, `ex(e, map)`                                                         | `ex(e)`, `ex(e, map)`                                                         |
+| `getRequirements()`                                                           | `this.getRequirements()` (a `Set<string>`)                                    |
+| `getStringFromEnvironment(env, key, path, name)`                              | `this.getStringFromEnvironment(env, key, path, name)`                         |
+| `getJsonObjectFromEnvironment(...)`, `getJsonArrayFromEnvironment(...)`       | same                                                                          |
+| `createBrowserInteractionPlaceholder(msg)`                                    | `this.createBrowserInteractionPlaceholder(msg)`                               |
+| `Condition.ConditionResult.FAILURE`                                           | `ConditionResult.FAILURE`                                                     |
+| `getMessage()`                                                                | `this.getMessage()`                                                           |
+| `RandomStringUtils.secure().nextAlphanumeric(n)`                              | `RandomStringUtils.nextAlphanumeric(n)`                                       |
+| `Strings.isNullOrEmpty(s)`                                                    | `!s` (for `string \| null`)                                                   |
+| `Strings.nullToEmpty(s)`                                                      | `s ?? ""`                                                                     |
+| `Instant.now().getEpochSecond()`                                              | `Math.floor(Date.now() / 1000)`                                               |
+| `String.format(...)` / `"%s".formatted(x)`                                    | template literal                                                              |
+| `Objects.equals(a, b)`                                                        | `a === b`                                                                     |
+| `List.of(...)` / `Set.of(...)`                                                | arrays / `new Set([...])`                                                     |
+| `BaseEncoding.base64Url()...`                                                 | `Buffer.from(x).toString("base64url")` / `Buffer.from(s, "base64url")`        |
+| `URL` parsing where only validity matters                                     | `new URL(s)` (throws on invalid), `URL.canParse(s)`; for `new URI(s)` see JDK |
+| `UriComponentsBuilder.fromUriString(u).queryParam(k, v)...toUriString()`      | `toUriString(u, [[k, v], ...])` from `src/util/UriComponentsBuilder.ts`       |
+| `URLEncodedUtils.parse(s, charset, '&')`                                      | `[...new URLSearchParams(s).entries()]`                                       |
+| `MessageDigest.getInstance("SHA-256").digest(b)`                              | `createHash("sha256").update(b).digest()` from `node:crypto`                  |
 
 ## Environment
 
@@ -124,7 +118,7 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `JsonObject`                                                 | `JsonObject` (`{ [k: string]: JsonValue }`)                                                 |
 | `JsonArray`                                                  | `JsonArray` (`JsonValue[]`)                                                                 |
-| `JsonElement`                                                | `JsonValue` (`                                                                              | undefined` when it may be missing) |
+| `JsonElement`                                                | `JsonValue` (`JsonValue \| undefined` when it may be missing)                               |
 | `new JsonObject()`                                           | `{}` typed as `const o: JsonObject = {}`                                                    |
 | `o.addProperty("k", v)` / `o.add("k", el)`                   | `o["k"] = v`                                                                                |
 | `o.get("k")` (null if missing)                               | `o["k"]` (undefined if missing)                                                             |
@@ -132,7 +126,7 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 | `o.remove("k")`                                              | `const v = o["k"]; delete o["k"]`                                                           |
 | `o.keySet()` / `o.entrySet()` / `o.size()`                   | `Object.keys(o)` / `Object.entries(o)` / `Object.keys(o).length`                            |
 | `el.isJsonObject()` / `isJsonArray()` / `isJsonNull()`       | `isJsonObject(el)` / `isJsonArray(el)` / `el === null`                                      |
-| `el.isJsonPrimitive() && el.getAsJsonPrimitive().isString()` | `typeof el === "string"`                                                                    |
+| `el.isJsonPrimitive() && el.getAsJsonPrimitive().isString()` | `typeof el === "string"` (or `OIDFJSON.isString(el)`)                                       |
 | `...isNumber()` / `...isBoolean()`                           | `typeof el === "number"` / `typeof el === "boolean"`                                        |
 | `el.getAsJsonObject()` / `getAsJsonArray()`                  | `el as JsonObject` after an `isJsonObject` check                                            |
 | `OIDFJSON.getString(el)` etc.                                | `OIDFJSON.getString(el)` (same strict semantics, throws on wrong type)                      |
@@ -147,29 +141,39 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 | `arr.add(x)` / `arr.size()` / `arr.get(i)`                   | `arr.push(x)` / `arr.length` / `arr[i]`                                                     |
 | `JsonNull.INSTANCE`                                          | `null`                                                                                      |
 
-`Map<String, Object>` log args are `Record<string, unknown>`; `JsonObject` and maps are interchangeable in logs.
+`OIDFJSON` holds the `OIDFJSON.java` accessors (`getString`, `getNumber`, `forceConversionToString`, `isString`,
+...); there are no Gson-style helpers (`get`, `keySet`, `entrySet`, `isJsonString`): use the object operations
+above. `Map<String, Object>` log args are
+`Record<string, unknown>`; `JsonObject` and maps are interchangeable in logs.
 
-## Nimbus JOSE -> `jose`
+## Library emulation: `src/util/nimbus`, `src/util/jdk`
 
-Use `jose` (https://github.com/panva/jose). Two layers:
+The ported util classes (`src/util/JWKUtil.ts`, `JWSUtil.ts`, `JWEUtil.ts`, `JWTUtil.ts`, `JWAUtil.ts`, ...) are
+lock-tracked 1:1 ports and contain only their upstream methods (plus re-exports of the emulation, marked
+`Not in upstream:`). Where the Java calls a library whose behaviour shows up in the test log (messages, accepted
+inputs, JSON member order), the port emulates that library:
 
-- `src/util/JWKUtil.ts`, `JWSUtil.ts`, `JWEUtil.ts`, `JWTUtil.ts`, `JWAUtil.ts` are lock-tracked 1:1 ports of the
-  upstream util classes and contain only their ported methods (plus re-exports of the emulation they used to hold).
-- `src/util/nimbus/` is **not** lock-tracked: it emulates the Nimbus JOSE+JWT 10.9 API the Java code calls (same
-  JSON member order, same exception classes and messages), on top of jose. `src/util/jdk/` does the same for JDK
-  behaviour (java.net.URI, String.format, ...), when it exists.
+- `src/util/nimbus/` - the Nimbus JOSE+JWT API (version pinned by upstream's `pom.xml`, noted in
+  `nimbus/algorithms.ts`) on top of `jose`: same JSON member order, exception classes and messages.
+- `src/util/jdk/` - JDK behaviour that differs from JS: `java.net.URI` (`uri.ts`), `LdapName`/`Rdn` (`ldap.ts`),
+  `InetAddress` (`inet.ts`), X.509 (`x509.ts`), `String`/`Base64`/`URLEncoder` (`strings.ts`).
 
-**Rule: Nimbus or JDK behaviour lives in `src/util/nimbus` (and `src/util/jdk`); never define it inside a
-condition.** Look there first; if something is missing, extend it there (one copy, faithful to the Nimbus/JDK
-source, the decision documented in a comment) and give it a unit test (`src/util/nimbus/*.test.ts`, `node:test`)
-that pins the result and the exception message. Exception messages end up in the test log, so check them against
-the real library when you can (`java -cp nimbus-jose-jwt.jar Foo.java`).
+**Rule: Nimbus or JDK behaviour lives only in `src/util/nimbus` / `src/util/jdk`; never define it inside a
+condition or a ported util class.** Look there first; if something is missing, extend it there (one copy,
+faithful to the library source, the decision documented in a comment) and give it a `node:test` unit test next to
+it (`src/util/{nimbus,jdk}/*.test.ts`) that pins the result and the exception message. Exception messages end up
+in the test log, so check them against the real library when you can (`java -cp nimbus-jose-jwt.jar Foo.java`;
+the jdk tests were produced with OpenJDK 21).
+
+### Nimbus JOSE -> `jose` / `src/util/nimbus`
 
 | Nimbus                                                                                 | jose / port                                                                                                         |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `JWT jwt = JWTParser.parse(s)`                                                         | `JWTUtil.parseJWT(s)` (adds upstream's character check) or `parseJWT(s)` from `nimbus/jwt.ts` -> `JWT` object       |
 | `SignedJWT.parse(s)`                                                                   | `parseSignedJWT(s)` from `nimbus/jwt.ts` (not `JWTUtil.parseJWT` + a type check: the messages differ)               |
 | `JWEObject.parse(s)` / `EncryptedJWT.parse(s)`                                         | `parseJWEObject(s)` from `nimbus/jwt.ts`                                                                            |
+| `jwt instanceof EncryptedJWT`, `jwt.getHeader().toJSONObject()`, `jwt.serialize()`     | `jwt.type === "encrypted"`, `jwt.header`, `jwt.serialized`                                                          |
+| `jwt.getJWTClaimsSet()` (as JSON)                                                      | `JWTUtil.jwtClaimsSetAsJsonObject(jwt)`; then `claims["iss"]` for `getStringClaim("iss")`                           |
 | `JWTClaimsSet.parse(json.toString())` + `toJSONObject()` / `toPayload()`               | `parseClaimsSet(json, includeNullValues)` from `nimbus/jwt.ts`                                                      |
 | `JWKSet.parse(json)` / `JWK.parse(json)`                                               | `JWKUtil.parseJWKSet(json)` / `parseJWK(json)` (`nimbus/jwk.ts`), JSON-shaped; `importKey(jwk, alg)` -> jose key    |
 | `jwk.toPublicJWK()`, `jwk.isPrivate()`, `jwk.getRequiredParams()`                      | `toPublicJWK`, `isPrivate`, `getRequiredParams` (`nimbus/jwk.ts`; the first two also on `JWKUtil`)                  |
@@ -185,16 +189,34 @@ the real library when you can (`java -cp nimbus-jose-jwt.jar Foo.java`).
 | `JSONObjectUtils.parse/getString/...`                                                  | `nimbusParseJsonObject`, `nimbusGetString`, ... (`nimbus/json.ts`)                                                  |
 | `java.text.ParseException`, `JOSEException`, `KeyLengthException`                      | `ParseException`, `JOSEException`, `KeyLengthException`, `isJOSEException(e)` (`nimbus/errors.ts`)                  |
 | a `HashMap` whose iteration order decides JSON member order                            | `JavaHashMap` (`nimbus/HashMap.ts`, JDK 21 order)                                                                   |
-| `jwt.getJWTClaimsSet().getStringClaim("iss")`                                          | `claims["iss"]` on the decoded claims object                                                                        |
 | `RSAKeyGenerator(2048).keyID(kid).generate()`                                          | `generateKeyPair("RS256", { modulusLength: 2048 })` + `exportJWK`                                                   |
 | `Base64URL.encode(bytes)`                                                              | `base64url.encode(bytes)` from jose, or `Buffer...toString("base64url")`                                            |
 
 jose is async: conditions that sign/verify become `async evaluate(...)`. jose also validates more strictly than
 Nimbus in places (e.g. unsupported curves); when Java leniently skipped keys, do the same explicitly.
 
+### JDK -> `src/util/jdk`
+
+| Java                                                                  | TypeScript                                                       |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `new URI(s)` (accept/reject, host, port matter), `URISyntaxException` | `parseJavaURI(s)`, `URISyntaxException` (`jdk/uri.ts`)           |
+| `new LdapName(dn).getRdns()`, `Rdn.equals`, `InvalidNameException`    | `parseLdapName`, `rdnEquals`, `InvalidNameException` (`ldap.ts`) |
+| `InetAddresses.forString(s)` compared with `InetAddress.equals`       | `inetAddressBytes(s)` (`jdk/inet.ts`)                            |
+| `s.getBytes(US_ASCII)`                                                | `Buffer.from(toUsAscii(s), "latin1")` (`jdk/strings.ts`)         |
+| `s.isBlank()`, `URLEncoder.encode(s, UTF_8)`                          | `isBlank(s)`, `urlEncode(s)` (`jdk/strings.ts`)                  |
+| `Base64.getDecoder().decode(s)`, its `IllegalArgumentException`       | `javaBase64Decode(s)`, `IllegalArgumentException` (`strings.ts`) |
+| `CertificateFactory.generateCertificates`, `CertificateException`     | `generateCertificates`, `CertificateException` (`jdk/x509.ts`)   |
+| `publicKey.getAlgorithm()`                                            | `javaKeyAlgorithm(key)` (`jdk/x509.ts`)                          |
+| `cert.getSubjectX500Principal().getName()`                            | `getSubjectX500PrincipalName(cert)` (`jdk/x509.ts`)              |
+| `cert.getSubjectAlternativeNames()`                                   | `getSubjectAlternativeNames(cert)` (`jdk/x509.ts`)               |
+
 ## Spring HTTP -> HttpClient
 
-Conditions that call endpoints use `this.createHttpClient(env)` (alias `this.createRestTemplate(env)`):
+Conditions that call endpoints use `this.createHttpClient(env, restrictAllowedTLSVersions = true, interceptor?)`
+(Java `createRestTemplate(env)`; `this.createRestTemplate(env, restrict?)` is an alias, and
+`await this.createRestTemplateWithCache(env)` adds the opt-in external endpoint cache, `CachingHttpInterceptor`).
+The client uses the `mutual_tls_authentication` certificate unless the condition overrides
+`useMtlsForHttpRequests()`, and times out after `getHttpClientTimeoutSeconds()`.
 
 ```ts
 const client = this.createHttpClient(env);
@@ -218,7 +240,9 @@ try {
 }
 ```
 
-- Every request/response is logged automatically (like LoggingRequestInterceptor); do not log them again.
+- Every request/response is logged automatically (like LoggingRequestInterceptor); do not log them again. A
+  response replayed by the cache carries `response.cacheAgeSeconds` (Java: `CachedHttpResponseMarker`) and is
+  logged as such.
 - Redirects are not followed; no HTTP status throws. Spring's default `RestTemplate` throws
   `RestClientResponseException` on 4xx/5xx: when Java relies on that (no custom `ResponseErrorHandler`), port the
   catch block as `if (response.status >= 400) { ...same error... }`. When Java installs a handler returning
@@ -255,11 +279,27 @@ explicit fields (no parameter properties). `call(sequence(Foo))`, `exec().mapKey
 `replace/skip/insertBefore/insertAfter/then/butFirst` all exist with the Java names. Java `Class<? extends Foo>`
 arguments are the class itself (`Foo`), `Supplier<Foo>` is `() => new Foo(...)`.
 
+The builders keep what they collected in a readonly `spec` instead of Java getters:
+`ConditionCallBuilder.conditionClass` and `.spec.{requirements, onFail, onSkip, stopOnFailure, skips}`,
+`Command.spec.{envCommands, startBlock, endBlock, exposeStrings}`. A unit's type is `unit.unitKind`
+(`"condition" | "command" | "sequence" | "sequence-call" | "skipped"`), not `instanceof`. Java's static
+`actionToConditionClass` function is `AbstractConditionSequence.actionToConditionClass` (use it with `.map(...)`).
+
 ## Test modules
 
 See `.claude/skills/port-test-module/SKILL.md`. Short version: everything that runs conditions is `async` and
 `await`ed; `@PublishTestModule` -> `static readonly meta`; variant annotations -> `static override variants`;
-HTTP handlers return a web `Response` built with `jsonResponse` / `redirectView` / `modelAndView` / `noContent`.
+HTTP handlers return a web `Response` built with `jsonResponse` / `redirectView` / `modelAndView` / `noContent`;
+the runner hands the module its collaborators with `attach({...})` (Java `setProperties`), modules never call it.
+
+## Marking differences from upstream
+
+- `// UPSTREAM: <what Java does>` at every spot where the TS knowingly behaves like questionable upstream code
+  (a bug, a dead check, a misleading message) or cannot behave exactly like it (a `NullPointerException` that
+  becomes a `TypeError`, a JDK/Spring behaviour with no JS equivalent). Keep the explanation to the difference;
+  `grep -rn "UPSTREAM:" src` lists them all.
+- `Not in upstream:` marks a member that exists only in the port (re-exports of the emulation, runner hooks).
+- A deliberate behaviour change is a deviation: comment it at the code site and add it to the list below.
 
 ## Deliberate deviations from upstream
 
@@ -274,11 +314,11 @@ Everything else is 1:1; these are the known, intentional differences (each is co
 - `src/framework/views/checkSessionIFrame.ts` splits the postMessage `"client_id session_state"` on the last
   space; the template splits on the first one and breaks with client ids containing spaces.
 - `AbstractTestModule.setKeepServingAfterFinish()` lets the RP test module acting as emulated OP in
-  suite-vs-suite runs answer requests after its own flow finished (FINISHED -> RUNNING is allowed then).
+  suite-vs-suite runs answer requests after its own flow finished (FINISHED -> RUNNING/WAITING is allowed then).
 - `src/framework/server.ts` adds `x-ssl-protocol` / `x-ssl-cipher` to incoming requests over TLS, which the
   nginx/apache proxy adds upstream.
-- `src/runner/TestRunner.ts` starts modules with `autoStart() == false` right away (upstream's CI script does
-  the same for `oidcc-server-rotate-keys`).
+- `src/runner/TestRunner.ts` starts modules with `autoStart() == false` right away and logs a `TEST-RUNNER` INFO
+  entry saying so (upstream's CI script does the same for `oidcc-server-rotate-keys`).
 
 ## Fidelity checklist (review every ported file against it)
 

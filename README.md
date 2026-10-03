@@ -131,6 +131,9 @@ Node.js 24 or newer; no build step (native TypeScript).
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | `src/condition/`, `src/sequence/`, `src/openid/` | 1:1 ports of the Java conditions, sequences, test modules and plans                                                           |
 | `src/framework/`                                 | the test framework (environment, condition runner, status machine, event log, HTTP client/server, Playwright browser control) |
+| `src/util/`                                      | 1:1 ports of the Java util classes; `nimbus/` and `jdk/` emulate the Nimbus JOSE+JWT and JDK behaviour the Java relies on     |
+| `src/runner/`, `bin/`                            | the module runner, CI project list, expected-failure analysis, reporters, and the `openid-conformance` CLI                    |
+| `scripts/`                                       | `sync-upstream.ts`, `gen-registry.ts` (generates `src/registry.ts`), `log-fingerprint.ts` (log fidelity diff)                 |
 | `targets/`                                       | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                          |
 | `configs/`                                       | the CI test configurations and expected-failure lists                                                                         |
 | `tests/plan.spec.ts`                             | the Playwright entry point                                                                                                    |
@@ -150,6 +153,9 @@ for both humans and coding agents:
 - `port-conditions`, `port-test-module` - workflows for conditions/sequences and modules/plans/variants
 - `sync-upstream` - keeping up with upstream
 - `run-conformance` - running and debugging plans
+
+Framework changes are checked for fidelity by the unit tests (`npm run test:unit`), the suite-vs-suite project
+and a before/after diff of every module's log with `scripts/log-fingerprint.ts` (see `CONTRIBUTING.md`).
 
 ## License
 

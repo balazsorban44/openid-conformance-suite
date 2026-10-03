@@ -11,37 +11,58 @@ description: How to run the ported OpenID conformance test plans locally and in 
 npm ci
 npx playwright install --with-deps chromium   # once
 
+node bin/openid-conformance.ts projects       # the CI projects: name, plan, variant, config
 # OP plan against the bundled panva oidc-provider (started automatically by the config)
-npm run test -- --project=op-basic
+node bin/openid-conformance.ts ci --project op-basic-dynamic
 # RP plan: the suite emulates the OP, the bundled openid-client RP is driven through it
-npm run test -- --project=rp-basic
+node bin/openid-conformance.ts ci --project rp-basic
+# extra Playwright args after `--`, e.g. one module
+node bin/openid-conformance.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["
 
 # Any plan/config:
-CONFORMANCE_PLAN=oidcc-basic-certification-test-plan \
-CONFORMANCE_VARIANT='[server_metadata=discovery][client_registration=dynamic_client]' \
-CONFORMANCE_CONFIG=configs/oidc-provider/oidcc-basic.json \
-npx playwright test tests/plan.spec.ts
+node bin/openid-conformance.ts run --plan oidcc-basic-certification-test-plan \
+  --variant server_metadata=discovery --variant client_registration=dynamic_client \
+  --config configs/oidc-provider/oidcc-basic-dynamic.json [--module 'oidcc-server*'] [--tls] [--headed]
+node bin/openid-conformance.ts list [--plans|--modules|--variants]
 ```
 
-Or with the CLI (same thing, nicer flags):
-
-```bash
-npx openid-conformance run --plan oidcc-basic-certification-test-plan \
-  --variant client_auth_type=client_secret_basic --config ./my-config.json
-npx openid-conformance list            # plans, modules, variants
-npx openid-conformance run ... --module oidcc-server   # one module only
-```
+`ci` and `run` spawn `playwright test tests/plan.spec.ts` with the `CONFORMANCE_*` environment below (`ci` also
+sets `CONFORMANCE_TLS=1` unless already set). `npm run test` is plain `playwright test`: it runs whatever the
+environment selects (`CONFORMANCE_PROJECT=<name>`, or `CONFORMANCE_PLAN` + `CONFORMANCE_CONFIG`) and otherwise
+reports a single skipped test. The Playwright project is named after `CONFORMANCE_PROJECT` (default
+`conformance`), so `--project=<name>` does not select a plan. `npm run test:unit` runs the `node:test` unit tests.
 
 One Playwright test = one test module instance (`<plan> › <module>[variants]`). Each test writes into its
 `test-results/<test>/` directory (and attaches to the HTML report): `log.json` (the full event log), `log.html`
 (rendered log, same shape as the upstream log-detail page), `module-report.json` (result + expected-failure
 analysis), `target-output.txt` (stdout/stderr of the `target` process), screenshots of every scripted-browser
-page on failure, and Playwright's video/trace when enabled. `CONFORMANCE_VERBOSE=1` streams the event log to
-the console while running; `CONFORMANCE_VIDEO=off` skips video recording.
+page on failure, `emulated-op-log.html` for suite-vs-suite runs, and Playwright's video/trace when enabled.
 
-Test outcome mapping: module result PASSED/WARNING/REVIEW -> passed (WARNING/REVIEW annotated), SKIPPED ->
-skipped, FAILED -> failed unless listed in the expected-failures file for the config (then it passes and is
-annotated "expected failure"; an expected failure that does NOT happen fails).
+Test outcome (`src/runner/expected.ts`, a port of upstream's `run-test-plan.py` analysis): a module's test passes
+when its log has no FAILURE or WARNING entry that is not in the config's expected-failures list, every listed
+expected failure/warning did happen, the module was not SKIPPED unless the expected-skips list says so (then the
+Playwright test is reported skipped), and it was not INTERRUPTED. Expected failures and warnings are annotated.
+
+## Environment variables
+
+| Variable                                                                       | Effect                                                                                  |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `CONFORMANCE_PROJECT`                                                          | select a project from `src/runner/projects.ts` (plan, variant, config, skipped modules) |
+| `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG`                | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)       |
+| `CONFORMANCE_MODULE`                                                           | only modules whose `testName` matches this glob                                         |
+| `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`                             | serve the suite over https (default: the bundled `configs/certs/localhost.*`)           |
+| `CONFORMANCE_PORT`, `CONFORMANCE_HOST`, `CONFORMANCE_EXTERNAL_URL`             | where the suite server listens / the base URL it advertises                             |
+| `CONFORMANCE_CWD`                                                              | directory the config's `target.command` runs in (the CLI sets the caller's cwd)         |
+| `CONFORMANCE_MODULE_TIMEOUT` (s, 150), `CONFORMANCE_TEST_TIMEOUT` (ms, 240000) | per-module run timeout / Playwright test timeout                                        |
+| `CONFORMANCE_WORKERS`                                                          | Playwright workers (default 1)                                                          |
+| `CONFORMANCE_VERBOSE=1`                                                        | stream the event log to the console                                                     |
+| `CONFORMANCE_TARGET_OUTPUT=1`                                                  | echo the target's stdout/stderr                                                         |
+| `CONFORMANCE_KEEP_SERVER=1`                                                    | do not stop the `target` process after the plan                                         |
+| `CONFORMANCE_VIDEO=off`, `CONFORMANCE_TRACE=on`                                | skip video recording / record a trace for every test                                    |
+| `CONFORMANCE_LOG_FINAL_ENV=false`                                              | do not log the final environment at the end of each module                              |
+| `CONFORMANCE_REPORT_DIR`, `CONFORMANCE_SUMMARY_TITLE`                          | where/with which title the summary is written (`conformance-report/`)                   |
+| `CONFORMANCE_PRINT_SUMMARY=1`                                                  | print the summary to stdout (always on when `CI` is set)                                |
+| `CONFORMANCE_OWNER`                                                            | the owner `sub` exposed to modules (default `ci`)                                       |
 
 ## Configuration file
 
@@ -63,6 +84,12 @@ by the port:
 
 Modules that upstream starts manually from the UI (`autoStart() == false`, i.e. `oidcc-server-rotate-keys`) are
 started right away, as upstream's `run-test-plan.py` does in CI.
+
+## CI matrix
+
+`src/runner/projects.ts` is the matrix: each entry (name, plan, variant, config, optional `skipModules`) is one
+GitHub Actions job running `node bin/openid-conformance.ts ci --project <name>`; `.github/workflows/ci.yml` reads
+the names from `node bin/openid-conformance.ts projects --json`. Adding a project there adds the CI job.
 
 ## Reading the CI summary
 
@@ -92,7 +119,8 @@ entries per module, and modules found on one side only (`!!!`); any of these exi
 of regexes; a changed message that matches one (old or new text) is accepted. Entries that only moved (`>`) are
 listed but accepted: the scripted browser and the test module log concurrently, so two runs of unchanged code
 interleave some entries differently (`--strict-order` fails on moves too). The framework messages themselves are
-pinned by the unit tests (`npm run test:unit`: `src/framework/*.test.ts`, `src/util/nimbus-helpers.test.ts`).
+pinned by the unit tests (`npm run test:unit`: `src/framework/*.test.ts`, `src/runner/*.test.ts`,
+`src/util/{nimbus,jdk}/*.test.ts`).
 
 ## Debugging a failing module
 
@@ -102,6 +130,7 @@ pinned by the unit tests (`npm run test:unit`: `src/framework/*.test.ts`, `src/u
    (`.claude/skills/java-to-ts-porting`): message text, severity and requirement must match.
 3. Re-run only that module: `--module <testName>` (CLI) or `-g "<testName>"` (playwright). `--headed` opens the
    browser for the scripted-browser steps; `PWDEBUG=1` pauses.
-4. For RP tests, `CONFORMANCE_KEEP_SERVER=1` keeps the emulated OP running after the module to poke it manually.
+4. `CONFORMANCE_KEEP_SERVER=1` leaves the `target` (the bundled OP or RP) running after the plan to poke it
+   manually; `CONFORMANCE_TARGET_OUTPUT=1` shows its output live.
 5. A genuine implementation bug in a bundled target is fixed in `targets/`; a genuine spec deviation that the
    target won't fix goes into the config's expected-failures file with a comment, exactly as upstream does.

@@ -1,8 +1,8 @@
 /**
  * The CI matrix: every entry becomes a Playwright project and a GitHub Actions job (.github/workflows/ci.yml reads
  * the names from `openid-conformance projects --json`). `plan` + `variant` select the module instances (see
- * VariantService.expandPlan), `config` is the test configuration file (which also names the implementation under
- * test to start).
+ * `expandPlan` in src/framework/VariantService.ts), `config` is the test configuration file (which also names the
+ * implementation under test to start).
  *
  * Mirrors upstream `.gitlab-ci/run-tests.sh` (makeOidccTest / makeClientTest / local provider runs).
  */

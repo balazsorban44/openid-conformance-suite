@@ -19,7 +19,9 @@ Prerequisite: read `.claude/skills/java-to-ts-porting/SKILL.md` (the rulebook) f
 1. For each file, read the Java source **and its superclass chain** (`extends Abstract...`). Port abstract bases
    first (they are in the batch when they are in the closure; otherwise they already exist in `src/`).
 2. Check whether the condition depends on `src/util/*` helpers (JWKUtil, JWTUtil, ...) and whether those exist.
-   If a helper is missing, add it to the matching util file with the Java method name (never inline a copy).
+   If an upstream util method is missing, port it into the matching util file with the Java method name (never
+   inline a copy). If the Java calls Nimbus or JDK API that has no equivalent yet, add it to `src/util/nimbus` /
+   `src/util/jdk` with a unit test, never inside the condition (see the porting rulebook).
 3. Write the TS file following the skeleton and mapping tables. Keep the Java javadoc and inline comments.
 4. Before moving on, re-read the Java and TS side by side against the fidelity checklist.
 5. After the batch: `npx tsc --noEmit -p tsconfig.json 2>&1 | grep '<your paths>'` must be empty for your files
@@ -27,18 +29,24 @@ Prerequisite: read `.claude/skills/java-to-ts-porting/SKILL.md` (the rulebook) f
    fine ONLY if the import path matches the lock file's target path exactly). Run `npx oxfmt <files>` and
    `npx oxlint <files>`.
 6. Do not commit; the orchestrator commits batches. Do not edit files outside your list except `src/util/*`
-   additions (append-only) and brand-new helper files.
+   additions (append-only, including `src/util/nimbus` / `src/util/jdk`) and brand-new helper files.
 
 ## Patterns that recur
 
 - **Abstract validate-hash style classes** (`AbstractValidateHash`, `AbstractCheckForUnexpectedSchemaProperties`):
   port the abstract base with `protected` methods, subclasses call `super.method(env, ...)`.
 - **HTTP-calling conditions** (`GetDynamicServerConfiguration`, `CallTokenEndpointAndReturnFullResponse`,
-  `CallProtectedResource`, `FetchServerKeys`, `CallDynamicRegistrationEndpoint`, `Unregister...`): extend the
-  ported `AbstractCallEndpoint` family; use `this.createHttpClient(env)`; `async evaluate`.
+  `CallProtectedResource`, `FetchServerKeys`, `CallDynamicRegistrationEndpoint`, `Unregister...`): keep the Java
+  base class (`AbstractCallEndpoint*`, `AbstractCallOAuthEndpoint`, ...); `async evaluate`. Java
+  `createRestTemplate(env)` -> `this.createHttpClient(env)`; `createRestTemplate(env, false)` ->
+  `this.createRestTemplate(env, false)`; the cached discovery/JWKS fetches use
+  `await this.createRestTemplateWithCache(env)`. Always `await client.close()` in `finally`.
 - **JOSE conditions** (`ValidateIdTokenSignature`, `SignRequestObject`, `ExtractJWT` family): `async evaluate`,
-  use `src/util/JWTUtil.ts` / `JWKUtil.ts`; the environment representation of a JWT is
-  `{ value, header, claims, (jwe_header) }` exactly as `JWTUtil.jwtStringToJsonObjectForEnvironment` produces.
+  use `src/util/JWTUtil.ts` / `JWKUtil.ts` and the Nimbus emulation in `src/util/nimbus`; the environment
+  representation of a JWT is `{ value, header, claims, (jwe_header) }` exactly as
+  `JWTUtil.jwtStringToJsonObjectForEnvironment` produces.
+- **Sequences that inspect their units** (e.g. `RefreshTokenRequestSteps`): read the builder's `spec`
+  (`requirements`, `onFail`, ...) and map units with `AbstractConditionSequence.actionToConditionClass`.
 - **Conditions with `ENV_KEY` constants**: `static readonly ENV_KEY = "..."`.
 - **`@PreEnvironment` on an abstract class** whose subclasses do not override `evaluate`: declare `static pre` on
   the base; subclasses inherit it.
@@ -49,11 +57,11 @@ Prerequisite: read `.claude/skills/java-to-ts-porting/SKILL.md` (the rulebook) f
 
 ## Verifying a port quickly
 
-Write a scratch script (do not commit) under `/tmp` or the scratchpad:
+Write a scratch script (do not commit) in the scratchpad, importing the repo by absolute path:
 
 ```ts
-import { Environment, TestInstanceEventLog, ConditionResult } from "./src/framework/index.ts";
-import { CheckStateInAuthorizationResponse } from "./src/condition/client/CheckStateInAuthorizationResponse.ts";
+import { Environment, TestInstanceEventLog, ConditionResult } from "<repo>/src/framework/index.ts";
+import { CheckStateInAuthorizationResponse } from "<repo>/src/condition/client/CheckStateInAuthorizationResponse.ts";
 const env = new Environment();
 env.putString("state", "abc");
 env.putObject("authorization_endpoint_response", { state: "abc" });
@@ -63,4 +71,5 @@ c.setProperties("t1", log, ConditionResult.FAILURE, []);
 await c.execute(env);
 ```
 
-Run with `node scratch.ts` (Node 24 strips types natively).
+Run with `node scratch.ts` (Node 24 strips types natively). For anything worth keeping, write a `node:test` file
+next to the code instead (`npm run test:unit` runs `src/**/*.test.ts`).
