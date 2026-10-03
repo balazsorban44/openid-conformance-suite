@@ -5,3 +5,6 @@ conformance-report/
 .upstream/
 *.log
 .DS_Store
+
+# agent worktrees
+.claude/worktrees/
