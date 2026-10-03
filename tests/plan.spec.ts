@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { LogEntry } from "../src/framework/EventLog.ts";
 import { SuiteServer } from "../src/framework/server.ts";
 import { VariantSelection } from "../src/framework/variants.ts";
-import { VariantService } from "../src/framework/VariantService.ts";
+import { expandPlan } from "../src/framework/VariantService.ts";
 import { findPlan } from "../src/registry.ts";
 import { loadConfig, type LoadedConfig } from "../src/runner/config.ts";
 import { analyzeResultLogs, describeProblems } from "../src/runner/expected.ts";
@@ -43,7 +43,7 @@ if (!planName || !configPath) {
 		throw new Error(`Unknown test plan '${planName}'`);
 	}
 	const moduleRe = moduleFilter ? globToRegExp(moduleFilter) : null;
-	const modules = VariantService.expandPlan(planClass, VariantSelection.fromBracketString(variantString)).filter(
+	const modules = expandPlan(planClass, VariantSelection.fromBracketString(variantString)).filter(
 		(m) => !moduleRe || moduleRe.test(m.testName),
 	);
 

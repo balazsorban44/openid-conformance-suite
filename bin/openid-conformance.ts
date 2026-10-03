@@ -66,7 +66,7 @@ function parseArgs(argv: string[]): { cmd: string; opts: Opts; rest: string[] } 
 
 async function list(opts: Opts): Promise<void> {
 	const { modules, plans } = await import("../src/registry.ts");
-	const { VariantService } = await import("../src/framework/VariantService.ts");
+	const { expandPlan } = await import("../src/framework/VariantService.ts");
 	const { collectVariantMetadata, VariantSelection } = await import("../src/framework/variants.ts");
 	if (opts["modules"]) {
 		for (const m of modules) {
@@ -86,7 +86,7 @@ async function list(opts: Opts): Promise<void> {
 		for (const p of plans) {
 			console.log(`${p.meta.testPlanName}\n    ${p.meta.displayName}`);
 			const params = new Set<string>();
-			for (const m of VariantService.expandPlan(p, new VariantSelection({}))) {
+			for (const m of expandPlan(p, new VariantSelection({}))) {
 				for (const v of collectVariantMetadata(m.moduleClass).parameters) {
 					if (!m.variantFromPlanDefinition.has(v)) {
 						params.add(`${v.parameter.name}=${v.values().map(String).join("|")}`);

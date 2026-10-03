@@ -9,26 +9,6 @@ import {
 	type ConditionSequenceSupplier,
 } from "./ConditionSequence.ts";
 
-export function actionToConditionClass(action: TestExecutionUnit): ConditionClass | null {
-	if (action instanceof ConditionCallBuilder) {
-		return action.getConditionClass();
-	}
-	const c = action as unknown as Condition;
-	if (typeof c.execute === "function" && typeof c.setProperties === "function") {
-		return action.constructor as ConditionClass;
-	}
-	return null;
-}
-
-function isSequence(u: unknown): u is ConditionSequence {
-	return (
-		typeof u === "object" &&
-		u !== null &&
-		typeof (u as ConditionSequence).evaluate === "function" &&
-		typeof (u as ConditionSequence).getTestExecutionUnits === "function"
-	);
-}
-
 /**
  * Port of sequence/AbstractConditionSequence.java
  *
@@ -36,6 +16,11 @@ function isSequence(u: unknown): u is ConditionSequence {
  * The test module executes the resulting units.
  */
 export abstract class AbstractConditionSequence implements ConditionSequence {
+	/** The condition class a unit calls, or null if it is not a condition call (Java: a protected static Function) */
+	static actionToConditionClass(action: TestExecutionUnit): ConditionClass | null {
+		return action.unitKind === "condition" ? (action as ConditionCallBuilder).conditionClass : null;
+	}
+
 	readonly unitKind = "sequence";
 	private callables: TestExecutionUnit[] = [];
 	private replacements = new Map<ConditionClass, TestExecutionUnit>();
@@ -76,10 +61,10 @@ export abstract class AbstractConditionSequence implements ConditionSequence {
 		const expandedUnits: TestExecutionUnit[] = [];
 		for (const action of this.callables) {
 			let sequence: ConditionSequence | null = null;
-			if (action instanceof ConditionSequenceCallBuilder) {
-				sequence = action.create();
-			} else if (isSequence(action)) {
-				sequence = action;
+			if (action.unitKind === "sequence-call") {
+				sequence = (action as ConditionSequenceCallBuilder).create();
+			} else if (action.unitKind === "sequence") {
+				sequence = action as ConditionSequence;
 			}
 			if (sequence != null) {
 				sequence.evaluate();
@@ -95,15 +80,10 @@ export abstract class AbstractConditionSequence implements ConditionSequence {
 		// process any condition sequences this sequence calls, producing a flat list - this means that replace() etc
 		// can work on conditions within sub-sequences
 		const expandedUnits = this.getCallablesWithSubSequencesExpanded();
+		const toClass = AbstractConditionSequence.actionToConditionClass;
 
 		// First check that all modifications refer to a condition in this sequence
-		const conditionClasses = new Set<ConditionClass>();
-		for (const u of expandedUnits) {
-			const c = actionToConditionClass(u);
-			if (c != null) {
-				conditionClasses.add(c);
-			}
-		}
+		const conditionClasses = new Set(expandedUnits.map(toClass));
 		const check = (map: Map<ConditionClass, unknown>, what: string) => {
 			for (const conditionClass of map.keys()) {
 				if (!conditionClasses.has(conditionClass)) {
@@ -118,19 +98,23 @@ export abstract class AbstractConditionSequence implements ConditionSequence {
 
 		const units: TestExecutionUnit[] = [...this.before];
 		for (let action of expandedUnits) {
-			const conditionClass = actionToConditionClass(action);
+			const conditionClass = toClass(action);
 			if (conditionClass != null) {
-				if (this.replacements.has(conditionClass)) {
-					action = this.replacements.get(conditionClass) as TestExecutionUnit;
+				const replacement = this.replacements.get(conditionClass);
+				const skipMessage = this.skips.get(conditionClass);
+				const before = this._insertBefore.get(conditionClass);
+				const after = this._insertAfter.get(conditionClass);
+				if (replacement) {
+					action = replacement;
 				}
-				if (this.skips.has(conditionClass)) {
-					action = new SkippedCondition(conditionClass.name, this.skips.get(conditionClass) as string);
+				if (skipMessage !== undefined) {
+					action = new SkippedCondition(conditionClass.name, skipMessage);
 				}
-				if (this._insertBefore.has(conditionClass)) {
-					action = sequenceOf(this._insertBefore.get(conditionClass) as TestExecutionUnit, action);
+				if (before) {
+					action = sequenceOf(before, action);
 				}
-				if (this._insertAfter.has(conditionClass)) {
-					action = sequenceOf(action, this._insertAfter.get(conditionClass) as TestExecutionUnit);
+				if (after) {
+					action = sequenceOf(action, after);
 				}
 			}
 			units.push(action);
@@ -186,15 +170,7 @@ export abstract class AbstractConditionSequence implements ConditionSequence {
 		condition: Condition | ConditionClass,
 		...rest: (string | ConditionResult)[]
 	): void {
-		let onFail: ConditionResult;
-		let requirements: string[];
-		if (rest.length > 0 && isConditionResult(rest[0])) {
-			onFail = rest[0];
-			requirements = rest.slice(1) as string[];
-		} else {
-			requirements = rest as string[];
-			onFail = requirements.length === 0 ? ConditionResult.INFO : ConditionResult.WARNING;
-		}
+		const { onFail, requirements } = splitOnFail(rest, implicitOnFail(rest));
 		this.call(this.condition(condition).requirements(requirements).onFail(onFail).dontStopOnFailure());
 	}
 }
@@ -219,4 +195,9 @@ export function splitOnFail(
 		return { onFail: rest[0], requirements: rest.slice(1) as string[] };
 	}
 	return { onFail: defaultOnFail, requirements: rest as string[] };
+}
+
+/** The onFail of Java's overloads without an explicit one: INFO without requirements, WARNING with requirements */
+export function implicitOnFail(requirements: unknown[]): ConditionResult {
+	return requirements.length === 0 ? ConditionResult.INFO : ConditionResult.WARNING;
 }

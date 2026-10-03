@@ -3,6 +3,7 @@ import type { TestExecutionUnit } from "./ConditionCallBuilder.ts";
 
 /** Port of sequence/ConditionSequence.java */
 export interface ConditionSequence extends TestExecutionUnit {
+	readonly unitKind: "sequence";
 	evaluate(): void;
 	getTestExecutionUnits(): TestExecutionUnit[];
 	replace(conditionToReplace: ConditionClass, builder: TestExecutionUnit): ConditionSequence;
@@ -26,47 +27,20 @@ export class SkippedCondition implements TestExecutionUnit {
 		this.source = source;
 		this.message = message;
 	}
-
-	getSource(): string {
-		return this.source;
-	}
-
-	getMessage(): string {
-		return this.message;
-	}
 }
 
 /** Port of testmodule/ConditionSequenceCallBuilder.java */
 export class ConditionSequenceCallBuilder implements TestExecutionUnit {
 	readonly unitKind = "sequence-call";
-	private readonly conditionSequenceClass: ConditionSequenceClass | null;
-	private readonly conditionSequenceConstructor: ConditionSequenceSupplier | null;
+	/** Instantiate the sequence this builder describes (a new instance on every call) */
+	readonly create: ConditionSequenceSupplier;
 
 	constructor(classOrSupplier: ConditionSequenceClass | ConditionSequenceSupplier) {
-		if (isClass(classOrSupplier)) {
-			this.conditionSequenceClass = classOrSupplier;
-			this.conditionSequenceConstructor = null;
-		} else {
-			this.conditionSequenceClass = null;
-			this.conditionSequenceConstructor = classOrSupplier;
-		}
+		// Java takes a Class or a Supplier; here both are functions. A class is constructed; an arrow function
+		// supplier (no prototype, not constructible) is called.
+		this.create =
+			"prototype" in classOrSupplier
+				? () => new (classOrSupplier as ConditionSequenceClass)()
+				: (classOrSupplier as ConditionSequenceSupplier);
 	}
-
-	/** Instantiate the sequence this builder describes */
-	create(): ConditionSequence {
-		if (this.conditionSequenceConstructor) {
-			return this.conditionSequenceConstructor();
-		}
-		return new (this.conditionSequenceClass as ConditionSequenceClass)();
-	}
-}
-
-/**
- * Distinguish `class Foo {}` from `() => new Foo()`: classes have a prototype object with a constructor,
- * arrow functions do not have a prototype property at all.
- */
-export function isClass(v: unknown): v is new () => unknown {
-	return (
-		typeof v === "function" && typeof (v as { prototype?: unknown }).prototype === "object" && v.prototype !== null
-	);
 }

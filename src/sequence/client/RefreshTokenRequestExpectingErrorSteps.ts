@@ -1,11 +1,8 @@
 import {
 	AbstractConditionSequence,
-	ConditionCallBuilder,
 	ConditionResult,
-	type Condition,
 	type ConditionClass,
 	type ConditionSequenceClass,
-	type TestExecutionUnit,
 } from "../../framework/index.ts";
 import { AddScopeToTokenEndpointRequest } from "../../condition/client/AddScopeToTokenEndpointRequest.ts";
 import { CallTokenEndpointAllowingDpopNonceErrorAndReturnFullResponse } from "../../condition/client/CallTokenEndpointAllowingDpopNonceErrorAndReturnFullResponse.ts";
@@ -16,19 +13,6 @@ import { CheckTokenEndpointReturnedJsonContentType } from "../../condition/clien
 import { CreateRefreshTokenRequest } from "../../condition/client/CreateRefreshTokenRequest.ts";
 import { ValidateErrorFromTokenEndpointResponseError } from "../../condition/client/ValidateErrorFromTokenEndpointResponseError.ts";
 import { CreateDpopProofSteps } from "./CreateDpopProofSteps.ts";
-
-// Java: AbstractConditionSequence.actionToConditionClass (a protected static there; the framework port keeps it
-// module-private, so it is repeated here)
-function actionToConditionClass(action: TestExecutionUnit): ConditionClass | null {
-	if (action instanceof ConditionCallBuilder) {
-		return action.getConditionClass();
-	}
-	const c = action as unknown as Condition;
-	if (typeof c.execute === "function" && typeof c.setProperties === "function") {
-		return action.constructor as ConditionClass;
-	}
-	return null;
-}
 
 export class RefreshTokenRequestExpectingErrorSteps extends AbstractConditionSequence {
 	private secondClient: boolean;
@@ -70,7 +54,9 @@ export class RefreshTokenRequestExpectingErrorSteps extends AbstractConditionSeq
 			// repeat conditions in CreateDpopProofSteps.createTokenEndpointDpopSteps() only if token_endpoint_dpop_nonce_error is found
 			const seq = CreateDpopProofSteps.createTokenEndpointDpopSteps();
 			seq.evaluate();
-			const condList = seq.getTestExecutionUnits().map(actionToConditionClass) as ConditionClass[];
+			const condList = seq
+				.getTestExecutionUnits()
+				.map(AbstractConditionSequence.actionToConditionClass) as ConditionClass[];
 			for (const cond of condList) {
 				this.call(
 					this.condition(cond).skipIfStringsMissing("token_endpoint_dpop_nonce_error").onSkip(ConditionResult.INFO),

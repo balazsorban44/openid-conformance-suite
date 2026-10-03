@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AbstractCondition } from "./AbstractCondition.ts";
-import { AbstractConditionSequence, actionToConditionClass } from "./AbstractConditionSequence.ts";
+import { AbstractConditionSequence } from "./AbstractConditionSequence.ts";
 import { AbstractTestModule } from "./AbstractTestModule.ts";
 import { BrowserControl } from "./BrowserControl.ts";
 import { ConditionResult } from "./Condition.ts";
@@ -47,9 +47,9 @@ class Outer extends AbstractConditionSequence {
 function names(units: TestExecutionUnit[]): unknown[] {
 	return units.map((u) => {
 		if (u instanceof SkippedCondition) {
-			return `skip:${u.getSource()}:${u.getMessage()}`;
+			return `skip:${u.source}:${u.message}`;
 		}
-		const c = actionToConditionClass(u);
+		const c = AbstractConditionSequence.actionToConditionClass(u);
 		if (c != null) {
 			return c.name;
 		}
@@ -145,11 +145,11 @@ test("default severities of sequence calls", () => {
 	const s = new Severities();
 	s.evaluate();
 	const got = (s.getTestExecutionUnits() as ConditionCallBuilder[]).map((b) => [
-		b.getConditionClass().name,
-		b.getOnFail(),
-		b.isStopOnFailure(),
-		b.getRequirements(),
-		b.getOnSkip(),
+		b.conditionClass.name,
+		b.spec.onFail,
+		b.spec.stopOnFailure,
+		b.spec.requirements,
+		b.spec.onSkip,
 	]);
 	assert.deepEqual(got, [
 		["A", "FAILURE", true, [], "INFO"],
@@ -175,14 +175,14 @@ test("a skipped condition logs only its message under the condition's name", asy
 	const m = new SeqModule();
 	const exec = new TestExecutionManager("tid", { onError: async () => {}, afterTask: () => {} });
 	const images = new ImageService(log);
-	m.setProperties(
-		"tid",
-		null,
-		log,
-		new BrowserControl({}, "tid", log, exec, images, () => Promise.reject()),
-		exec,
-		images,
-	);
+	m.attach({
+		id: "tid",
+		owner: null,
+		eventLog: log,
+		browser: new BrowserControl({}, "tid", log, exec, images, () => Promise.reject()),
+		executionManager: exec,
+		imageService: images,
+	});
 	const s = new Outer();
 	s.skip(B, "B is not applicable");
 	await m.runSequence(s);

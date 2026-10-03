@@ -1,5 +1,4 @@
 import { AbstractTestModule } from "./AbstractTestModule.ts";
-import { args } from "./DataUtils.ts";
 import { sleep } from "./execution.ts";
 import { TestFailureException } from "./exceptions.ts";
 import { isJsonObject, OIDFJSON, type JsonObject } from "./json.ts";
@@ -44,19 +43,12 @@ export abstract class AbstractRedirectServerTestModule extends AbstractTestModul
 	protected async performRedirect(method = "GET"): Promise<void> {
 		const redirectTo = this.env.getString("redirect_to_authorization_endpoint") as string;
 
-		this.eventLog.log(
-			this.getName(),
-			args(
-				"msg",
-				"Redirecting to authorization endpoint",
-				"redirect_to",
-				redirectTo,
-				"method",
-				method,
-				"http",
-				"redirect",
-			),
-		);
+		this.eventLog.log(this.getName(), {
+			msg: "Redirecting to authorization endpoint",
+			redirect_to: redirectTo,
+			method,
+			http: "redirect",
+		});
 
 		await this.setStatus(Status.WAITING);
 
@@ -69,10 +61,11 @@ export abstract class AbstractRedirectServerTestModule extends AbstractTestModul
 	): Promise<void> {
 		const redirectTo = this.env.getString("redirect_to_authorization_endpoint") as string;
 
-		this.eventLog.log(
-			this.getName(),
-			args("msg", "Redirecting to authorization endpoint", "redirect_to", redirectTo, "http", "redirect"),
-		);
+		this.eventLog.log(this.getName(), {
+			msg: "Redirecting to authorization endpoint",
+			redirect_to: redirectTo,
+			http: "redirect",
+		});
 
 		await this.createPlaceholder();
 
@@ -88,10 +81,11 @@ export abstract class AbstractRedirectServerTestModule extends AbstractTestModul
 	protected async performRedirectWithPlaceholder(method = "GET"): Promise<void> {
 		const redirectTo = this.env.getString("redirect_to_authorization_endpoint") as string;
 
-		this.eventLog.log(
-			this.getName(),
-			args("msg", "Redirecting to authorization endpoint", "redirect_to", redirectTo, "http", "redirect"),
-		);
+		this.eventLog.log(this.getName(), {
+			msg: "Redirecting to authorization endpoint",
+			redirect_to: redirectTo,
+			http: "redirect",
+		});
 
 		await this.createPlaceholder();
 
@@ -172,25 +166,15 @@ export abstract class AbstractRedirectServerTestModule extends AbstractTestModul
 				await import("../condition/client/ExtractImplicitHashToCallbackResponse.ts");
 			await this.callAndStopOnFailure(ExtractImplicitHashToCallbackResponse);
 
-			this.eventLog.log(
-				this.getName(),
-				args(
-					"msg",
-					"Authorization endpoint response captured",
-					"http",
-					"redirect-in",
-					"http_method",
-					this.env.getString("callback_http_method"),
-					"url_query",
-					this.env.getObject("callback_query_params"),
-					"url_fragment",
-					this.env.getObject("callback_params"),
-					"headers",
-					this.env.getObject("callback_headers"),
-					"post_body",
-					this.env.getObject("callback_body_form_params"),
-				),
-			);
+			this.eventLog.log(this.getName(), {
+				msg: "Authorization endpoint response captured",
+				http: "redirect-in",
+				http_method: this.env.getString("callback_http_method"),
+				url_query: this.env.getObject("callback_query_params"),
+				url_fragment: this.env.getObject("callback_params"),
+				headers: this.env.getObject("callback_headers"),
+				post_body: this.env.getObject("callback_body_form_params"),
+			});
 
 			await this.processCallback();
 

@@ -71,7 +71,15 @@ function create(): { m: M; log: TestInstanceEventLog; statuses: Status[] } {
 	const exec = new TestExecutionManager("tid", { onError: async () => {}, afterTask: () => m.forceReleaseLock() });
 	const images = new ImageService(log);
 	const browser = new BrowserControl({}, "tid", log, exec, images, () => Promise.reject(new Error("no browser")));
-	m.setProperties("tid", null, log, browser, exec, images, { onStatusChange: (s) => statuses.push(s) });
+	m.attach({
+		id: "tid",
+		owner: null,
+		eventLog: log,
+		browser,
+		executionManager: exec,
+		imageService: images,
+		hooks: { onStatusChange: (s) => statuses.push(s) },
+	});
 	return { m, log, statuses };
 }
 

@@ -1,21 +1,15 @@
-import {
-	ConditionError,
-	ConditionResult,
-	isConditionResult,
-	type Condition,
-	type ConditionClass,
-} from "./Condition.ts";
-import { ConditionCallBuilder, type TestExecutionUnit } from "./ConditionCallBuilder.ts";
+import { ConditionError, ConditionResult, type Condition, type ConditionClass } from "./Condition.ts";
+import { ConditionCallBuilder, type Skip, type TestExecutionUnit } from "./ConditionCallBuilder.ts";
 import { Command } from "./Command.ts";
 import {
 	ConditionSequenceCallBuilder,
-	SkippedCondition,
 	type ConditionSequence,
 	type ConditionSequenceClass,
 	type ConditionSequenceSupplier,
+	type SkippedCondition,
 } from "./ConditionSequence.ts";
-import { AbstractConditionSequence, splitOnFail } from "./AbstractConditionSequence.ts";
-import { args, ex } from "./DataUtils.ts";
+import { implicitOnFail, sequenceOf, splitOnFail } from "./AbstractConditionSequence.ts";
+import { ex, type LogArgs } from "./DataUtils.ts";
 import { Environment } from "./Environment.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
 import { TestExecutionManager, sleep } from "./execution.ts";
@@ -33,40 +27,34 @@ import type { ModuleVariantMetadata, VariantEnum, VariantEnumClass, VariantMap }
  * flow (the test body or an incoming HTTP request handler) runs conditions at a time; HTTP I/O releases it.
  */
 class AsyncMutex {
-	private locked = false;
-	private waiters: (() => void)[] = [];
-
-	isLocked(): boolean {
-		return this.locked;
-	}
+	locked = false;
+	private readonly waiters = new Set<() => void>();
 
 	async acquire(timeoutMs: number, onTimeout: () => Error): Promise<void> {
-		if (!this.locked) {
-			this.locked = true;
-			return;
-		}
-		await new Promise<void>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.waiters = this.waiters.filter((w) => w !== wake);
-				reject(onTimeout());
-			}, timeoutMs);
+		if (this.locked) {
+			const { promise, resolve, reject } = Promise.withResolvers<void>();
 			const wake = () => {
 				clearTimeout(timer);
 				resolve();
 			};
-			this.waiters.push(wake);
-		});
+			const timer = setTimeout(() => {
+				this.waiters.delete(wake);
+				reject(onTimeout());
+			}, timeoutMs);
+			this.waiters.add(wake);
+			await promise;
+		}
 		this.locked = true;
 	}
 
 	release(): void {
-		if (!this.locked) {
-			return;
-		}
-		this.locked = false;
-		const next = this.waiters.shift();
-		if (next) {
-			next();
+		if (this.locked) {
+			this.locked = false;
+			const [next] = this.waiters;
+			if (next) {
+				this.waiters.delete(next);
+				next();
+			}
 		}
 	}
 }
@@ -75,6 +63,106 @@ export interface TestModuleHooks {
 	onStatusChange?: (status: Status) => void;
 	onResultChange?: (result: Result) => void;
 }
+
+/** What the runner hands a module before configure() (Java: TestRunner calling setProperties) */
+export interface TestModuleAttachment {
+	id: string;
+	owner: Record<string, string> | null;
+	eventLog: TestInstanceEventLog;
+	browser: BrowserControl;
+	executionManager: TestExecutionManager;
+	imageService: ImageService;
+	hooks?: TestModuleHooks;
+}
+
+/**
+ * Test status state machine:
+ *
+ *          /----------->--------------------------------\
+ *         /           /                                  \
+ *        /----------------->----------------\             \
+ *       /           /     /                  v             v
+ *   CREATED -> CONFIGURED -> RUNNING --> FINISHED      INTERRUPTED
+ *                         \     ^--v      ^              ^
+ *                          \-> WAITING --/--------------/
+ *
+ * Not in upstream: FINISHED -> RUNNING/WAITING is allowed with keepServingAfterFinish (see setStatusInternal).
+ */
+const TRANSITIONS: Record<Status, readonly Status[]> = {
+	NOT_YET_CREATED: [Status.CREATED],
+	CREATED: [Status.CONFIGURED, Status.WAITING, Status.INTERRUPTED, Status.FINISHED],
+	CONFIGURED: [Status.RUNNING, Status.INTERRUPTED, Status.FINISHED, Status.WAITING],
+	RUNNING: [Status.INTERRUPTED, Status.FINISHED, Status.WAITING],
+	WAITING: [Status.RUNNING, Status.INTERRUPTED, Status.FINISHED],
+	FINISHED: [],
+	INTERRUPTED: [],
+};
+
+const mapped = (env: Environment, key: string) => (env.isKeyShadowed(key) ? env.getEffectiveKey(key) : null);
+
+/**
+ * The skip checks of a condition call, in the order they are evaluated (every skip of the first kind, then of the
+ * second kind, ...). Each returns the log entry (keys in upstream order) when the call has to be skipped, else null.
+ */
+const SKIP_CHECKS: {
+	[K in Skip["kind"]]: (
+		env: Environment,
+		skip: Extract<Skip, { kind: K }>,
+		result: ConditionResult,
+		requirements: string[],
+	) => LogArgs | null;
+} = {
+	objectMissing: (env, { key }, result, requirements) =>
+		env.containsObject(key)
+			? null
+			: {
+					msg: "Skipped evaluation due to missing required object: " + key,
+					expected: key,
+					result,
+					mapped: mapped(env, key),
+					requirements,
+				},
+	stringMissing: (env, { key }, result, requirements) =>
+		env.getString(key) != null
+			? null
+			: { msg: "Skipped evaluation due to missing required string: " + key, expected: key, result, requirements },
+	stringPresent: (env, { key }, result, requirements) =>
+		env.getString(key) == null
+			? null
+			: { msg: "Skipped evaluation because string is present: " + key, expected: key, result, requirements },
+	longMissing: (env, { key }, result, requirements) =>
+		env.getLong(key) != null
+			? null
+			: {
+					msg: "Skipped evaluation due to missing required long integer: " + key,
+					expected: key,
+					result,
+					requirements,
+				},
+	elementMissing: (env, { key, path }, result, requirements) =>
+		env.getElementFromObject(key, path) != null
+			? null
+			: {
+					msg: "Skipped evaluation due to missing required element: " + key + " " + path,
+					object: key,
+					path,
+					mapped: mapped(env, key),
+					result,
+					requirements,
+				},
+	elementPresent: (env, { key, path }, result, requirements) =>
+		env.getElementFromObject(key, path) == null
+			? null
+			: {
+					msg: "Skipped evaluation because element is present: " + key + " " + path,
+					object: key,
+					path,
+					mapped: mapped(env, key),
+					result,
+					requirements,
+				},
+};
+const SKIP_KINDS = Object.keys(SKIP_CHECKS) as Skip["kind"][];
 
 /**
  * Port of testmodule/AbstractTestModule.java
@@ -85,6 +173,7 @@ export interface TestModuleHooks {
  *    release it, and HTTP I/O inside conditions releases/reacquires it via the TestLockManager
  *  - @PublishTestModule becomes `static readonly meta`, variant annotations become `static variants`
  *  - handleHttp() returns a web `Response`
+ *  - setProperties(...) is attach({...}); whenStatus()/whenFinished() let the runner wait for a status
  */
 export abstract class AbstractTestModule {
 	static readonly meta: PublishTestModule;
@@ -105,17 +194,33 @@ export abstract class AbstractTestModule {
 	private cleanupCalled = false;
 	private cleanupInProgress = false;
 	protected imageService!: ImageService;
-	private testLockManager!: TestLockManager;
 	private hooks: TestModuleHooks = {};
 	private readonly mutex = new AsyncMutex();
-	private finishedPromise: Promise<void>;
-	private resolveFinished!: () => void;
-
-	constructor() {
-		this.finishedPromise = new Promise<void>((resolve) => {
-			this.resolveFinished = resolve;
-		});
-	}
+	private readonly finished = Promise.withResolvers<void>();
+	private statusWaiters: { statuses: Status[]; resolve: (status: Status) => void }[] = [];
+	/**
+	 * Not in upstream. When set, incoming HTTP requests are still handled after the module has finished (status
+	 * FINISHED -> RUNNING is allowed). The runner sets it on the RP test module that acts as the emulated OP in
+	 * suite-vs-suite runs, where OP test modules call e.g. the userinfo endpoint more than once.
+	 */
+	private keepServingAfterFinish = false;
+	private lockManagerEnabled = true;
+	/** Handed to conditions: releases the lock around HTTP I/O (RUNNING -> WAITING -> RUNNING) */
+	private readonly testLockManager: TestLockManager = {
+		releaseLock: async () => {
+			if (this.lockManagerEnabled && this.status === Status.RUNNING) {
+				await this.setStatusInternal(Status.WAITING);
+			}
+		},
+		reacquireLock: async () => {
+			if (this.lockManagerEnabled && this.status === Status.WAITING) {
+				await this.setStatusInternal(Status.RUNNING);
+			}
+		},
+		disable: () => {
+			this.lockManagerEnabled = false;
+		},
+	};
 
 	getEventLog(): TestInstanceEventLog {
 		return this.eventLog;
@@ -126,41 +231,17 @@ export abstract class AbstractTestModule {
 		return true;
 	}
 
-	setProperties(
-		id: string,
-		owner: Record<string, string> | null,
-		eventLog: TestInstanceEventLog,
-		browser: BrowserControl,
-		executionManager: TestExecutionManager,
-		imageService: ImageService,
-		hooks: TestModuleHooks = {},
-	): void {
-		this.id = id;
-		this.owner = owner;
-		this.eventLog = eventLog;
-		this.browser = browser;
-		this.executionManager = executionManager;
-		this.imageService = imageService;
-		this.hooks = hooks;
+	/** Java: setProperties(id, owner, eventLog, browser, info, executionManager, imageService) */
+	attach(a: TestModuleAttachment): void {
+		this.id = a.id;
+		this.owner = a.owner;
+		this.eventLog = a.eventLog;
+		this.browser = a.browser;
+		this.executionManager = a.executionManager;
+		this.imageService = a.imageService;
+		this.hooks = a.hooks ?? {};
 
 		this.exposeOwnerIdToEnvironment();
-
-		let enabled = true;
-		this.testLockManager = {
-			releaseLock: async () => {
-				if (enabled && this.status === Status.RUNNING) {
-					await this.setStatusInternal(Status.WAITING);
-				}
-			},
-			reacquireLock: async () => {
-				if (enabled && this.status === Status.WAITING) {
-					await this.setStatusInternal(Status.RUNNING);
-				}
-			},
-			disable: () => {
-				enabled = false;
-			},
-		};
 
 		void this.setStatusInternal(Status.CREATED);
 	}
@@ -244,18 +325,7 @@ export abstract class AbstractTestModule {
 		condition: Condition | ConditionClass,
 		...rest: (string | ConditionResult)[]
 	): Promise<void> {
-		let onFail: ConditionResult;
-		let requirements: string[];
-		if (rest.length > 0 && isConditionResult(rest[0])) {
-			onFail = rest[0];
-			requirements = rest.slice(1) as string[];
-		} else if (rest.length === 0) {
-			onFail = ConditionResult.INFO;
-			requirements = [];
-		} else {
-			onFail = ConditionResult.WARNING;
-			requirements = rest as string[];
-		}
+		const { onFail, requirements } = splitOnFail(rest, implicitOnFail(rest));
 		await this.call(
 			this.condition(condition)
 				.skipIfObjectsMissing(required)
@@ -289,171 +359,55 @@ export abstract class AbstractTestModule {
 	}
 
 	/**
-	 * Call the condition as specified in the builder (see Java doc for the order of checks).
+	 * Call the condition as specified in the builder: create it, check the skips, evaluate it, and map a failure
+	 * to the test result (or a TestFailureException when the call stops on failure).
 	 */
 	protected async callCondition(builder: ConditionCallBuilder): Promise<void> {
-		if (this.getStatus() !== Status.CREATED && !this.cleanupInProgress) {
-			// We don't run this check for 'CREATED' as the lock is currently not held during 'configure'; cleanup()
-			// runs inside the FINISHED/INTERRUPTED transition with the lock held (Java: isHeldByCurrentThread)
-			if (this.getStatus() !== Status.RUNNING) {
-				throw new TestFailureException(
-					this.getId(),
-					"Condition '" +
-						builder.getConditionClass().name +
-						"' called when test status is '" +
-						this.getStatus() +
-						"'. This is a bug in the test module and probably means that a call to " +
-						"setStatus(Status.RUNNING) is missing.",
-				);
-			}
+		// We don't run this check for 'CREATED' as the lock is currently not held during 'configure'; cleanup()
+		// runs inside the FINISHED/INTERRUPTED transition with the lock held (Java: isHeldByCurrentThread)
+		if (this.status !== Status.CREATED && !this.cleanupInProgress && this.status !== Status.RUNNING) {
+			throw new TestFailureException(
+				this.getId(),
+				"Condition '" +
+					builder.conditionClass.name +
+					"' called when test status is '" +
+					this.getStatus() +
+					"'. This is a bug in the test module and probably means that a call to " +
+					"setStatus(Status.RUNNING) is missing.",
+			);
 		}
 
+		const { spec } = builder;
 		try {
-			let condition = builder.getCondition();
-			if (condition == null) {
-				condition = new (builder.getConditionClass())();
-			}
-			condition.setProperties(this.id, this.eventLog, builder.getOnFail(), builder.getRequirements());
+			const condition = builder.condition ?? new builder.conditionClass();
+			condition.setProperties(this.id, this.eventLog, spec.onFail, spec.requirements);
 			condition.setLockManager(this.testLockManager);
 
 			// check the environment to see if we need to skip this call
-			for (const req of builder.getSkipIfObjectsMissing()) {
-				if (!this.env.containsObject(req)) {
-					this.eventLog.log(
-						condition.getMessage(),
-						args(
-							"msg",
-							"Skipped evaluation due to missing required object: " + req,
-							"expected",
-							req,
-							"result",
-							builder.getOnSkip(),
-							"mapped",
-							this.env.isKeyShadowed(req) ? this.env.getEffectiveKey(req) : null,
-							"requirements",
-							builder.getRequirements(),
-						),
-					);
-					this.updateResultFromConditionFailure(builder.getOnSkip());
-					return;
-				}
-			}
-			for (const s of builder.getSkipIfStringsMissing()) {
-				if (this.env.getString(s) == null) {
-					this.eventLog.log(
-						condition.getMessage(),
-						args(
-							"msg",
-							"Skipped evaluation due to missing required string: " + s,
-							"expected",
-							s,
-							"result",
-							builder.getOnSkip(),
-							"requirements",
-							builder.getRequirements(),
-						),
-					);
-					this.updateResultFromConditionFailure(builder.getOnSkip());
-					return;
-				}
-			}
-			for (const s of builder.getSkipIfStringsPresent()) {
-				if (this.env.getString(s) != null) {
-					this.eventLog.log(
-						condition.getMessage(),
-						args(
-							"msg",
-							"Skipped evaluation because string is present: " + s,
-							"expected",
-							s,
-							"result",
-							builder.getOnSkip(),
-							"requirements",
-							builder.getRequirements(),
-						),
-					);
-					this.updateResultFromConditionFailure(builder.getOnSkip());
-					return;
-				}
-			}
-			for (const s of builder.getSkipIfLongsMissing()) {
-				if (this.env.getLong(s) == null) {
-					this.eventLog.log(
-						condition.getMessage(),
-						args(
-							"msg",
-							"Skipped evaluation due to missing required long integer: " + s,
-							"expected",
-							s,
-							"result",
-							builder.getOnSkip(),
-							"requirements",
-							builder.getRequirements(),
-						),
-					);
-					this.updateResultFromConditionFailure(builder.getOnSkip());
-					return;
-				}
-			}
-			for (const [key, path] of builder.getSkipIfElementsMissing()) {
-				const el = this.env.getElementFromObject(key, path);
-				if (el == null) {
-					this.eventLog.log(
-						condition.getMessage(),
-						args(
-							"msg",
-							"Skipped evaluation due to missing required element: " + key + " " + path,
-							"object",
-							key,
-							"path",
-							path,
-							"mapped",
-							this.env.isKeyShadowed(key) ? this.env.getEffectiveKey(key) : null,
-							"result",
-							builder.getOnSkip(),
-							"requirements",
-							builder.getRequirements(),
-						),
-					);
-					this.updateResultFromConditionFailure(builder.getOnSkip());
-					return;
-				}
-			}
-			for (const [key, path] of builder.getSkipIfElementsPresent()) {
-				const el = this.env.getElementFromObject(key, path);
-				if (el != null) {
-					this.eventLog.log(
-						condition.getMessage(),
-						args(
-							"msg",
-							"Skipped evaluation because element is present: " + key + " " + path,
-							"object",
-							key,
-							"path",
-							path,
-							"mapped",
-							this.env.isKeyShadowed(key) ? this.env.getEffectiveKey(key) : null,
-							"result",
-							builder.getOnSkip(),
-							"requirements",
-							builder.getRequirements(),
-						),
-					);
-					this.updateResultFromConditionFailure(builder.getOnSkip());
-					return;
+			for (const kind of SKIP_KINDS) {
+				const check = SKIP_CHECKS[kind] as (
+					env: Environment,
+					skip: Skip,
+					result: ConditionResult,
+					requirements: string[],
+				) => LogArgs | null;
+				for (const skip of spec.skips) {
+					const skipped = skip.kind === kind ? check(this.env, skip, spec.onSkip, spec.requirements) : null;
+					if (skipped) {
+						this.eventLog.log(condition.getMessage(), skipped);
+						this.updateResultFromConditionFailure(spec.onSkip);
+						return;
+					}
 				}
 			}
 
 			await condition.execute(this.env);
 		} catch (error) {
 			if (error instanceof ConditionError) {
-				if (error.isPreOrPostError) {
+				if (error.isPreOrPostError || spec.stopOnFailure) {
 					throw new TestFailureException(error);
-				} else if (builder.isStopOnFailure()) {
-					throw new TestFailureException(error);
-				} else {
-					this.updateResultFromConditionFailure(builder.getOnFail());
 				}
+				this.updateResultFromConditionFailure(spec.onFail);
 			} else if (error instanceof TestFailureException) {
 				throw error;
 			} else {
@@ -478,17 +432,17 @@ export abstract class AbstractTestModule {
 	 * Execute a set of test execution commands: expose strings, start block, env commands, end block.
 	 */
 	protected async callCommand(builder: Command): Promise<void> {
-		for (const e of builder.getExposeStrings()) {
+		const { exposeStrings, startBlock, envCommands, endBlock } = builder.spec;
+		for (const e of exposeStrings) {
 			this.exposeEnvString(e);
 		}
-		const start = builder.getStartBlock();
-		if (start) {
-			this.eventLog.startBlock(start);
+		if (startBlock) {
+			this.eventLog.startBlock(startBlock);
 		}
-		for (const cmd of builder.getEnvCommands()) {
+		for (const cmd of envCommands) {
 			cmd(this.env);
 		}
-		if (builder.isEndBlock()) {
+		if (endBlock) {
 			this.eventLog.endBlock();
 		}
 	}
@@ -497,23 +451,29 @@ export abstract class AbstractTestModule {
 	 * Dispatch function to call a more specific subclass as needed.
 	 */
 	protected async call(
-		builder: TestExecutionUnit | ConditionSequence | ConditionSequenceCallBuilder | null | undefined,
+		unit: TestExecutionUnit | ConditionSequence | ConditionSequenceCallBuilder | null | undefined,
 	): Promise<void> {
-		if (builder == null) {
+		if (unit == null) {
 			return;
 		}
-		if (builder instanceof ConditionCallBuilder) {
-			await this.callCondition(builder);
-		} else if (builder instanceof Command) {
-			await this.callCommand(builder);
-		} else if (builder instanceof ConditionSequenceCallBuilder) {
-			await this.callSequence(builder.create());
-		} else if (builder instanceof SkippedCondition) {
-			this.eventLog.log(builder.getSource(), args("msg", builder.getMessage()));
-		} else if (isSequence(builder)) {
-			await this.callSequence(builder);
-		} else {
-			throw new TestFailureException(this.getId(), "Unknown class passed to call() function");
+		switch (unit.unitKind) {
+			case "condition":
+				await this.callCondition(unit as ConditionCallBuilder);
+				break;
+			case "command":
+				await this.callCommand(unit as Command);
+				break;
+			case "sequence-call":
+				await this.callSequence((unit as ConditionSequenceCallBuilder).create());
+				break;
+			case "sequence":
+				await this.callSequence(unit as ConditionSequence);
+				break;
+			case "skipped":
+				this.eventLog.log((unit as SkippedCondition).source, { msg: (unit as SkippedCondition).message });
+				break;
+			default:
+				throw new TestFailureException(this.getId(), "Unknown class passed to call() function");
 		}
 	}
 
@@ -523,11 +483,7 @@ export abstract class AbstractTestModule {
 	}
 
 	protected sequenceOf(...units: TestExecutionUnit[]): ConditionSequence {
-		return new (class extends AbstractConditionSequence {
-			evaluate(): void {
-				this.call(units);
-			}
-		})();
+		return sequenceOf(...units);
 	}
 
 	/**
@@ -571,7 +527,7 @@ export abstract class AbstractTestModule {
 
 	protected logFinalEnv(): void {
 		if (AbstractTestModule.LOG_FINAL_ENV) {
-			this.eventLog.log(this.getName(), args("msg", "Final environment", "env", this.env.toJSON(), "final_env", true));
+			this.eventLog.log(this.getName(), { msg: "Final environment", env: this.env.toJSON(), final_env: true });
 		}
 	}
 
@@ -615,10 +571,11 @@ export abstract class AbstractTestModule {
 				this.imageService.fillPlaceholder(this.getId(), placeholder, { image_no_longer_required: true }, true);
 			}
 
-			this.eventLog.log(
-				this.getName(),
-				args("msg", "Test has run to completion", "result", Status.FINISHED, "testmodule_result", this.getResult()),
-			);
+			this.eventLog.log(this.getName(), {
+				msg: "Test has run to completion",
+				result: Status.FINISHED,
+				testmodule_result: this.getResult(),
+			});
 
 			// if we weren't interrupted already, then we're finished
 			if (this.getStatus() !== Status.INTERRUPTED) {
@@ -666,62 +623,47 @@ export abstract class AbstractTestModule {
 	}
 
 	private updateResultFromConditionFailure(onFail: ConditionResult): void {
-		switch (onFail) {
-			case ConditionResult.FAILURE:
-				this.setResult(Result.FAILED);
-				break;
-			case ConditionResult.WARNING:
-				if (this.getResult() !== Result.FAILED && this.getResult() !== Result.REVIEW) {
-					this.setResult(Result.WARNING);
-				}
-				break;
-			default:
-				break;
+		if (onFail === ConditionResult.FAILURE) {
+			this.setResult(Result.FAILED);
+		} else if (
+			onFail === ConditionResult.WARNING &&
+			this.getResult() !== Result.FAILED &&
+			this.getResult() !== Result.REVIEW
+		) {
+			this.setResult(Result.WARNING);
 		}
 	}
 
 	protected async setStatus(newStatus: Status): Promise<void> {
-		switch (newStatus) {
-			case Status.CONFIGURED:
-			case Status.WAITING:
-			case Status.RUNNING:
-				await this.setStatusInternal(newStatus);
-				break;
-			default:
-				throw new TestFailureException(
-					this.getId(),
-					"Test module called setStatus() with a value other than CONFIGURED/WAITING/RUNNING. This is a bug in the test module; it should use a different method to change to the desired state - e.g. fireTestFinished() or throwing a TestFailureException.",
-				);
+		if (newStatus !== Status.CONFIGURED && newStatus !== Status.WAITING && newStatus !== Status.RUNNING) {
+			throw new TestFailureException(
+				this.getId(),
+				"Test module called setStatus() with a value other than CONFIGURED/WAITING/RUNNING. This is a bug in the test module; it should use a different method to change to the desired state - e.g. fireTestFinished() or throwing a TestFailureException.",
+			);
 		}
+		await this.setStatusInternal(newStatus);
 	}
 
-	/*
-	 * Test status state machine:
-	 *
-	 *          /----------->--------------------------------\
-	 *         /           /                                  \
-	 *        /----------------->----------------\             \
-	 *       /           /     /                  v             v
-	 *   CREATED -> CONFIGURED -> RUNNING --> FINISHED      INTERRUPTED
-	 *                         \     ^--v      ^              ^
-	 *                          \-> WAITING --/--------------/
-	 */
+	/** Changes the status along the state machine (see TRANSITIONS), taking and releasing the lock */
 	private async setStatusInternal(newStatus: Status): Promise<void> {
 		// RUNNING always takes the lock; FINISHED/INTERRUPTED take it unless the current flow already holds it
 		// (status RUNNING means the holder is the flow that is now finishing/stopping itself)
 		const needsLock =
 			newStatus === Status.RUNNING ||
 			((newStatus === Status.FINISHED || newStatus === Status.INTERRUPTED) &&
-				!(this.mutex.isLocked() && this.status === Status.RUNNING));
+				!(this.mutex.locked && this.status === Status.RUNNING));
 		if (needsLock) {
-			await this.mutex.acquire(this.getLockAcquireTimeoutSeconds() * 1000, () => {
-				return new TestFailureException(
-					this.getId(),
-					"Timed out after " +
-						this.getLockAcquireTimeoutSeconds() +
-						" seconds waiting to acquire the test lock; another thread is holding it and is probably stuck. This may be a bug in the test suite. Aborting.",
-				);
-			});
+			const timeoutSeconds = this.getLockAcquireTimeoutSeconds();
+			await this.mutex.acquire(
+				timeoutSeconds * 1000,
+				() =>
+					new TestFailureException(
+						this.getId(),
+						"Timed out after " +
+							timeoutSeconds +
+							" seconds waiting to acquire the test lock; another thread is holding it and is probably stuck. This may be a bug in the test suite. Aborting.",
+					),
+			);
 		}
 		try {
 			const oldStatus = this.getStatus();
@@ -733,43 +675,14 @@ export abstract class AbstractTestModule {
 				);
 			}
 
-			const illegal = () =>
-				new TestFailureException(this.getId(), "Illegal test state change: " + oldStatus + " -> " + newStatus);
-			const allowed = (...s: Status[]) => s.includes(newStatus);
-			switch (oldStatus) {
-				case Status.NOT_YET_CREATED:
-					if (newStatus !== Status.CREATED) {
-						throw illegal();
-					}
-					break;
-				case Status.CREATED:
-					if (!allowed(Status.CONFIGURED, Status.WAITING, Status.INTERRUPTED, Status.FINISHED)) {
-						throw illegal();
-					}
-					break;
-				case Status.CONFIGURED:
-					if (!allowed(Status.RUNNING, Status.INTERRUPTED, Status.FINISHED, Status.WAITING)) {
-						throw illegal();
-					}
-					break;
-				case Status.RUNNING:
-					if (!allowed(Status.INTERRUPTED, Status.FINISHED, Status.WAITING)) {
-						throw illegal();
-					}
-					break;
-				case Status.WAITING:
-					if (!allowed(Status.RUNNING, Status.INTERRUPTED, Status.FINISHED)) {
-						throw illegal();
-					}
-					break;
-				case Status.FINISHED:
-					// not in upstream: an emulated OP (suite-vs-suite) keeps answering requests after its own flow finished
-					if (!(this.keepServingAfterFinish && allowed(Status.RUNNING, Status.WAITING))) {
-						throw illegal();
-					}
-					break;
-				default:
-					throw illegal();
+			const allowed =
+				TRANSITIONS[oldStatus].includes(newStatus) ||
+				// not in upstream: an emulated OP (suite-vs-suite) keeps answering requests after its own flow finished
+				(oldStatus === Status.FINISHED &&
+					this.keepServingAfterFinish &&
+					(newStatus === Status.RUNNING || newStatus === Status.WAITING));
+			if (!allowed) {
+				throw new TestFailureException(this.getId(), "Illegal test state change: " + oldStatus + " -> " + newStatus);
 			}
 
 			if (newStatus === Status.FINISHED || newStatus === Status.INTERRUPTED) {
@@ -794,17 +707,11 @@ export abstract class AbstractTestModule {
 				);
 			}
 
-			this.status = newStatus;
-			this.hooks.onStatusChange?.(newStatus);
+			this.updateStatus(newStatus);
 
-			if (newStatus === Status.FINISHED || newStatus === Status.INTERRUPTED) {
-				this.resolveFinished();
-			}
-
-			if (newStatus === Status.RUNNING) {
-				// exit with the lock still held, as we should always have the lock when TestConditions are being run
-			} else {
-				// release the lock as the very final step
+			if (newStatus !== Status.RUNNING) {
+				// release the lock as the very final step (RUNNING exits with the lock held, as we should always have
+				// the lock when TestConditions are being run)
 				this.mutex.release();
 			}
 		} catch (e) {
@@ -812,6 +719,37 @@ export abstract class AbstractTestModule {
 			this.mutex.release();
 			throw e;
 		}
+	}
+
+	/** The one place the status changes: notifies the hooks, whenStatus() and whenFinished() */
+	private updateStatus(newStatus: Status): void {
+		this.status = newStatus;
+		this.hooks.onStatusChange?.(newStatus);
+		const waiting = this.statusWaiters;
+		this.statusWaiters = waiting.filter((w) => !w.statuses.includes(newStatus));
+		for (const w of waiting) {
+			if (w.statuses.includes(newStatus)) {
+				w.resolve(newStatus);
+			}
+		}
+		if (newStatus === Status.FINISHED || newStatus === Status.INTERRUPTED) {
+			this.finished.resolve();
+		}
+	}
+
+	/** Resolves with the status once the test is in one of the given statuses (immediately if it already is) */
+	whenStatus(...statuses: Status[]): Promise<Status> {
+		if (statuses.includes(this.status)) {
+			return Promise.resolve(this.status);
+		}
+		const { promise, resolve } = Promise.withResolvers<Status>();
+		this.statusWaiters.push({ statuses, resolve });
+		return promise;
+	}
+
+	/** Resolves when the test reaches FINISHED or INTERRUPTED */
+	whenFinished(): Promise<void> {
+		return this.finished.promise;
 	}
 
 	/** Add a key/value pair to the exposed values that the user will see in the frontend */
@@ -847,11 +785,6 @@ export abstract class AbstractTestModule {
 		return (this.constructor as typeof AbstractTestModule).meta.testName;
 	}
 
-	/** Resolves when the test reaches FINISHED or INTERRUPTED */
-	whenFinished(): Promise<void> {
-		return this.finishedPromise;
-	}
-
 	/**
 	 * Called by the test runner to stop the test. This will add an entry to the log, if the test is not already
 	 * FINISHED/INTERRUPTED.
@@ -859,10 +792,10 @@ export abstract class AbstractTestModule {
 	async stop(reason: string): Promise<void> {
 		if (!(this.getStatus() === Status.FINISHED || this.getStatus() === Status.INTERRUPTED)) {
 			await this.setStatusInternal(Status.INTERRUPTED);
-			this.eventLog.log(
-				this.getName(),
-				args("msg", "Test was interrupted before it could complete. " + reason, "result", Status.INTERRUPTED),
-			);
+			this.eventLog.log(this.getName(), {
+				msg: "Test was interrupted before it could complete. " + reason,
+				result: Status.INTERRUPTED,
+			});
 			this.logFinalEnv();
 		}
 		this.getTestExecutionManager().cancelAllBackgroundTasks();
@@ -875,7 +808,7 @@ export abstract class AbstractTestModule {
 				await this.cleanup();
 			} catch (e) {
 				if (e instanceof TestFailureException) {
-					this.eventLog.log(this.getName(), ex(e, args("msg", "A test failure was raised while cleaning up")));
+					this.eventLog.log(this.getName(), ex(e, { msg: "A test failure was raised while cleaning up" }));
 				} else {
 					throw e;
 				}
@@ -889,10 +822,7 @@ export abstract class AbstractTestModule {
 	/** Handle a fatal exception */
 	async handleException(error: TestInterruptedException, source: string): Promise<void> {
 		if (error instanceof TestSkippedException) {
-			this.eventLog.log(
-				this.getName(),
-				args("result", Result.SKIPPED, "msg", "The test was skipped: " + error.message),
-			);
+			this.eventLog.log(this.getName(), { result: Result.SKIPPED, msg: "The test was skipped: " + error.message });
 			await this.fireTestFinished();
 		} else {
 			/* must be a TestFailureException */
@@ -1028,13 +958,7 @@ export abstract class AbstractTestModule {
 		}, "placeholder watcher");
 	}
 
-	/**
-	 * Not in upstream. When set, incoming HTTP requests are still handled after the module has finished (status
-	 * FINISHED -> RUNNING is allowed). The runner sets it on the RP test module that acts as the emulated OP in
-	 * suite-vs-suite runs, where OP test modules call e.g. the userinfo endpoint more than once.
-	 */
-	private keepServingAfterFinish = false;
-
+	/** Not in upstream: see keepServingAfterFinish */
 	setKeepServingAfterFinish(keep: boolean): void {
 		this.keepServingAfterFinish = keep;
 	}
@@ -1043,13 +967,4 @@ export abstract class AbstractTestModule {
 	forceReleaseLock(): void {
 		this.mutex.release();
 	}
-}
-
-function isSequence(u: unknown): u is ConditionSequence {
-	return (
-		typeof u === "object" &&
-		u !== null &&
-		typeof (u as ConditionSequence).evaluate === "function" &&
-		typeof (u as ConditionSequence).getTestExecutionUnits === "function"
-	);
 }

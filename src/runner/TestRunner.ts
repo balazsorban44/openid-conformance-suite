@@ -9,7 +9,7 @@ import { ImageService } from "../framework/ImageService.ts";
 import type { JsonObject } from "../framework/json.ts";
 import type { SuiteServer } from "../framework/server.ts";
 import { Result, Status, type TestModuleClass } from "../framework/TestModule.ts";
-import { VariantService } from "../framework/VariantService.ts";
+import { newInstance, parametersOf } from "../framework/VariantService.ts";
 import { VariantSelection } from "../framework/variants.ts";
 import { findModule } from "../registry.ts";
 import type { ClientDriverConfig, LoadedConfig, SuiteTargetConfig } from "./config.ts";
@@ -94,7 +94,7 @@ function createInstance(
 	const testId = randomBytes(6).toString("hex");
 	const eventLog = new TestInstanceEventLog(testId, opts.onLog);
 	const imageService = new ImageService(eventLog);
-	const module = VariantService.newInstance(moduleClass, variant);
+	const module = newInstance(moduleClass, variant);
 	const executionManager = new TestExecutionManager(testId, {
 		onError: (error, source) => module.handleException(error, source),
 		afterTask: () => module.forceReleaseLock(),
@@ -107,25 +107,8 @@ function createInstance(
 		imageService,
 		async () => opts.context,
 	);
-	const waiters = new Set<{ statuses: Status[]; resolve: (status: Status) => void }>();
-	module.setProperties(testId, OWNER, eventLog, browser, executionManager, imageService, {
-		onStatusChange: (status) => {
-			for (const w of waiters) {
-				if (w.statuses.includes(status)) {
-					waiters.delete(w);
-					w.resolve(status);
-				}
-			}
-		},
-	});
-	const reached = (statuses: Status[]): Promise<Status> => {
-		if (statuses.includes(module.getStatus())) {
-			return Promise.resolve(module.getStatus());
-		}
-		const { promise, resolve } = Promise.withResolvers<Status>();
-		waiters.add({ statuses, resolve });
-		return promise;
-	};
+	module.attach({ id: testId, owner: OWNER, eventLog, browser, executionManager, imageService });
+	const reached = (statuses: Status[]): Promise<Status> => module.whenStatus(...statuses);
 	const { url, mtlsUrl } = opts.server.register(module, { alias });
 	return { testId, eventLog, module, executionManager, browser, url, mtlsUrl, reached };
 }
@@ -254,7 +237,7 @@ async function startEmulatedOp(target: SuiteTargetConfig, opts: ModuleRunOptions
 	// suite_target.variant wins; a parameter the emulated module declares but the config leaves out is taken from
 	// the variant of the module under test when it has one (e.g. client_auth_type), so the two sides agree
 	const variant: Record<string, string> = {};
-	for (const p of VariantService.parametersOf(moduleClass)) {
+	for (const p of parametersOf(moduleClass)) {
 		const name = p.parameter.name;
 		const value = target.variant?.[name] ?? opts.variant.getVariant()[name];
 		if (value !== undefined) {
