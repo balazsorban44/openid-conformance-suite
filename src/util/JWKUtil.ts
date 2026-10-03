@@ -199,6 +199,7 @@ export function nimbusGetURI(o: JsonObject, name: string): string | null {
 		return null;
 	}
 	// java.net.URI rejects whitespace, control characters and a few ASCII punctuation characters
+	// oxlint-disable-next-line no-control-regex
 	const m = /[\s"<>\\^`{|}\u0000-\u001f\u007f]/.exec(value);
 	if (m) {
 		throw new ParseException(uriSyntaxMessage(value, m.index));
@@ -388,9 +389,13 @@ export function nimbusParseJsonObject(s: string, sizeLimit = -1): JsonObject {
 	return parsed;
 }
 
-/** Scans already-valid JSON text for an object with a repeated member name. */
+/**
+ * Scans already-valid JSON text for a repeated member name in the top-level object (Gson's map adapter rejects
+ * those; nested objects are read by its ObjectTypeAdapter, where the last value wins, as with JSON.parse).
+ */
 function hasDuplicateKeys(text: string): boolean {
 	let i = 0;
+	let depth = 0;
 	const skipWs = () => {
 		while (i < text.length && " \t\n\r".includes(text[i])) {
 			i++;
@@ -413,6 +418,8 @@ function hasDuplicateKeys(text: string): boolean {
 		const c = text[i];
 		if (c === "{") {
 			i++;
+			const topLevel = depth === 0;
+			depth++;
 			const seen = new Set<string>();
 			skipWs();
 			if (text[i] === "}") {
@@ -422,7 +429,7 @@ function hasDuplicateKeys(text: string): boolean {
 			for (;;) {
 				skipWs();
 				const key = readString();
-				if (seen.has(key)) {
+				if (topLevel && seen.has(key)) {
 					return true;
 				}
 				seen.add(key);

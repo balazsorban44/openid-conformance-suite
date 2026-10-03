@@ -101,14 +101,14 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-client-back-channel-logout-rp-basic",
 		variant:
 			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
-		config: "configs/openid-client-rp/oidcc-client-backchannel-logout.json",
+		config: "configs/openid-client-rp/oidcc-client-back-channel-logout.json",
 	},
 	{
 		name: "rp-frontchannel-logout",
 		plan: "oidcc-client-front-channel-logout-rp-basic",
 		variant:
 			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
-		config: "configs/openid-client-rp/oidcc-client-frontchannel-logout.json",
+		config: "configs/openid-client-rp/oidcc-client-front-channel-logout.json",
 	},
 	{
 		name: "rp-session-management",
@@ -122,7 +122,7 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-client-test-3rd-party-init-login-test-plan",
 		variant:
 			"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]",
-		config: "configs/openid-client-rp/oidcc-client-3rdparty-init-login.json",
+		config: "configs/openid-client-rp/oidcc-client-3rd-party-init-login.json",
 	},
 	// ---- suite vs suite: our OP tests against our own emulated OP (RP test module as the OP) ----
 	{

@@ -32,7 +32,21 @@ export interface ClientDriverConfig {
 
 export type ConformanceConfig = JsonObject;
 
+/**
+ * suite-vs-suite: run an RP test module of this suite as the emulated OP that the OP plan under test talks to.
+ * The emulated module is started fresh for every OP module and its base URL is injected as server.discoveryUrl.
+ */
+export interface SuiteTargetConfig {
+	/** testName of the RP module acting as OP, e.g. "oidcc-client-test" */
+	module: string;
+	variant?: Record<string, string>;
+	alias?: string;
+	/** configuration handed to the emulated module (client, client2, ...) */
+	config?: JsonObject;
+}
+
 export interface LoadedConfig {
+	suiteTarget: SuiteTargetConfig | null;
 	/** The JSON handed to the test module (runner-only keys removed) */
 	config: ConformanceConfig;
 	/** The browser hook when the config is a .ts/.js module exporting one */
@@ -66,7 +80,7 @@ export interface ExpectedSkip {
 	comment?: string;
 }
 
-const RUNNER_KEYS = ["target", "client_driver", "expectedFailures", "expectedSkips"] as const;
+const RUNNER_KEYS = ["target", "client_driver", "expectedFailures", "expectedSkips", "suite_target"] as const;
 
 export async function loadConfig(path: string): Promise<LoadedConfig> {
 	const abs = resolve(path);
@@ -83,6 +97,7 @@ export async function loadConfig(path: string): Promise<LoadedConfig> {
 	}
 	const target = (raw["target"] as TargetConfig | undefined) ?? null;
 	const clientDriver = (raw["client_driver"] as ClientDriverConfig | undefined) ?? null;
+	const suiteTarget = (raw["suite_target"] as SuiteTargetConfig | undefined) ?? null;
 	const expectedFailures = await loadList<ExpectedFailure>(raw["expectedFailures"], abs);
 	const expectedSkips = await loadList<ExpectedSkip>(raw["expectedSkips"], abs);
 
@@ -106,6 +121,7 @@ export async function loadConfig(path: string): Promise<LoadedConfig> {
 		browserHook,
 		target,
 		clientDriver,
+		suiteTarget,
 		expectedFailures,
 		expectedSkips,
 		path: abs,

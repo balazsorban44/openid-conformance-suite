@@ -212,7 +212,12 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 	out["enc"] = enc;
 	const epkJson = "epk" in json ? nimbusGetJSONObject(json, "epk") : null;
 	if (epkJson != null) {
-		out["epk"] = JWKUtil.parseJWK(epkJson);
+		const epk = JWKUtil.parseJWK(epkJson);
+		if (JWKUtil.isPrivate(epk)) {
+			// IllegalArgumentException in Java: not wrapped into a ParseException
+			throw new Error("Ephemeral public key should not be a private key");
+		}
+		out["epk"] = epk;
 	}
 	putString("zip", nimbusGetString(json, "zip"));
 	putString("apu", nimbusGetString(json, "apu"));
@@ -221,7 +226,8 @@ function parseHeader(json: JsonObject, kind: "plain" | "signed" | "encrypted"): 
 	if ("p2c" in json) {
 		const p2c = nimbusGetLong(json, "p2c");
 		if (p2c < 0) {
-			throw new ParseException("The PBES2 count parameter must not be negative");
+			// IllegalArgumentException in Java: not wrapped into a ParseException
+			throw new Error("The PBES2 count parameter must not be negative");
 		}
 		if (p2c > 0) {
 			out["p2c"] = p2c;

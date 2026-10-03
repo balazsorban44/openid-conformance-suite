@@ -54,6 +54,7 @@ export class NodePath {
 						.replace(/\n/g, "\\n")
 						.replace(/\t/g, "\\t")
 						.replace(/\r/g, "\\r")
+						// oxlint-disable-next-line no-control-regex
 						.replace(/\u0008/g, "\\b")
 						.replace(/\f/g, "\\f");
 			}

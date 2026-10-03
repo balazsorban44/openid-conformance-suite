@@ -596,5 +596,5 @@
 		"readyUrl": "http://localhost:3000/.well-known/openid-configuration",
 		"env": {}
 	},
-	"expectedFailures": "configs/expected-failures/oidc-provider.json"
+	"expectedFailures": "../expected-failures/oidc-provider.json"
 }

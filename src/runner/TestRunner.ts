@@ -11,8 +11,9 @@ import type { JsonObject } from "../framework/json.ts";
 import type { SuiteServer } from "../framework/server.ts";
 import { Result, Status, type TestModuleClass } from "../framework/TestModule.ts";
 import { VariantService } from "../framework/VariantService.ts";
-import type { VariantSelection } from "../framework/variants.ts";
-import type { ClientDriverConfig, LoadedConfig } from "./config.ts";
+import { VariantSelection } from "../framework/variants.ts";
+import { findModule } from "../registry.ts";
+import type { ClientDriverConfig, LoadedConfig, SuiteTargetConfig } from "./config.ts";
 
 export interface ModuleRunOptions {
 	moduleClass: TestModuleClass<AbstractTestModule>;
@@ -42,6 +43,8 @@ export interface ModuleRunResult {
 	durationMs: number;
 	/** Response from the RP driver (RP plans only) */
 	clientDriverResult?: unknown;
+	/** The emulated OP module's log (suite-vs-suite only) */
+	nested?: { testName: string; result: Result; status: Status; entries: LogEntry[] };
 }
 
 function newTestId(): string {
@@ -63,6 +66,13 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 		afterTask: () => module.forceReleaseLock(),
 	});
 	const config = structuredClone(opts.loaded.config) as JsonObject;
+	// suite-vs-suite: start the emulated OP (an RP test module of this suite) and point the OP tests at it
+	const emulated = opts.loaded.suiteTarget ? await startEmulatedOp(opts.loaded.suiteTarget, opts) : null;
+	if (emulated) {
+		const server = (config["server"] as JsonObject | undefined) ?? {};
+		server["discoveryUrl"] = emulated.url + "/.well-known/openid-configuration";
+		config["server"] = server;
+	}
 	const browserConfig: JsonObject & { browser?: unknown } = { ...config };
 	if (opts.loaded.browserHook) {
 		browserConfig.browser = opts.loaded.browserHook;
@@ -135,7 +145,23 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 	await executionManager.drain();
 	opts.server.unregister(module);
 
+	let nested: ModuleRunResult["nested"];
+	if (emulated) {
+		if (emulated.module.getStatus() !== Status.FINISHED && emulated.module.getStatus() !== Status.INTERRUPTED) {
+			await emulated.module.stop("The test under test has finished");
+		}
+		await emulated.executionManager.drain();
+		opts.server.unregister(emulated.module);
+		nested = {
+			testName: emulated.module.getName(),
+			result: emulated.module.getResult(),
+			status: emulated.module.getStatus(),
+			entries: emulated.eventLog.entries,
+		};
+	}
+
 	return {
+		nested,
 		testId,
 		testName,
 		variant: opts.variant.getVariant(),
@@ -148,6 +174,73 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 		durationMs: Date.now() - started,
 		clientDriverResult,
 	};
+}
+
+/**
+ * Start an RP test module of this suite to act as the OP under test (upstream: "OP-vs-RP pairing").
+ */
+async function startEmulatedOp(
+	target: SuiteTargetConfig,
+	opts: ModuleRunOptions,
+): Promise<{
+	module: AbstractTestModule;
+	url: string;
+	executionManager: TestExecutionManager;
+	eventLog: TestInstanceEventLog;
+}> {
+	const moduleClass = findModule(target.module);
+	if (!moduleClass) {
+		throw new Error(`suite_target.module '${target.module}' is not a known test module`);
+	}
+	const testId = newTestId();
+	const eventLog = new TestInstanceEventLog(testId, opts.onLog);
+	const imageService = new ImageService(eventLog);
+	const module = VariantService.newInstance(moduleClass, new VariantSelection(target.variant ?? {}));
+	const executionManager = new TestExecutionManager(testId, {
+		onError: (error, source) => module.handleException(error, source),
+		afterTask: () => module.forceReleaseLock(),
+	});
+	const config = structuredClone(target.config ?? {}) as JsonObject;
+	const browser = new BrowserControl(
+		config,
+		testId,
+		eventLog,
+		executionManager,
+		imageService,
+		async () => opts.context,
+	);
+	module.setProperties(testId, null, eventLog, browser, executionManager, imageService, {});
+	const alias = target.alias ?? "emulated-op";
+	const { url, mtlsUrl } = opts.server.register(module, { alias });
+	eventLog.log(
+		"TEST-RUNNER",
+		args(
+			"msg",
+			"Emulated OP test instance " + testId + " created",
+			"result",
+			ConditionResult.INFO,
+			"baseUrl",
+			url,
+			"config",
+			config,
+			"alias",
+			alias,
+			"testName",
+			module.getName(),
+		),
+	);
+	executionManager.runInBackground(async () => {
+		await module.configure(config, url, "", mtlsUrl);
+		if (module.getStatus() === Status.CONFIGURED && module.autoStart()) {
+			await module.start();
+		}
+		return "done";
+	}, "test");
+	const status = await waitForStatus(module, [Status.WAITING, Status.FINISHED, Status.INTERRUPTED], 60_000);
+	if (status !== Status.WAITING) {
+		throw new Error(`emulated OP module '${target.module}' did not reach WAITING (status ${status}); see its log`);
+	}
+	return { module, url, executionManager, eventLog };
 }
 
 async function waitForStatus(module: AbstractTestModule, statuses: Status[], timeoutMs: number): Promise<Status> {

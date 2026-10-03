@@ -31,6 +31,7 @@ export class Bcp47SubtagRegistry {
 			if ((e as NodeJS.ErrnoException).code === "ENOENT") {
 				throw new Error(
 					"IANA Language Subtag Registry resource not found at " + Bcp47SubtagRegistry.RESOURCE_PATH.pathname,
+					{ cause: e },
 				);
 			}
 			throw new Error("Failed to load IANA Language Subtag Registry", { cause: e });

@@ -128,6 +128,16 @@ if (!planName || !configPath) {
 					body: renderLogHtml(title, run.entries, { result: run.result, status: run.status, variant: run.variant }),
 					contentType: "text/html",
 				});
+				if (run.nested) {
+					await testInfo.attach("emulated-op-log.html", {
+						body: renderLogHtml(`${title} (emulated OP: ${run.nested.testName})`, run.nested.entries, {
+							result: run.nested.result,
+							status: run.nested.status,
+							variant: {},
+						}),
+						contentType: "text/html",
+					});
+				}
 				for (const s of run.screenshots) {
 					await testInfo.attach(s.name + ".png", { body: s.png, contentType: "image/png" });
 				}
