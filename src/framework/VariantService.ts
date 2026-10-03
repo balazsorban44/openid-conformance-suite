@@ -60,7 +60,6 @@ export const VariantService = {
 			for (const moduleClass of entry.testModules) {
 				const meta = collectVariantMetadata(moduleClass);
 				const fixed: Record<string, string> = {};
-				let skipModule = false;
 				for (const v of entry.variant) {
 					if (!meta.parameters.includes(v.key)) {
 						if (entry.optionalVariants.has(v.key)) {
@@ -81,9 +80,6 @@ export const VariantService = {
 						);
 					}
 					fixed[v.key.parameter.name] = v.value;
-				}
-				if (skipModule) {
-					continue;
 				}
 				const full = new VariantSelection({ ...selection.getVariant(), ...fixed });
 				// a module is dropped from the plan when the user's selection picks a value it excludes

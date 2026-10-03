@@ -43,12 +43,6 @@ export class HttpClientException extends Error {
 	}
 }
 
-export interface MutualTlsConfig {
-	cert: string;
-	key: string;
-	ca?: string;
-}
-
 /** An interceptor around the real network call (used for the opt-in external endpoint cache) */
 export type HttpInterceptor = (
 	req: { method: string; url: string; headers: Headers },

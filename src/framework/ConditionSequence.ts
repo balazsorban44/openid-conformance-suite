@@ -52,14 +52,6 @@ export class ConditionSequenceCallBuilder implements TestExecutionUnit {
 		}
 	}
 
-	getConditionSequenceClass(): ConditionSequenceClass | null {
-		return this.conditionSequenceClass;
-	}
-
-	getConditionSequenceConstructor(): ConditionSequenceSupplier | null {
-		return this.conditionSequenceConstructor;
-	}
-
 	/** Instantiate the sequence this builder describes */
 	create(): ConditionSequence {
 		if (this.conditionSequenceConstructor) {

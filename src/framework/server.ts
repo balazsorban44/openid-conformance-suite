@@ -78,10 +78,6 @@ export class SuiteServer {
 		return this.baseUrl;
 	}
 
-	getBaseUrl(): string {
-		return this.baseUrl;
-	}
-
 	getPort(): number {
 		return (this.server.address() as AddressInfo).port;
 	}

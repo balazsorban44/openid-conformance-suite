@@ -36,20 +36,16 @@ export class TestExecutionManager {
 		return this.controller.signal;
 	}
 
-	getTestId(): string {
-		return this.testId;
-	}
-
 	/** Cancel all background tasks (cooperatively) */
 	cancelAllBackgroundTasks(): void {
-		this.controller.abort();
-		this.tasks.clear();
-	}
-
-	cancelAllBackgroundTasksExceptFinalisation(): void {
 		// a cancelled task notices via `signal`; the finalisation task does not check it
 		this.controller.abort();
 		this.tasks.clear();
+	}
+
+	/** Same as cancelAllBackgroundTasks(): the finalisation task never checks `signal` */
+	cancelAllBackgroundTasksExceptFinalisation(): void {
+		this.cancelAllBackgroundTasks();
 	}
 
 	private wrap(callable: BackgroundTask, source: string, isFinalisation: boolean): Promise<unknown> {
@@ -100,15 +96,6 @@ export class TestExecutionManager {
 		const p = this.wrap(callable, source, false);
 		this.tasks.add(p);
 		p.finally(() => this.tasks.delete(p)).catch(() => {});
-	}
-
-	/** Like runInBackground but returns false (and does nothing) once finalisation has started */
-	tryRunInBackground(callable: BackgroundTask, source = "background task"): boolean {
-		if (this.finalisationStarted) {
-			return false;
-		}
-		this.runInBackground(callable, source);
-		return true;
 	}
 
 	scheduleInBackground(callable: BackgroundTask, delayMillis: number, source = "scheduled task"): void {

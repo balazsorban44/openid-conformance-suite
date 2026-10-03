@@ -18,7 +18,6 @@ export * from "./AbstractCondition.ts";
 export * from "./ConditionCallBuilder.ts";
 export * from "./Command.ts";
 export * from "./ConditionSequence.ts";
-export * from "./IterateEnvironmentArray.ts";
 export * from "./AbstractConditionSequence.ts";
 export * from "./variants.ts";
 export * from "./TestModule.ts";

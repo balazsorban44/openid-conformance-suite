@@ -6,7 +6,8 @@ import type { TestExecutionManager } from "./execution.ts";
 import { sleep } from "./execution.ts";
 import { TestFailureException } from "./exceptions.ts";
 import type { ImageService } from "./ImageService.ts";
-import { isJsonArray, isJsonObject, OIDFJSON, type JsonArray, type JsonObject, type JsonValue } from "./json.ts";
+import { isJsonArray, OIDFJSON, type JsonArray, type JsonObject } from "./json.ts";
+import { escapeHtml } from "./views.ts";
 
 /**
  * A user-supplied Playwright hook, the alternative to the JSON `browser` automation. Receives the page the suite
@@ -54,14 +55,8 @@ export class BrowserControl {
 	private browserCommands: JsonArray = [];
 	private hook: BrowserHook | null = null;
 	private verboseLogging = false;
-	private showQrCodes = false;
 
-	private urls: string[] = [];
-	private urlsWithMethod: { url: string; method: string }[] = [];
 	private visited: string[] = [];
-	private visitedUrlsWithMethod: { url: string; method: string }[] = [];
-	private browserApiRequests: { request: JsonObject; submitUrl: string }[] = [];
-	private uriInputRequests: { submitUrl: string; description: string }[] = [];
 	private runners = new Set<WebRunner>();
 
 	private readonly imageService: ImageService;
@@ -97,29 +92,9 @@ export class BrowserControl {
 	}
 
 	/**
-	 * Returns true if the test configuration contains a 'browser' automation entry matching the given url.
-	 */
-	urlMatchesBrowserAutomation(url: string): boolean {
-		if (this.hook) {
-			return true;
-		}
-		for (const commandsEl of this.browserCommands) {
-			const commands = commandsEl as JsonObject;
-			const urlMatcher = OIDFJSON.getString(commands["match"]);
-			if (simpleMatch(urlMatcher, url)) {
-				if ("match-limit" in commands && OIDFJSON.getInt(commands["match-limit"]) <= 0) {
-					continue;
-				}
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * Tell the front-end control that a url needs to be visited. If there is a matching browser configuration
-	 * element, this will execute automatically. If there is no matching element, the url is made available for
-	 * user interaction.
+	 * element, this will execute automatically. If there is no matching element, the url is left to the user (the
+	 * port has no UI that lists it; only the verbose log mentions it).
 	 */
 	goToUrl(url: string, placeholder: string | null = null, method = "GET", delaySeconds = 0): void {
 		if (this.hook) {
@@ -157,67 +132,15 @@ export class BrowserControl {
 		if (this.verboseLogging) {
 			this.eventLog.log("BROWSER", "asking user to visit url, no automation for found: " + url);
 		}
-		// if we couldn't find a command for this URL, leave it up to the user to do something with it
-		this.urls.push(url);
-		this.urlsWithMethod.push({ url, method });
 	}
 
-	requestCredential(request: JsonObject, submitUrl: string): void {
-		this.browserApiRequests.push({ request, submitUrl });
-	}
-
-	requestUriInput(submitUrl: string, description: string): void {
-		if (this.uriInputRequests.some((r) => r.submitUrl === submitUrl)) {
-			return;
-		}
-		this.uriInputRequests.push({ submitUrl, description });
-	}
-
-	/** Tell the front end control that a url has been visited by the user externally. */
+	/** Tell the front end control that a url has been visited. */
 	urlVisited(url: string): void {
-		this.urls = this.urls.filter((u) => u !== url);
 		this.visited.push(url);
-		const idx = this.urlsWithMethod.findIndex((u) => u.url === url);
-		if (idx >= 0) {
-			const [u] = this.urlsWithMethod.splice(idx, 1);
-			this.visitedUrlsWithMethod.push(u);
-		}
-	}
-
-	getUrls(): string[] {
-		return this.urls;
-	}
-
-	getUrlsWithMethod(): { url: string; method: string }[] {
-		return this.urlsWithMethod;
-	}
-
-	getBrowserApiRequests(): { request: JsonObject; submitUrl: string }[] {
-		return this.browserApiRequests;
-	}
-
-	getUriInputRequests(): { submitUrl: string; description: string }[] {
-		return this.uriInputRequests;
-	}
-
-	getVisitedUrlsWithMethod(): { url: string; method: string }[] {
-		return this.visitedUrlsWithMethod;
 	}
 
 	getVisited(): string[] {
 		return this.visited;
-	}
-
-	showQrCodes_(): boolean {
-		return this.showQrCodes;
-	}
-
-	setShowQrCodes(showQrCodes: boolean): void {
-		this.showQrCodes = showQrCodes;
-	}
-
-	getWebRunners(): JsonObject[] {
-		return [...this.runners].map((wr) => wr.describe());
 	}
 
 	runnersActive(): boolean {
@@ -324,9 +247,6 @@ class WebRunner {
 	private readonly delaySeconds: number;
 	private readonly hook: BrowserHook | null;
 	private page: Page | null = null;
-	private currentTask: string | null = null;
-	private currentCommand: string | null = null;
-	private lastException: string | null = null;
 	private lastResponseCode: number | null = null;
 	private lastResponseContentType: string | null = null;
 	private lastResponseContent: string | null = null;
@@ -347,19 +267,6 @@ class WebRunner {
 		this.method = method;
 		this.delaySeconds = delaySeconds;
 		this.hook = hook;
-	}
-
-	describe(): JsonObject {
-		return {
-			url: this.url,
-			currentUrl: this.page?.url() ?? null,
-			currentTask: this.currentTask,
-			currentCommand: this.currentCommand,
-			lastResponseCode: this.lastResponseCode,
-			lastResponseContentType: this.lastResponseContentType,
-			lastResponseContent: this.lastResponseContent,
-			lastException: this.lastException,
-		};
 	}
 
 	private testId(): string {
@@ -440,10 +347,10 @@ class WebRunner {
 				);
 				// do the actual HTTP POST via an auto-submitting form, so the browser performs a real navigation
 				const inputs = [...new URLSearchParams(params).entries()]
-					.map(([k, v]) => `<input type="hidden" name="${escapeAttr(k)}" value="${escapeAttr(v)}">`)
+					.map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}">`)
 					.join("");
 				await page.setContent(
-					`<html><body><form id="f" method="post" action="${escapeAttr(urlWithoutQuery)}">${inputs}</form></body></html>`,
+					`<html><body><form id="f" method="post" action="${escapeHtml(urlWithoutQuery)}">${inputs}</form></body></html>`,
 				);
 				// register the listeners before submitting so the (possibly immediate) response is not missed
 				const responsePromise = page
@@ -516,7 +423,6 @@ class WebRunner {
 					throw new TestFailureException(testId, "Invalid Task Definition: no 'task' property");
 				}
 				const taskName = OIDFJSON.getString(currentTask["task"]);
-				this.currentTask = taskName;
 
 				let expectedUrlMatcher = "*"; // default to matching any URL
 				if ("match" in currentTask) {
@@ -578,7 +484,6 @@ class WebRunner {
 						}
 						for (const command of commands) {
 							await this.doCommand(command as JsonArray, taskName);
-							this.currentCommand = null;
 						}
 					}
 
@@ -633,7 +538,6 @@ class WebRunner {
 					img: screenshot ? "data:image/png;base64," + screenshot.toString("base64") : undefined,
 				}),
 			);
-			this.lastException = err.message;
 			if (e instanceof TestFailureException) {
 				throw new TestFailureException(testId, "Web Runner Exception: " + err.message, e.cause);
 			}
@@ -690,10 +594,8 @@ class WebRunner {
 		const page = this.page as Page;
 		const commandString = OIDFJSON.getString(command[0]);
 		if (!commandString) {
-			this.lastException = "Invalid Command " + commandString;
 			throw new TestFailureException(testId, "Invalid Command: " + commandString);
 		}
-		this.currentCommand = commandString;
 		const elementType = OIDFJSON.getString(command[1]);
 		const target = OIDFJSON.getString(command[2]);
 		const cmd = commandString.toLowerCase();
@@ -817,7 +719,6 @@ class WebRunner {
 				} else if (action === "update-image-placeholder") {
 					updateImagePlaceHolder = true;
 				} else {
-					this.lastException = "Invalid action: " + action;
 					throw new TestFailureException(testId, "Invalid action: " + action);
 				}
 			}
@@ -875,8 +776,7 @@ class WebRunner {
 				} else {
 					await this.getSelector(elementType, target).first().waitFor({ state: "attached", timeout });
 				}
-			} catch (e) {
-				this.lastException = (e as Error).message;
+			} catch {
 				throw new TestFailureException(testId, "Timed out waiting: " + JSON.stringify(command));
 			}
 		} else if (cmd === "wait-element-invisible") {
@@ -885,8 +785,7 @@ class WebRunner {
 				await this.getSelector(elementType, target)
 					.first()
 					.waitFor({ state: "hidden", timeout: timeoutSeconds * 1000 });
-			} catch (e) {
-				this.lastException = (e as Error).message;
+			} catch {
 				throw new TestFailureException(
 					testId,
 					"Timed out waiting for element to become invisible: " + JSON.stringify(command),
@@ -898,12 +797,10 @@ class WebRunner {
 				await this.getSelector(elementType, target)
 					.first()
 					.waitFor({ state: "visible", timeout: timeoutSeconds * 1000 });
-			} catch (e) {
-				this.lastException = (e as Error).message;
+			} catch {
 				throw new TestFailureException(testId, "Timed out waiting for element visibility: " + JSON.stringify(command));
 			}
 		} else {
-			this.lastException = "Invalid Command " + commandString;
 			throw new TestFailureException(testId, "Invalid Command: " + commandString);
 		}
 	}
@@ -926,16 +823,7 @@ class WebRunner {
 			case "class":
 				return page.locator(`.${value.split(/\s+/).join(".")}`);
 			default:
-				this.lastException = "Invalid Command Selector: Type: " + type + " Value: " + value;
 				throw new TestFailureException(this.testId(), "Invalid Command Selector: Type: " + type + " Value: " + value);
 		}
 	}
-}
-
-function escapeAttr(s: string): string {
-	return s.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
-}
-
-export function isBrowserConfig(v: JsonValue | undefined): v is JsonArray {
-	return isJsonArray(v) && v.every((x) => isJsonObject(x));
 }

@@ -1,4 +1,4 @@
-import { type JsonArray, type JsonObject, type JsonValue, isJsonObject, parseJsonObject, OIDFJSON } from "./json.ts";
+import { type JsonArray, type JsonObject, type JsonValue, isJsonObject, parseJsonObject } from "./json.ts";
 
 /**
  * Port of testmodule/Environment.java
@@ -210,18 +210,9 @@ export class Environment {
 		throw new UnexpectedTypeException(`A boolean is required for ${key} ${path} but ${typeName(e)} was found`);
 	}
 
+	/** Java Integer and Long are both JS numbers: same lookup and error as getInteger() */
 	getLong(key: string, path?: string): number | null {
-		if (path === undefined) {
-			return this.getLong(Environment.NATIVE_VALUES, key);
-		}
-		const e = this.getElementFromObject(key, path);
-		if (e == null) {
-			return null;
-		}
-		if (typeof e === "number") {
-			return Math.trunc(e);
-		}
-		throw new UnexpectedTypeException(`A number is required for ${key} ${path} but ${typeName(e)} was found`);
+		return this.getInteger(key, path);
 	}
 
 	toString(): string {
@@ -314,23 +305,8 @@ export class Environment {
 		delete this.natives()[key];
 	}
 
-	/** Executes the given code block with the supplied key mapping and resets the mapping after completion. */
-	async runWithMapKey(from: string, to: string, code: () => void | Promise<void>): Promise<void> {
-		this.mapKey(from, to);
-		try {
-			await code();
-		} finally {
-			this.unmapKey(from);
-		}
-	}
-
 	private natives(): JsonObject {
 		return this.store.get(Environment.NATIVE_VALUES) as JsonObject;
-	}
-
-	/** Helper for ported code: equivalent of OIDFJSON.getString(env.getElementFromObject(key, path)) */
-	getStringStrict(key: string, path: string): string {
-		return OIDFJSON.getString(this.getElementFromObject(key, path));
 	}
 }
 

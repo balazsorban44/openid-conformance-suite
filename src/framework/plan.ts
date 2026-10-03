@@ -111,11 +111,6 @@ export abstract class TestPlan {
 	certificationProfileName(_variant: VariantSelection): string[] {
 		return [];
 	}
-
-	/** Override to exclude specific variant values from being shown in the test plan UI. */
-	variantsNotApplicable(): Variant[] {
-		return [];
-	}
 }
 
 export interface TestPlanClass {

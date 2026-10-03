@@ -21,19 +21,12 @@ import type { TestInstanceEventLog } from "./EventLog.ts";
 import { TestExecutionManager, sleep } from "./execution.ts";
 import { TestFailureException, TestInterruptedException, TestSkippedException } from "./exceptions.ts";
 import type { ImageService } from "./ImageService.ts";
-import { IterateEnvironmentArray } from "./IterateEnvironmentArray.ts";
-import { isJsonArray, type JsonObject } from "./json.ts";
+import type { JsonObject } from "./json.ts";
 import type { BrowserControl } from "./BrowserControl.ts";
 import { Result, Status, type HttpSession, type IncomingHttpRequest, type PublishTestModule } from "./TestModule.ts";
 import type { TestLockManager } from "./TestLockManager.ts";
 import { jsonResponse } from "./views.ts";
-import {
-	collectVariantMetadata,
-	type ModuleVariantMetadata,
-	type VariantEnum,
-	type VariantEnumClass,
-	type VariantMap,
-} from "./variants.ts";
+import type { ModuleVariantMetadata, VariantEnum, VariantEnumClass, VariantMap } from "./variants.ts";
 
 /**
  * A simple async mutex standing in for the Java ReentrantLock that protects a running test. Only one logical
@@ -109,9 +102,6 @@ export abstract class AbstractTestModule {
 	protected executionManager!: TestExecutionManager;
 	protected exposed: Record<string, string | null> = {}; // exposes runtime values to outside modules
 	protected env = new Environment(); // keeps track of values at runtime
-	private created = new Date();
-	private statusUpdated = new Date();
-	private finalError: TestInterruptedException | null = null;
 	private cleanupCalled = false;
 	private cleanupInProgress = false;
 	protected imageService!: ImageService;
@@ -155,9 +145,6 @@ export abstract class AbstractTestModule {
 
 		this.exposeOwnerIdToEnvironment();
 
-		this.created = new Date();
-		this.statusUpdated = this.created;
-
 		let enabled = true;
 		this.testLockManager = {
 			releaseLock: async () => {
@@ -193,24 +180,8 @@ export abstract class AbstractTestModule {
 		return value as T;
 	}
 
-	/** Like getVariant(), but returns defaultValue instead of throwing when no value is set for parameter. */
-	getVariantOrDefault<T extends VariantEnum>(parameter: VariantEnumClass<T>, defaultValue: T): T {
-		if (!this.variant.has(parameter)) {
-			return defaultValue;
-		}
-		return this.getVariant(parameter);
-	}
-
-	getVariantMap(): VariantMap {
-		return this.variant;
-	}
-
-	getOwner(): Record<string, string> | null {
-		return this.owner;
-	}
-
 	protected exposeOwnerIdToEnvironment(): void {
-		const currentOwner = this.getOwner();
+		const currentOwner = this.owner;
 		if (currentOwner != null) {
 			const sub = currentOwner["sub"];
 			const iss = currentOwner["iss"];
@@ -522,41 +493,6 @@ export abstract class AbstractTestModule {
 		}
 	}
 
-	protected async callIterate(builder: IterateEnvironmentArray): Promise<void> {
-		const sourceElement = this.env.getElementFromObject(builder.getSourceObject(), builder.getSourcePath());
-		if (sourceElement == null) {
-			throw new TestFailureException(
-				this.getId(),
-				"Missing environment array for iteration at " + builder.getSourceObject() + "." + builder.getSourcePath(),
-			);
-		}
-		if (!isJsonArray(sourceElement)) {
-			throw new TestFailureException(
-				this.getId(),
-				"Expected environment array for iteration at " + builder.getSourceObject() + "." + builder.getSourcePath(),
-			);
-		}
-		try {
-			for (let i = 0; i < sourceElement.length; i++) {
-				const element = sourceElement[i];
-				builder.prepareIteration(this.env, element, i, sourceElement.length);
-				const blockLabel = builder.getLogBlockLabel(element, i, sourceElement.length);
-				if (blockLabel) {
-					this.eventLog.startBlock(blockLabel);
-				}
-				try {
-					await this.call(builder.getSequenceCallBuilder());
-				} finally {
-					if (blockLabel) {
-						this.eventLog.endBlock();
-					}
-				}
-			}
-		} finally {
-			builder.cleanupAfterIteration(this.env, sourceElement.length);
-		}
-	}
-
 	/**
 	 * Dispatch function to call a more specific subclass as needed.
 	 */
@@ -570,8 +506,6 @@ export abstract class AbstractTestModule {
 			await this.callCondition(builder);
 		} else if (builder instanceof Command) {
 			await this.callCommand(builder);
-		} else if (builder instanceof IterateEnvironmentArray) {
-			await this.callIterate(builder);
 		} else if (builder instanceof ConditionSequenceCallBuilder) {
 			await this.callSequence(builder.create());
 		} else if (builder instanceof SkippedCondition) {
@@ -731,19 +665,6 @@ export abstract class AbstractTestModule {
 		this.hooks.onResultChange?.(result);
 	}
 
-	/**
-	 * Records the FAILED result of a stop-on-failure condition whose exception the module catches, to answer the
-	 * client with an error response and keep the test running. Returns the condition failure.
-	 */
-	protected recordConditionFailure(e: TestFailureException): ConditionError {
-		const cause = e.cause;
-		if (!(cause instanceof ConditionError) || cause.isPreOrPostError) {
-			throw e;
-		}
-		this.updateResultFromConditionFailure(ConditionResult.FAILURE);
-		return cause;
-	}
-
 	private updateResultFromConditionFailure(onFail: ConditionResult): void {
 		switch (onFail) {
 			case ConditionResult.FAILURE:
@@ -774,14 +695,6 @@ export abstract class AbstractTestModule {
 		}
 	}
 
-	/**
-	 * Atomically changes the test status from WAITING to RUNNING. Returns false when the status was not
-	 * WAITING by the time the lock was acquired.
-	 */
-	protected async setStatusRunningIfWaiting(): Promise<boolean> {
-		return this.setStatusInternal(Status.RUNNING, Status.WAITING);
-	}
-
 	/*
 	 * Test status state machine:
 	 *
@@ -793,35 +706,25 @@ export abstract class AbstractTestModule {
 	 *                         \     ^--v      ^              ^
 	 *                          \-> WAITING --/--------------/
 	 */
-	private async setStatusInternal(newStatus: Status, expectedOldStatus: Status | null = null): Promise<boolean> {
+	private async setStatusInternal(newStatus: Status): Promise<void> {
 		// RUNNING always takes the lock; FINISHED/INTERRUPTED take it unless the current flow already holds it
 		// (status RUNNING means the holder is the flow that is now finishing/stopping itself)
 		const needsLock =
 			newStatus === Status.RUNNING ||
 			((newStatus === Status.FINISHED || newStatus === Status.INTERRUPTED) &&
 				!(this.mutex.isLocked() && this.status === Status.RUNNING));
-		let acquired = false;
 		if (needsLock) {
-			{
-				await this.mutex.acquire(this.getLockAcquireTimeoutSeconds() * 1000, () => {
-					return new TestFailureException(
-						this.getId(),
-						"Timed out after " +
-							this.getLockAcquireTimeoutSeconds() +
-							" seconds waiting to acquire the test lock; another thread is holding it and is probably stuck. This may be a bug in the test suite. Aborting.",
-					);
-				});
-				acquired = true;
-			}
+			await this.mutex.acquire(this.getLockAcquireTimeoutSeconds() * 1000, () => {
+				return new TestFailureException(
+					this.getId(),
+					"Timed out after " +
+						this.getLockAcquireTimeoutSeconds() +
+						" seconds waiting to acquire the test lock; another thread is holding it and is probably stuck. This may be a bug in the test suite. Aborting.",
+				);
+			});
 		}
 		try {
 			const oldStatus = this.getStatus();
-			if (expectedOldStatus != null && oldStatus !== expectedOldStatus) {
-				if (acquired) {
-					this.mutex.release();
-				}
-				return false;
-			}
 
 			if (newStatus !== Status.RUNNING && newStatus === oldStatus) {
 				throw new TestFailureException(
@@ -892,7 +795,6 @@ export abstract class AbstractTestModule {
 			}
 
 			this.status = newStatus;
-			this.statusUpdated = new Date();
 			this.hooks.onStatusChange?.(newStatus);
 
 			if (newStatus === Status.FINISHED || newStatus === Status.INTERRUPTED) {
@@ -905,17 +807,11 @@ export abstract class AbstractTestModule {
 				// release the lock as the very final step
 				this.mutex.release();
 			}
-			return true;
 		} catch (e) {
 			// It's really best if we don't exit with the lock held
 			this.mutex.release();
 			throw e;
 		}
-	}
-
-	/** Helper to check if we have the lock, and if we do, unlock it. */
-	protected clearLockIfHeld(): void {
-		this.mutex.release();
 	}
 
 	/** Add a key/value pair to the exposed values that the user will see in the frontend */
@@ -944,10 +840,6 @@ export abstract class AbstractTestModule {
 
 	getExposedValues(): Record<string, string | null> {
 		return this.exposed;
-	}
-
-	getBrowser(): BrowserControl {
-		return this.browser;
 	}
 
 	/** The test module name (Java: @PublishTestModule.testName) */
@@ -1014,8 +906,6 @@ export abstract class AbstractTestModule {
 				if (error.cause == null) {
 					// a message a TestModule has explicitly thrown
 					event["msg"] = failure;
-				} else {
-					this.setFinalError(error);
 				}
 				this.eventLog.log(this.getName(), ex(error, event));
 			}
@@ -1031,22 +921,6 @@ export abstract class AbstractTestModule {
 	 */
 	async cleanup(): Promise<void> {
 		// Nothing to do in general
-	}
-
-	getCreated(): Date {
-		return this.created;
-	}
-
-	getStatusUpdated(): Date {
-		return this.statusUpdated;
-	}
-
-	getFinalError(): TestInterruptedException | null {
-		return this.finalError;
-	}
-
-	setFinalError(finalError: TestInterruptedException): void {
-		this.finalError = finalError;
 	}
 
 	protected getLockAcquireTimeoutSeconds(): number {
@@ -1154,7 +1028,6 @@ export abstract class AbstractTestModule {
 		}, "placeholder watcher");
 	}
 
-	/** Force the lock to be released, if held. Used in failure paths to cleanup. */
 	/**
 	 * Not in upstream. When set, incoming HTTP requests are still handled after the module has finished (status
 	 * FINISHED -> RUNNING is allowed). The runner sets it on the RP test module that acts as the emulated OP in
@@ -1166,13 +1039,9 @@ export abstract class AbstractTestModule {
 		this.keepServingAfterFinish = keep;
 	}
 
+	/** Force the lock to be released, if held. Used in failure paths to cleanup. */
 	forceReleaseLock(): void {
 		this.mutex.release();
-	}
-
-	/** The merged variant metadata of this module's class hierarchy */
-	static variantMetadata(this: Function): Required<ModuleVariantMetadata> {
-		return collectVariantMetadata(this);
 	}
 }
 

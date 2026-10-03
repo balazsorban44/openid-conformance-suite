@@ -4,7 +4,6 @@ import { Environment, UnexpectedTypeException } from "./Environment.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
 import { HttpClient, type HttpResponse } from "./http.ts";
 import {
-	OIDFJSON,
 	isJsonArray,
 	isJsonObject,
 	parseJson,
@@ -553,9 +552,6 @@ export abstract class AbstractCondition implements Condition {
 		responseInfo["body_json"] = jsonRoot;
 		return responseInfo;
 	}
-
-	/** Shorthand used by ported code: OIDFJSON.getString(obj.get(key)) etc. */
-	protected static readonly json = OIDFJSON;
 }
 
 function isPlainArgs(v: unknown): v is LogArgs {

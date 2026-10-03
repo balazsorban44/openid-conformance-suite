@@ -28,17 +28,6 @@ export function args(...a: unknown[]): LogArgs {
 	return m;
 }
 
-export function stringMap(...a: string[]): Record<string, string> {
-	if (a.length % 2 !== 0) {
-		throw new Error("Need an even and nonzero number of arguments");
-	}
-	const m: Record<string, string> = {};
-	for (let i = 0; i < a.length; i += 2) {
-		m[a[i]] = a[i + 1];
-	}
-	return m;
-}
-
 /**
  * Utility function to convert HTTP headers (or a multi-value map) to a JsonObject for storage.
  * Duplicated headers become an array of values.

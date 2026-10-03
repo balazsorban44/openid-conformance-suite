@@ -33,10 +33,6 @@ export function modelAndView(name: string, model: Record<string, unknown> = {}, 
 	});
 }
 
-export function hasView(name: string): boolean {
-	return views.has(name);
-}
-
 export function jsonResponse(body: JsonValue | Record<string, unknown>, status = 200, headers?: HeadersInit): Response {
 	const h = new Headers(headers);
 	if (!h.has("content-type")) {

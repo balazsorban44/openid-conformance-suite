@@ -121,7 +121,7 @@ Port Java `if (el == null)` as `if (el == null)` (loose, covers both).
 | `o.remove("k")`                                              | `const v = o["k"]; delete o["k"]`                                                           |
 | `o.keySet()` / `o.entrySet()` / `o.size()`                   | `Object.keys(o)` / `Object.entries(o)` / `Object.keys(o).length`                            |
 | `el.isJsonObject()` / `isJsonArray()` / `isJsonNull()`       | `isJsonObject(el)` / `isJsonArray(el)` / `el === null`                                      |
-| `el.isJsonPrimitive() && el.getAsJsonPrimitive().isString()` | `typeof el === "string"` (or `isJsonString(el)`)                                            |
+| `el.isJsonPrimitive() && el.getAsJsonPrimitive().isString()` | `typeof el === "string"`                                                                    |
 | `...isNumber()` / `...isBoolean()`                           | `typeof el === "number"` / `typeof el === "boolean"`                                        |
 | `el.getAsJsonObject()` / `getAsJsonArray()`                  | `el as JsonObject` after an `isJsonObject` check                                            |
 | `OIDFJSON.getString(el)` etc.                                | `OIDFJSON.getString(el)` (same strict semantics, throws on wrong type)                      |

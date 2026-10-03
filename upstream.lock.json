@@ -3369,7 +3369,8 @@
 		"src/framework/IterateEnvironmentArray.ts": {
 			"java": "src/main/java/net/openid/conformance/testmodule/IterateEnvironmentArray.java",
 			"blob": "68b1dac2c38654568f07912b7a7a4731078490d2",
-			"loc": 192
+			"loc": 192,
+			"note": "not ported: no ported test module iterates over an environment array (AbstractTestModule.callIterate)"
 		},
 		"src/framework/TestLockManager.ts": {
 			"java": "src/main/java/net/openid/conformance/testmodule/TestLockManager.java",

@@ -187,26 +187,10 @@ export function collectVariantMetadata(moduleClass: Function): Required<ModuleVa
  * (e.g. { client_auth_type: "client_secret_basic", response_type: "code" }).
  */
 export class VariantSelection {
-	static readonly EMPTY = new VariantSelection({});
-
 	private readonly variant: Record<string, string>;
 
 	constructor(variant: Record<string, string>) {
 		this.variant = { ...variant };
-	}
-
-	static fromJson(json: unknown): VariantSelection {
-		if (json == null || json === "") {
-			return new VariantSelection({});
-		}
-		if (typeof json === "object") {
-			const out: Record<string, string> = {};
-			for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
-				out[k] = String(v);
-			}
-			return new VariantSelection(out);
-		}
-		throw new Error("Invalid variant selection: " + JSON.stringify(json));
 	}
 
 	/** Parse the command line form `[client_auth_type=mtls][response_type=code]` */
@@ -230,26 +214,12 @@ export class VariantSelection {
 		return parameterClass.parameter.name in this.variant;
 	}
 
-	with(parameterClass: VariantEnumClass, value: string): VariantSelection {
-		return new VariantSelection({ ...this.variant, [parameterClass.parameter.name]: value });
-	}
-
-	getVariantAsKeyPairString(): string {
-		return Object.entries(this.variant)
-			.map(([k, v]) => `${k}=${v}`)
-			.join(", ");
-	}
-
 	/** The `[k=v][k2=v2]` form used by the upstream CI runner and our test names (sorted by key) */
 	toBracketString(): string {
 		return Object.keys(this.variant)
 			.sort()
 			.map((k) => `[${k}=${this.variant[k]}]`)
 			.join("");
-	}
-
-	toString(): string {
-		return `VariantSelection{variant=${JSON.stringify(this.variant)}}`;
 	}
 
 	toJSON(): Record<string, string> {

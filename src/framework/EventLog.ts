@@ -26,19 +26,13 @@ let seq = 0;
 export class TestInstanceEventLog {
 	readonly testId: string;
 	readonly entries: LogEntry[] = [];
-	private sinks: LogSink[] = [];
+	private readonly sink: LogSink | undefined;
 	// a block identifier for a log entry
 	private blockId: string | null = null;
 
 	constructor(testId: string, sink?: LogSink) {
 		this.testId = testId;
-		if (sink) {
-			this.sinks.push(sink);
-		}
-	}
-
-	addSink(sink: LogSink): void {
-		this.sinks.push(sink);
+		this.sink = sink;
 	}
 
 	/**
@@ -63,9 +57,7 @@ export class TestInstanceEventLog {
 			...sanitise(map),
 		};
 		this.entries.push(entry);
-		for (const sink of this.sinks) {
-			sink(entry);
-		}
+		this.sink?.(entry);
 	}
 
 	private newBlockId(): string {
@@ -90,18 +82,6 @@ export class TestInstanceEventLog {
 		const oldBlock = this.blockId;
 		this.blockId = null;
 		return oldBlock;
-	}
-
-	/** Wraps the given block in a startBlock()... endBlock() sequence. */
-	async runBlock(message: string | null, block: () => void | Promise<void>): Promise<string | null> {
-		this.startBlock(message);
-		let result: string | null;
-		try {
-			await block();
-		} finally {
-			result = this.endBlock();
-		}
-		return result;
 	}
 }
 

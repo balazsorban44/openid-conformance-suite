@@ -14,7 +14,7 @@
  *   obj.has("x")          -> has(obj, "x")
  *   el.isJsonObject()     -> isJsonObject(el)
  *   el.isJsonArray()      -> isJsonArray(el)
- *   el.isJsonPrimitive() && el.getAsJsonPrimitive().isString() -> isJsonString(el)
+ *   el.isJsonPrimitive() && el.getAsJsonPrimitive().isString() -> typeof el === "string"
  *   el.deepCopy()         -> deepCopy(el)
  *   el.toString()         -> JSON.stringify(el)
  *   JsonParser.parseString(s) -> parseJson(s)  (throws JsonParseException)
@@ -55,18 +55,6 @@ export function isJsonArray(v: unknown): v is JsonArray {
 	return Array.isArray(v);
 }
 
-export function isJsonString(v: unknown): v is string {
-	return typeof v === "string";
-}
-
-export function isJsonNumber(v: unknown): v is number {
-	return typeof v === "number";
-}
-
-export function isJsonBoolean(v: unknown): v is boolean {
-	return typeof v === "boolean";
-}
-
 /** Gson's el.isJsonPrimitive() */
 export function isJsonPrimitive(v: unknown): v is string | number | boolean {
 	return typeof v === "string" || typeof v === "number" || typeof v === "boolean";
@@ -80,17 +68,6 @@ export function isJsonNull(v: unknown): v is null {
 /** Gson's obj.has(key) */
 export function has(obj: JsonObject | null | undefined, key: string): boolean {
 	return obj != null && Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-/**
- * Gson's obj.get(key): returns the element, or undefined if the member is missing.
- * (Gson returns Java null when missing; a present JSON null is returned as null.)
- */
-export function get(obj: JsonObject | null | undefined, key: string): JsonValue | undefined {
-	if (obj == null || !Object.prototype.hasOwnProperty.call(obj, key)) {
-		return undefined;
-	}
-	return obj[key];
 }
 
 /** Gson's JsonParser.parseString() */
@@ -138,16 +115,6 @@ export function jsonEquals(a: JsonValue | undefined, b: JsonValue | undefined): 
 /** Gson's JsonArray.contains(new JsonPrimitive(x)) */
 export function jsonArrayContains(arr: JsonArray | null | undefined, value: JsonValue): boolean {
 	return arr != null && arr.some((x) => jsonEquals(x, value));
-}
-
-/** Gson's obj.keySet() */
-export function keySet(obj: JsonObject): string[] {
-	return Object.keys(obj);
-}
-
-/** Gson's obj.entrySet() */
-export function entrySet(obj: JsonObject): [string, JsonValue][] {
-	return Object.entries(obj);
 }
 
 /**
