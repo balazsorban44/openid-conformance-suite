@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CompactEncrypt, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { parseJavaURI } from "../condition/as/dynregistration/AbstractClientValidationCondition.ts";
+import { parseJavaURI } from "./jdk/uri.ts";
 import { JWKUtil, ParseException, type JWK, type JWKSet } from "./JWKUtil.ts";
 import { JWTUtil, type JWT } from "./JWTUtil.ts";
 
