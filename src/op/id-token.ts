@@ -1,0 +1,654 @@
+/**
+ * The id_token checks: the standard ones upstream runs on every id_token (PerformStandardIdTokenChecks) and the
+ * ones individual test modules add (kid, alg, at_hash / c_hash, claims that were not requested).
+ *
+ *   await idToken.performStandardIdTokenChecks(op, client, request, tokens.idToken);
+ */
+import { createHash } from "node:crypto";
+import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
+import { verifyJwsSignature, type ParsedJwt } from "../suite/jose.ts";
+import { JWAUtil, InvalidAlgorithmException } from "../util/JWAUtil.ts";
+import { JWEUtil } from "../util/JWEUtil.ts";
+import type { AuthorizationRequest } from "./authorization.ts";
+import type { Op } from "./op.ts";
+import type { Client } from "./registration.ts";
+import type { AccessToken } from "./token.ts";
+
+const DAY_MILLIS = 24 * 60 * 60 * 1000;
+/** 5 minute allowable clock skew */
+const TIME_SKEW_MILLIS = 5 * 60 * 1000;
+
+function claim(idToken: ParsedJwt, name: string): unknown {
+	return idToken.claims[name];
+}
+
+function stringClaim(idToken: ParsedJwt, name: string): string | null {
+	const v = claim(idToken, name);
+	return typeof v === "string" ? v : null;
+}
+
+function longClaim(idToken: ParsedJwt, name: string): number | null {
+	const v = claim(idToken, name);
+	return typeof v === "number" ? Math.trunc(v) : null;
+}
+
+/**
+ * iss, aud, exp, iat, auth_time, acr and nbf (OIDCC 3.1.3.7).
+ *
+ * upstream: condition/client/ValidateIdToken.java
+ */
+export function validateIdToken(
+	idToken: ParsedJwt,
+	op: Pick<Op, "metadata">,
+	client: Pick<Client, "client_id">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateIdToken", ...requirements);
+	const clientId = client.client_id;
+	const issuer = op.metadata.issuer;
+	const now = Date.now();
+	if (!clientId || !issuer) {
+		c.failure("Couldn't find values to test ID token against");
+	}
+	if (claim(idToken, "iss") == null) {
+		c.failure("'iss' claim missing");
+	}
+	if (issuer !== stringClaim(idToken, "iss")) {
+		c.failure("Issuer mismatch", { expected: issuer, actual: stringClaim(idToken, "iss") });
+	}
+	const aud = claim(idToken, "aud");
+	if (aud == null) {
+		c.failure("'aud' claim missing");
+	}
+	if (Array.isArray(aud)) {
+		if (!aud.includes(clientId)) {
+			c.failure("'aud' array does not contain our client id", { expected: clientId, actual: aud });
+		}
+	} else if (clientId !== String(aud)) {
+		c.failure("'aud' is not our client id", { expected: clientId, actual: aud });
+	}
+	const exp = longClaim(idToken, "exp");
+	if (exp == null) {
+		c.failure("'exp' claim missing");
+	}
+	if (now - TIME_SKEW_MILLIS > exp * 1000) {
+		c.failure("Token expired", { expiration: new Date(exp * 1000), now: new Date(now) });
+	}
+	if (exp * 1000 > now + 50 * 365 * DAY_MILLIS) {
+		c.failure(
+			"'exp' is unreasonably far in the future (more than 50 years), this may indicate the value was incorrectly specified in milliseconds instead of seconds",
+			{ exp: new Date(exp * 1000), now: new Date(now) },
+		);
+	}
+	const iat = longClaim(idToken, "iat");
+	if (iat == null) {
+		c.failure("'iat' claim missing");
+	}
+	if (now + TIME_SKEW_MILLIS < iat * 1000) {
+		c.failure("Token 'iat' in the future", { "issued-at": new Date(iat * 1000), now: new Date(now) });
+	}
+	if (now - TIME_SKEW_MILLIS > iat * 1000) {
+		// the client can reasonably assume servers send iat values that match the current time (OIDCC 3.1.3.7)
+		c.failure("Token 'iat' more than 5 minutes in the past", { "issued-at": new Date(iat * 1000), now: new Date(now) });
+	}
+	const authTime = longClaim(idToken, "auth_time");
+	if (authTime != null) {
+		if (now - 365 * DAY_MILLIS > authTime * 1000) {
+			c.failure("id_token auth_time is over a year in the past", {
+				auth_time: new Date(authTime * 1000),
+				now: new Date(now),
+			});
+		}
+		if (now + TIME_SKEW_MILLIS < authTime * 1000) {
+			c.failure("id_token auth_time is in the future", { auth_time: new Date(authTime * 1000), now: new Date(now) });
+		}
+	}
+	if (stringClaim(idToken, "acr") === "") {
+		c.failure("id_token acr is an empty string");
+	}
+	const nbf = longClaim(idToken, "nbf");
+	if (nbf != null && now + TIME_SKEW_MILLIS < nbf * 1000) {
+		// not part of OIDC; JWT defines it. Only logged, it does not make the token invalid
+		c.log("Token has future not-before", { "not-before": new Date(nbf * 1000), now: new Date(now) });
+	}
+	c.success("ID token iss, aud, exp, iat, auth_time, acr & nbf claims passed validation checks");
+}
+
+interface ElementValidator {
+	description: string;
+	isValid(v: unknown): boolean;
+}
+
+/** Java String.isBlank */
+function isBlank(s: string): boolean {
+	// oxlint-disable-next-line no-control-regex -- Character.isWhitespace includes the separators U+001C-U+001F
+	return /^[\s\u001c-\u001f]*$/.test(s);
+}
+
+const VALIDATE_STRING: ElementValidator = {
+	description: "a string with content",
+	// a claim that is not returned SHOULD be omitted, not null or empty; "null" has been seen as a user's name
+	isValid: (v) => typeof v === "string" && !isBlank(v) && v.toLowerCase() !== "null",
+};
+
+function isSaneBirthYear(year: number): boolean {
+	return year >= 1850 && year <= new Date().getFullYear();
+}
+
+const VALIDATE_BIRTHDATE: ElementValidator = {
+	description: "a valid birthdate in the format stated in OpenID Connect Standard - YYYY-MM-DD, 0000-MM-DD or YYYY",
+	isValid(v) {
+		if (!VALIDATE_STRING.isValid(v)) {
+			return false;
+		}
+		const date = v as string;
+		const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+		if (m) {
+			const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+			const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+			const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+			if (month < 1 || month > 12 || day < 1 || day > days) {
+				return false;
+			}
+			// the year can be 0000 when it is not held or not released
+			return year === 0 || isSaneBirthYear(year);
+		}
+		return /^[+-]?\d+$/.test(date) && isSaneBirthYear(Number.parseInt(date, 10));
+	},
+};
+
+const VALIDATE_BOOLEAN: ElementValidator = { description: "a boolean", isValid: (v) => typeof v === "boolean" };
+const VALIDATE_NUMBER: ElementValidator = { description: "a number", isValid: (v) => typeof v === "number" };
+const VALIDATE_JSON_OBJECT: ElementValidator = {
+	description: "a JSON object",
+	isValid: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
+};
+
+/**
+ * Validates an object of standard claims, logging each claim (upstream AbstractValidateOpenIdStandardClaims
+ * ObjectValidator); unknown claims are collected in `unknown`.
+ */
+function objectValidator(
+	c: Condition,
+	context: string | null,
+	claims: Map<string, ElementValidator>,
+	unknown: Record<string, unknown>,
+): ElementValidator {
+	return {
+		description: "a valid object or contains invalid claims",
+		isValid(elt) {
+			if (typeof elt !== "object" || elt === null || Array.isArray(elt) || Object.keys(elt).length === 0) {
+				c.logFailure("Not a JSON object or no identity claims");
+				return false;
+			}
+			let ok = true;
+			for (const [key, value] of Object.entries(elt)) {
+				const name = context != null ? context + "." + key : key;
+				const validator = claims.get(key);
+				if (validator == null) {
+					c.log("Skipping unknown claim: " + name);
+					unknown[name] = value;
+					continue;
+				}
+				if (validator.isValid(value)) {
+					c.log(name + " is " + validator.description);
+				} else {
+					c.logFailure(name + " is not " + validator.description);
+					ok = false;
+				}
+			}
+			return ok;
+		},
+	};
+}
+
+/** Claims specific to the id_token; what is left are the identity claims of OIDCC 5.1 */
+const ID_TOKEN_NON_IDENTITY_CLAIMS = [
+	"iss",
+	"aud",
+	"exp",
+	"iat",
+	"auth_time",
+	"nonce",
+	"acr",
+	"amr",
+	"azp",
+	"c_hash",
+	"at_hash",
+	"s_hash",
+	"jti",
+	"nbf",
+	"verified_claims",
+];
+
+/**
+ * The identity claims in the id_token have the types OIDCC 5.1 defines. Returns the unknown claims.
+ *
+ * upstream: condition/client/ValidateIdTokenStandardClaims.java (AbstractValidateOpenIdStandardClaims)
+ */
+export function validateIdTokenStandardClaims(idToken: ParsedJwt, ...requirements: string[]): Record<string, unknown> {
+	const c: Condition = condition("ValidateIdTokenStandardClaims", ...requirements);
+	const identityClaims = structuredClone(idToken.claims);
+	for (const name of ID_TOKEN_NON_IDENTITY_CLAIMS) {
+		delete identityClaims[name];
+	}
+	const unknown: Record<string, unknown> = {};
+	const address = new Map(
+		["formatted", "street_address", "locality", "region", "postal_code", "country"].map((k) => [k, VALIDATE_STRING]),
+	);
+	const standard = new Map<string, ElementValidator>([
+		...[
+			"sub",
+			"name",
+			"given_name",
+			"family_name",
+			"middle_name",
+			"nickname",
+			"preferred_username",
+			"profile",
+			"picture",
+			"website",
+			"email",
+		].map((k): [string, ElementValidator] => [k, VALIDATE_STRING]),
+		["email_verified", VALIDATE_BOOLEAN],
+		["gender", VALIDATE_STRING],
+		["birthdate", VALIDATE_BIRTHDATE],
+		["zoneinfo", VALIDATE_STRING],
+		["locale", VALIDATE_STRING],
+		["phone_number", VALIDATE_STRING],
+		["phone_number_verified", VALIDATE_BOOLEAN],
+		["address", objectValidator(c, "address", address, unknown)],
+		["updated_at", VALIDATE_NUMBER],
+		["_claim_names", VALIDATE_JSON_OBJECT],
+		["_claim_sources", VALIDATE_JSON_OBJECT],
+		// digitalid-financial-api-04.md
+		["txn", VALIDATE_STRING],
+	]);
+	if (!objectValidator(c, null, standard, unknown).isValid(identityClaims)) {
+		c.failure("id_token claims are not valid", identityClaims);
+	}
+	c.success("id_token claims are valid");
+	return unknown;
+}
+
+/** upstream: condition/client/ValidateIdTokenNonce.java */
+export function validateIdTokenNonce(
+	idToken: ParsedJwt,
+	expectedNonce: string | null,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateIdTokenNonce", ...requirements);
+	const nonce = stringClaim(idToken, "nonce");
+	if (nonce == null && expectedNonce == null) {
+		c.success("nonce is not in id_token, as expected.");
+		return;
+	}
+	if (expectedNonce !== nonce) {
+		c.failure("Nonce values mismatch", { actual: nonce, expected: expectedNonce });
+	}
+	c.success("Nonce values match", { nonce });
+}
+
+/** upstream: condition/client/ValidateIdTokenACRClaimAgainstRequest.java */
+export function validateIdTokenACRClaimAgainstRequest(
+	idToken: ParsedJwt,
+	request: Pick<AuthorizationRequest, "params">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateIdTokenACRClaimAgainstRequest", ...requirements);
+	const acr = claim(idToken, "acr");
+	if (acr != null && typeof acr !== "string") {
+		c.failure("acr value in id_token must be a string", { id_token: idToken });
+	}
+	const requested = (
+		request.params["claims"] as { id_token?: { acr?: { value?: unknown; values?: unknown[] } } } | undefined
+	)?.id_token?.acr;
+	const values: string[] =
+		requested?.values != null
+			? requested.values.map(String)
+			: requested?.value != null
+				? [String(requested.value)]
+				: [];
+	if (values.length === 0 && requested?.values == null) {
+		c.success("Nothing to check; the conformance suite did not request an acr claim in request object");
+		return;
+	}
+	if (acr == null) {
+		c.failure(
+			"One or more acr values were requested as an 'essential: true' claim so, as the authentication succeeded, the acr used MUST be returned in the id_token",
+			{ id_token: idToken, expected: values },
+		);
+	}
+	if (!values.includes(acr)) {
+		c.failure("acr value in id_token is not (one of the) requested values", { requested: values, actual: acr });
+	}
+	c.success("acr value in id_token is (one of) the requested values", { requested: values, actual: acr });
+}
+
+/** upstream: condition/client/ValidateIdTokenSignature.java (AbstractVerifyJwsSignature) */
+export async function validateIdTokenSignature(
+	idToken: ParsedJwt,
+	serverJwks: unknown,
+	...requirements: string[]
+): Promise<void> {
+	const c: Condition = condition("ValidateIdTokenSignature", ...requirements);
+	await verifyJwsSignature(c, idToken.value, serverJwks, "id_token", false, "server");
+}
+
+/** upstream: condition/client/CheckForSubjectInIdToken.java */
+export function checkForSubjectInIdToken(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("CheckForSubjectInIdToken", ...requirements);
+	const sub = stringClaim(idToken, "sub");
+	if (!sub) {
+		c.failure("id_token does not contain 'sub'");
+	}
+	// "It MUST NOT exceed 255 ASCII characters in length." (OIDCC 2)
+	if (sub.length > 255) {
+		c.failure("id_token 'sub' exceeds 255 ASCII characters", { sub });
+	}
+	for (let i = 0; i < sub.length; i++) {
+		const ch = sub.charCodeAt(i);
+		if (ch < 0x20) {
+			c.failure(
+				`id_token 'sub' contains non-printable character 0x${ch.toString(16).padStart(2, "0")} at offset ${i}`,
+				{ sub },
+			);
+		}
+		if (ch >= 0x7f) {
+			c.failure(`id_token 'sub' contains non-ASCII character 0x${ch.toString(16).padStart(2, "0")} at offset ${i}`, {
+				sub,
+			});
+		}
+	}
+	c.success("Found 'sub' in id_token", { sub });
+}
+
+/**
+ * upstream: condition/client/EnsureIdTokenUpdatedAtValid.java (AbstractUpdatedAtValid)
+ *
+ * UPSTREAM: reads `updated_at` from the top level of the parsed id_token object (value/header/claims), not from its
+ * claims, so it always logs that there is none; kept as is for identical results.
+ */
+export function ensureIdTokenUpdatedAtValid(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureIdTokenUpdatedAtValid", ...requirements);
+	const updatedAt = (idToken as unknown as Record<string, unknown>)["updated_at"];
+	if (typeof updatedAt !== "number") {
+		c.log("id_token response does not contain 'updated_at'");
+		return;
+	}
+	const now = Date.now();
+	const fields = { updated_at: new Date(updatedAt * 1000), now: new Date(now) };
+	if (now + TIME_SKEW_MILLIS < updatedAt * 1000) {
+		c.failure("updated_at in id_token appears to be in the future", fields);
+	}
+	if (Date.UTC(1990, 0, 1) > updatedAt * 1000) {
+		c.failure("updated_at in id_token appears to be prior to the year 1990", fields);
+	}
+	c.success("'updated_at' in id_token response seems to be a valid time", fields);
+}
+
+/** upstream: condition/client/ValidateEncryptedIdTokenHasKid.java */
+export function validateEncryptedIdTokenHasKid(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("ValidateEncryptedIdTokenHasKid", ...requirements);
+	const alg = idToken.jwe_header?.["alg"];
+	const kid = idToken.jwe_header?.["kid"];
+	if (JWEUtil.isSymmetricJWEAlgorithm(alg as string)) {
+		c.success("skipping KID check for symmetric alg " + String(alg));
+		return;
+	}
+	if (!kid) {
+		c.failure("kid was not found in the encrypted ID token header");
+	}
+	c.success("kid was found in the encrypted ID token header", { kid });
+}
+
+/**
+ * The checks that hold for every id_token, in upstream's order (all continue on failure).
+ *
+ * upstream: sequence/client/PerformStandardIdTokenChecks.java
+ */
+export async function performStandardIdTokenChecks(
+	op: Pick<Op, "metadata" | "jwks">,
+	client: Pick<Client, "client_id">,
+	request: Pick<AuthorizationRequest, "params" | "nonce">,
+	idToken: ParsedJwt,
+): Promise<void> {
+	soft(() => validateIdToken(idToken, op, client, "OIDCC-3.1.3.7"));
+	soft(() => validateIdTokenStandardClaims(idToken, "OIDCC-5.1"));
+	soft(() => validateIdTokenNonce(idToken, request.nonce, "OIDCC-2"));
+	soft(() => validateIdTokenACRClaimAgainstRequest(idToken, request, "OIDCC-5.5.1.1"));
+	await soft(() => validateIdTokenSignature(idToken, op.jwks));
+	soft(() => checkForSubjectInIdToken(idToken, "OIDCC-2"));
+	soft(() => ensureIdTokenUpdatedAtValid(idToken, "OIDCC-5.1"));
+	if (idToken.jwe_header == null) {
+		skipped("ValidateEncryptedIdTokenHasKid", { element: ["id_token", "jwe_header"] }, "OIDCC-10.2", "OIDCC-10.2.1");
+	} else {
+		soft(() => validateEncryptedIdTokenHasKid(idToken, "OIDCC-10.2", "OIDCC-10.2.1"));
+	}
+}
+
+/** A hash claim of the id_token and the id_token's alg (upstream env "at_hash" / "c_hash") */
+export interface ExtractedHash {
+	hash: string;
+	alg: string;
+}
+
+/** upstream: condition/client/ExtractHash.java */
+function extractHash(name: string, hashName: string, idToken: ParsedJwt, requirements: string[]): ExtractedHash {
+	const c: Condition = condition(name, ...requirements);
+	const value = claim(idToken, hashName);
+	if (value != null && typeof value !== "string") {
+		c.failure(hashName + " in ID token is not a string");
+	}
+	if (value == null) {
+		c.failure("Couldn't find " + hashName + " in ID token");
+	}
+	const alg = idToken.header["alg"];
+	if (typeof alg !== "string") {
+		c.failure("Couldn't find algorithm in ID token header");
+	}
+	c.success("Extracted " + hashName + " from ID Token", { [hashName]: value, alg });
+	return { hash: value, alg };
+}
+
+/** upstream: condition/client/ExtractAtHash.java */
+export function extractAtHash(idToken: ParsedJwt, ...requirements: string[]): ExtractedHash {
+	return extractHash("ExtractAtHash", "at_hash", idToken, requirements);
+}
+
+/** upstream: condition/client/ExtractCHash.java */
+export function extractCHash(idToken: ParsedJwt, ...requirements: string[]): ExtractedHash {
+	return extractHash("ExtractCHash", "c_hash", idToken, requirements);
+}
+
+/** upstream: condition/client/AbstractValidateHash.java: the left half of the digest of `baseString` */
+function validateHash(
+	name: string,
+	hashName: string,
+	extracted: ExtractedHash,
+	baseString: string,
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	if (!extracted.alg) {
+		c.failure("Alg is null or empty. Invalid");
+	}
+	if (!extracted.hash) {
+		c.failure(hashName + " element is null or empty. Invalid");
+	}
+	let digestAlgorithm: string;
+	try {
+		digestAlgorithm = JWAUtil.getDigestAlgorithmForSigAlg(extracted.alg);
+	} catch (e) {
+		if (e instanceof InvalidAlgorithmException) {
+			c.failure("Invalid algorithm", { alg: extracted.alg });
+		}
+		throw e;
+	}
+	// getBytes(US_ASCII): characters outside US-ASCII become '?'
+	const ascii = Buffer.from(Array.from(baseString, (ch) => (ch.charCodeAt(0) < 0x80 ? ch : "?")).join(""), "latin1");
+	const digest = createHash(digestAlgorithm.replace("-", "").toLowerCase()).update(ascii).digest();
+	const expected = digest.subarray(0, digest.length / 2).toString("base64url");
+	const fields = { expected_hash: expected, id_token_hash: extracted.hash, unhashed_value: baseString };
+	if (extracted.hash !== expected) {
+		c.failure("Invalid " + hashName + " in token", fields);
+	}
+	c.success(hashName + " validated successfully", fields);
+}
+
+/** upstream: condition/client/ValidateAtHash.java */
+export function validateAtHash(atHash: ExtractedHash, accessToken: AccessToken, ...requirements: string[]): void {
+	validateHash("ValidateAtHash", "at_hash", atHash, accessToken.value, requirements);
+}
+
+/** upstream: condition/client/ValidateCHash.java */
+export function validateCHash(cHash: ExtractedHash, code: string, ...requirements: string[]): void {
+	validateHash("ValidateCHash", "c_hash", cHash, code, requirements);
+}
+
+/**
+ * at_hash / c_hash are optional in an id_token from the token endpoint, but must be right when present.
+ *
+ * upstream: OIDCCServerTest.additionalTokenEndpointResponseValidation (the hash part)
+ */
+export function checkOptionalHashes(idToken: ParsedJwt, accessToken: AccessToken, code: string | null): void {
+	const atHash = soft(() => extractAtHash(idToken, "OIDCC-3.3.2.11", "OIDCC-3.3.3.6"), "info");
+	if (atHash === undefined) {
+		skipped("ValidateAtHash", { object: "at_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		soft(() => validateAtHash(atHash, accessToken, "OIDCC-3.3.2.11"));
+	}
+	const cHash = soft(() => extractCHash(idToken, "OIDCC-3.3.2.11", "OIDCC-3.3.3.6"), "info");
+	if (cHash === undefined) {
+		skipped("ValidateCHash", { object: "c_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		soft(() => validateCHash(cHash, code ?? "", "OIDCC-3.3.2.11"));
+	}
+}
+
+/** upstream: condition/client/EnsureIdTokenContainsKid.java */
+export function ensureIdTokenContainsKid(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureIdTokenContainsKid", ...requirements);
+	const kid = idToken.header["kid"];
+	if (!kid) {
+		c.failure("kid was not found in the ID token header");
+	}
+	c.success("kid was found in the ID token header", { kid });
+}
+
+/** upstream: condition/client/EnsureIdTokenSignatureIsRS256.java (AbstractCheckIdTokenSignatureAlgorithm) */
+export function ensureIdTokenSignatureIsRS256(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureIdTokenSignatureIsRS256", ...requirements);
+	const alg = idToken.header["alg"];
+	if (!alg) {
+		c.failure("alg not present in ID token header", { header: idToken.header });
+	}
+	if (alg !== "RS256") {
+		c.failure('ID token signature algorithm is not "RS256"', { alg });
+	}
+	c.success('ID token was signed with "RS256" as expected');
+}
+
+/** upstream: condition/client/EnsureIdTokenDoesNotContainName.java */
+export function ensureIdTokenDoesNotContainName(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureIdTokenDoesNotContainName", ...requirements);
+	const name = stringClaim(idToken, "name");
+	if (name != null) {
+		// see discussion on certification email list, 10th March 2020
+		c.failure(
+			"Unexpectedly found name in id_token. The conformance suite did not request the 'name' claim is returned in the id_token and hence did not expect the server to include it. Technically this does not violate the specifications but it is likely a bug in the server and may result in user data being exposed in unintended ways.",
+			{ name },
+		);
+	}
+	c.success("name claim not found in id_token, which is expected as it was not requested to be returned there");
+}
+
+/** The claims a scope stands for (OIDCC 5.4; upstream AbstractVerifyScopesReturnedInClaims) */
+export const SCOPE_STANDARD_CLAIMS = new Map<string, string[]>([
+	["openid", ["sub"]],
+	[
+		"profile",
+		[
+			"name",
+			"given_name",
+			"family_name",
+			"middle_name",
+			"nickname",
+			"profile",
+			"picture",
+			"website",
+			"gender",
+			"birthdate",
+			"zoneinfo",
+			"locale",
+			"updated_at",
+			"preferred_username",
+		],
+	],
+	["email", ["email", "email_verified"]],
+	["address", ["address"]],
+	["phone", ["phone_number", "phone_number_verified"]],
+	["offline_access", []],
+]);
+
+/**
+ * Claims that may appear in an id_token without being requested.
+ * UPSTREAM: a static list the condition adds the requested scopes' claims to, so they accumulate for the rest of
+ * the process; kept for identical results.
+ */
+const idTokenValidClaims = [
+	"iss",
+	"sub",
+	"aud",
+	"exp",
+	"iat",
+	"auth_time",
+	"nonce",
+	"acr",
+	"amr",
+	"azp",
+	"at_hash",
+	"c_hash",
+	"nbf",
+	"jti",
+	"sid",
+	"s_hash",
+	"openbanking_intent_id",
+	"txn",
+];
+
+/** upstream: condition/client/EnsureIdTokenDoesNotContainNonRequestedClaims.java */
+export function ensureIdTokenDoesNotContainNonRequestedClaims(
+	idToken: ParsedJwt,
+	request: Pick<AuthorizationRequest, "params">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureIdTokenDoesNotContainNonRequestedClaims", ...requirements);
+	const scope = typeof request.params["scope"] === "string" ? request.params["scope"] : null;
+	if (scope) {
+		const scopes = scope.split(" ");
+		if (scopes.includes("openid")) {
+			for (const s of scopes) {
+				for (const name of SCOPE_STANDARD_CLAIMS.get(s) ?? []) {
+					if (!idTokenValidClaims.includes(name)) {
+						idTokenValidClaims.push(name);
+					}
+				}
+			}
+		}
+	}
+	let failed = false;
+	for (const key of Object.keys(idToken.claims)) {
+		if (!idTokenValidClaims.includes(key)) {
+			failed = true;
+			c.logFailure("id_token contains non-requested claim '" + key + "'");
+		}
+	}
+	if (failed) {
+		c.failure(
+			"id_token contains non-requested claims. This may indicate the authorization server is returning data about the user that it should not, or that a specification has been wrongly implemented, or that it implements an extension the conformance suite is currently aware of.",
+			{ requested_scope: scope, supplied: idToken.claims },
+		);
+	}
+	c.success("no non-requested id_token claims found");
+}

@@ -12,7 +12,12 @@
  * keeps running its whole plan while the rewrite progresses; when a plan is complete, its modules list is the whole
  * plan and plan.spec.ts no longer runs anything for it.
  */
-export const portedPlans: Record<string, { spec: string; modules: string[] }> = {};
+export const portedPlans: Record<string, { spec: string; modules: string[] }> = {
+	"oidcc-basic-certification-test-plan": {
+		spec: "tests/op/basic.spec.ts",
+		modules: ["oidcc-server", "oidcc-response-type-missing", "oidcc-idtoken-signature", "oidcc-codereuse"],
+	},
+};
 
 export interface ConformanceProject {
 	name: string;
