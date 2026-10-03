@@ -8,7 +8,8 @@
  *
  * Environment:
  *   PORT (4000)                       http listener; RP_BASE_URL (http://localhost:PORT) is how others reach it
- *   RP_HTTPS_PORT (4443)              https listener (configs/certs/localhost.{crt,key}) for initiate_login_uri, 0 disables
+ *   RP_HTTPS_PORT (4443)              https listener (configs/certs/localhost.{crt,key}) for initiate_login_uri and
+ *                                     request objects, 0 disables (the configs pass free ports: ${PORT}, ${PORT_HTTPS})
  *   RP_STATIC_CLIENT_ID / RP_STATIC_CLIENT_SECRET   static client defaults (openid-client-rp / rp-secret-...)
  *   RP_JWKS                           private JWKS JSON to use instead of keys generated at startup
  *   RP_CHROMIUM_EXECUTABLE_PATH       chromium binary for the Playwright user agent (default: Playwright's)

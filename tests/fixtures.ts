@@ -12,6 +12,8 @@
  *   client_registration variant); a registered client is unregistered after the test.
  * - `configureClient(customizeRegistration?)`: the same client set up by the test, for modules that add to the
  *   registration request or run conditions before the client is configured (logout, 3rd-party-initiated login).
+ * - `rp`: for RP tests, the emulated OP (`rp.start(options)`, on the test's own server; its issuer is the server's
+ *   base url) and the client driver that makes the RP under test log in against it (`rp.driveClient()`).
  * - `variant`: the variant (the plan's fixed values + the selection from CONFORMANCE_VARIANT / the project).
  *
  * Selection (environment): CONFORMANCE_PROJECT (a project from src/runner/projects.ts) or CONFORMANCE_CONFIG +
@@ -39,6 +41,8 @@ import { createLog, renderLogHtml, resultOf, useLog, type EventLog, type LogEntr
 import type { ModuleReport } from "../src/suite/report.ts";
 import { startServer, type TestServer } from "../src/suite/server.ts";
 import { startTarget, type RunningTarget } from "../src/suite/target.ts";
+import type { RpVariant } from "../src/rp/op.ts";
+import { createRp, type Rp } from "../src/rp/rp.ts";
 
 export { expect };
 
@@ -74,6 +78,7 @@ interface Fixtures {
 	client: RegisteredClient;
 	client2: RegisteredClient;
 	configureClient: ConfigureClient;
+	rp: Rp;
 }
 
 /**
@@ -242,6 +247,26 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 			for (const registered of configured) {
 				await tearDownClient(registered);
 			}
+		}
+	},
+
+	rp: async ({ conformance, variant, suite }, use, testInfo) => {
+		const rp = createRp({
+			testName: conformance.testName,
+			variant: variant as unknown as RpVariant,
+			config: conformance.config,
+			server: conformance.server,
+			log: conformance.log,
+			clientDriver: suite.loaded.clientDriver,
+			skip: (reason) => {
+				testInfo.skip(true, reason);
+				throw new Error("unreachable: testInfo.skip throws");
+			},
+		});
+		try {
+			await use(rp);
+		} finally {
+			await rp.close();
 		}
 	},
 });

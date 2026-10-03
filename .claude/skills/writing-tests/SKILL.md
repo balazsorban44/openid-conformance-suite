@@ -36,10 +36,20 @@ src/op/               helpers for testing an OpenID Provider, one file per conce
                       logout token and front-channel request checks, the first login of the logout modules
   session.ts          session management: session_state, the suite's session check pages (check_session_iframe)
   initiate-login.ts   third-party-initiated login: initiate_login_uri in the registration / client configuration
-src/rp/               (to come) the emulated OP for RP tests and its request checks
-tests/fixtures.ts     the `test` with the `op`, `client`, `client2`, `variant`, `plan` fixtures
+src/rp/               the emulated OP for testing a Relying Party, one file per concern
+  op.ts               startEmulatedOp(): setup, the endpoints on the test's server, expect()/waitFor(), options (knobs)
+  rp.ts               the `rp` fixture's object (start, driveClient, skipTest) and driveClient (client_driver)
+  discovery.ts        the generated metadata (OIDCCGenerateServerConfiguration...), the discovery response
+  jwks.ts             the OP's keys (OIDCCGenerateServerJWKs and variants, unusable extra keys), the jwks response
+  registration.ts     the registration endpoint, client metadata checks, static clients, the client's keys
+  authorization.ts    the authorization endpoint: request checks, code, response (query / fragment / form_post)
+  token.ts            the token endpoint: client authentication, code exchange checks, token response
+  id-token.ts         signing algorithm, id_token claims, at_hash/c_hash, signing, the negative tests' defects
+  userinfo.ts         the user, the userinfo endpoint (bearer token checks, claims filtered by scope)
+tests/fixtures.ts     the `test` with the `op`, `client`, `client2`, `configureClient`, `rp`, `variant`, `plan` fixtures
 tests/op/*.spec.ts    one file per OP plan (basic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
                       session-management, 3rdparty-init-login so far)
+tests/rp/*.spec.ts    one file per RP plan (basic.spec.ts so far)
 tests/plan.spec.ts    the old framework, for the modules not rewritten yet (see "Transition")
 ```
 
@@ -133,6 +143,67 @@ test.describe("oidcc-basic-certification-test-plan", () => {
   or an error page). Put such a decision into a named helper when it is more than one line
   (`token.checkAuthorizationCodeReuseResponse`).
 
+## Anatomy of an RP test (from tests/rp/basic.spec.ts)
+
+The suite plays the OP: the test starts the emulated OP with what this module does differently, makes the RP under
+test log in against it, and follows the requests the RP sends. The checks upstream runs on those requests (the
+`condition/as` classes) run inside the endpoint handlers, logged in their blocks ("Registration endpoint",
+"Authorization endpoint", "Token endpoint", "Userinfo endpoint", ...).
+
+```ts
+import * as idToken from "../../src/rp/id-token.ts";
+import { failTest } from "../../src/rp/op.ts";
+import { test } from "../fixtures.ts";
+
+// upstream: openid/client/OIDCCClientTestInvalidAudInIdToken.java (rp-id_token-aud)
+test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not its client_id", async ({ rp }) => {
+	const op = await rp.start({
+		idTokenClaims: (claims) => idToken.addInvalidAudValueToIdToken(claims, "OIDCC-3.1.3.7", "OIDCC-2"),
+		onUserinfoRequest: () =>
+			failTest(
+				"Client has incorrectly called userinfo_endpoint after receiving an id_token with an invalid aud claim.",
+			),
+	});
+	const client = rp.driveClient(); // GET client_driver.startUrl: the RP starts logging in against op.issuer
+	await op.clientRegistered(); // dynamic_client: the registration request; static_client: the configured client
+	await op.expect("authorization");
+	await op.expect("token");
+	// the RP must reject the id_token and stop: no userinfo request within waitTimeoutSeconds
+	await op.waitFor("userinfo", rp.waitTimeoutSeconds);
+	await client; // the RP under test reports it finished (TEST-RUNNER entry)
+});
+```
+
+- `rp.start(options)` (src/rp/op.ts `startEmulatedOp`): the setup upstream's `AbstractOIDCCClientTest.configure`
+  logs (metadata, keys and their validation, the user, the static client) and the endpoints, served on the test's
+  server: the issuer is `server.baseUrl + "/"` (`/test/a/<alias>/`). The options are upstream's overridable methods
+  as plain values / callbacks, named after what they change: `serverConfiguration`, `serverJwks`, `signingAlg`,
+  `registrationSteps`, `checkNonce`, `checkResponseType`, `checkAuthorizationRequest`,
+  `allowMaxAgeZeroWithPromptNone`, `customizeAuthorizationResponse`, `idTokenClaims`, `signIdToken`,
+  `idTokenSignature`, `onCodeExchange`, `onUserinfoRequest`, `userinfo`, `clientAuthType`. A callback calls the
+  upstream condition functions itself (with upstream's requirements), so the test shows what is logged.
+- `op.expect(endpoint)` resolves with `{ request, ... }` once the OP answered the next request to `endpoint`
+  (`registration` -> `client`, `authorization` -> `authorization` state + `response` params, `token` -> `response`,
+  `userinfo` -> `response`); it fails when the RP finished without sending one (the client driver call returned),
+  after 60 s, or when a check failed while handling a request (upstream: the module stops). `discovery` and `jwks`
+  are served whenever the RP asks and can be awaited too.
+- `op.waitFor(endpoint, seconds)` is upstream's `startWaitingForTimeout`: the request or null when none came in
+  time (or the RP finished). Use it where the RP may or must not continue; what an unexpected request means is an
+  option: `onUserinfoRequest: () => failTest(msg)` (upstream throws TestFailureException in the handler) or
+  `rp.skipTest(msg)` (upstream fireTestSkipped). A test whose upstream module finishes after a request ends with
+  `await op.expect(<that endpoint>)`.
+- Requests are handled one at a time (upstream's test lock), outside the test's Playwright steps; the test's
+  `expect`/`waitFor` calls are the steps of the report.
+- `rp.driveClient()` (port of the old runner's driveClient, targets/openid-client-rp/README.md): GET
+  `client_driver.startUrl` with issuer, module, variant, client_metadata_defaults, alias and a static client's
+  credentials; logged under TEST-RUNNER. The call blocks until the RP has run its flow, so its return tells the OP
+  that no further requests will come.
+- Not supported yet by the emulated OP (they throw a TODO(port) error): request objects (request_type
+  request_object / request_uri), client_secret_jwt / private_key_jwt / mTLS client authentication, signed or
+  encrypted userinfo responses, encrypted id_tokens, refresh tokens, webfinger, logout / session management
+  endpoints. Add them to the concern file (new endpoints: `serve(...)` in op.ts, a handler in a new concern file
+  such as `src/rp/logout.ts`).
+
 ## Fixtures (tests/fixtures.ts)
 
 - `op: Op` (src/op/op.ts): `testName`, `testId`, `config` (`override` applied), `variant`, `metadata` (upstream
@@ -151,6 +222,10 @@ null (client_jwks), dynamic }`: registered (`registerClient`) or from the config
   test like `client`.
 - `conformance` (testName, log, config, server, browser) without discovery or keys, for modules whose own flow
   fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`).
+- `rp: Rp` (src/rp/rp.ts): `testName`, `variant` (RpVariant), `config`, `waitTimeoutSeconds` (config
+  `waitTimeoutSeconds`, default 5), `start(options)` -> `EmulatedOp` (also `rp.op`), `driveClient()`,
+  `skipTest(reason)`. Uses the same per-test setup and after-test analysis as `op` (the `conformance` fixture);
+  a client driver call still running when the test ends is aborted.
 - `variant: OpVariant`, `plan: { name, variant }` (option). A plan whose module lists fix different variants
   (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list.
 - Worker scope: the config is loaded and `target` started once per worker, on a free port. Per test: a fresh log,
@@ -277,5 +352,6 @@ the project, diff the fingerprints against the old framework's run, `pnpm lock-s
 
 pnpm 12 (`packageManager`), `pnpm check` (tsc, oxlint, oxfmt), `pnpm test:unit` (Vitest + MSW), `pnpm test`
 (Playwright), `node bin/cli.ts` / `pnpm exec openid-conformance` (commander CLI: list, run, ci, projects).
-Targets get a free `PORT` (`target.url: "https://localhost:${PORT}"`, configs use `${TARGET_URL}`), so workers and
-projects run in parallel.
+Targets get a free `PORT` (`target.url: "https://localhost:${PORT}"`, configs use `${TARGET_URL}`), and a free port
+for every `${PORT_<NAME>}` the target mentions (passed as `PORT_<NAME>`, e.g. `"env": { "RP_HTTPS_PORT":
+"${PORT_HTTPS}" }` for the RP's https listener), so workers and projects run in parallel.

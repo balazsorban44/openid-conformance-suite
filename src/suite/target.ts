@@ -9,8 +9,11 @@
  *   }
  *
  * When the target mentions `${PORT}` a free port is chosen and passed to the command as `PORT`; `${TARGET_URL}`
- * is `url` with the port filled in. Several workers or CI projects therefore never compete for a port. A target
- * whose readyUrl already answers before it is started is assumed to run externally and is left alone.
+ * is `url` with the port filled in. A target that needs more ports names them `${PORT_<NAME>}` (each gets its own
+ * free port, passed as the environment variable `PORT_<NAME>`, and usually mapped to the variable the command
+ * reads in `env`: `"env": { "RP_HTTPS_PORT": "${PORT_HTTPS}" }`). All of them can be used anywhere in the
+ * configuration. Several workers or CI projects therefore never compete for a port. A target whose readyUrl
+ * already answers before it is started is assumed to run externally and is left alone.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
@@ -25,7 +28,7 @@ export interface RunningTarget {
 	readonly port: number | null;
 	/** stdout and stderr of the command (last 2000 chunks) */
 	readonly output: string[];
-	/** Substitution variables for the configuration: TARGET_URL, PORT */
+	/** Substitution variables for the configuration: TARGET_URL, PORT, PORT_<NAME> */
 	readonly vars: Record<string, string>;
 	stop(): Promise<void>;
 }
@@ -40,9 +43,13 @@ export async function freePort(): Promise<number> {
 }
 
 export async function startTarget(cfg: TargetConfig, root = process.cwd()): Promise<RunningTarget> {
-	const usesPort = JSON.stringify(cfg).includes("${PORT}");
-	const port = usesPort ? await freePort() : null;
+	const json = JSON.stringify(cfg);
+	const port = json.includes("${PORT}") ? await freePort() : null;
 	const vars: Record<string, string> = port == null ? {} : { PORT: String(port) };
+	for (const [, name] of json.matchAll(/\$\{(PORT_[A-Z0-9_]+)\}/g)) {
+		vars[name] ??= String(await freePort());
+	}
+	const ports = Object.fromEntries(Object.entries(vars).filter(([k]) => k.startsWith("PORT")));
 	if (cfg.url) {
 		vars["TARGET_URL"] = substitute(cfg.url, vars).replace(/\/$/, "");
 	}
@@ -56,7 +63,7 @@ export async function startTarget(cfg: TargetConfig, root = process.cwd()): Prom
 	const [cmd, ...args] = target.command.split(/\s+/);
 	const child: ChildProcess = spawn(cmd, args, {
 		cwd: target.cwd ? resolve(root, target.cwd) : root,
-		env: { ...process.env, ...target.env, ...(port == null ? {} : { PORT: String(port) }) },
+		env: { ...process.env, ...ports, ...target.env },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	const capture = (chunk: Buffer) => {

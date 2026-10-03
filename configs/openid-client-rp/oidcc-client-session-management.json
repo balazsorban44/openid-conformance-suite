@@ -11,13 +11,15 @@
 	"waitTimeoutSeconds": 5,
 	"target": {
 		"command": "node targets/openid-client-rp/server.ts",
-		"readyUrl": "http://localhost:4000/ready",
+		"url": "http://localhost:${PORT}",
+		"readyUrl": "${TARGET_URL}/ready",
 		"env": {
-			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt"
+			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt",
+			"RP_HTTPS_PORT": "${PORT_HTTPS}"
 		}
 	},
 	"client_driver": {
-		"startUrl": "http://localhost:4000/start"
+		"startUrl": "${TARGET_URL}/start"
 	},
 	"expectedFailures": "../expected-failures/openid-client-rp.json",
 	"expectedSkips": "../expected-skips/openid-client-rp.json"

@@ -73,6 +73,25 @@ export const portedPlans: Record<string, { spec: string; modules: string[] }> = 
 		spec: "tests/op/3rdparty-init-login.spec.ts",
 		modules: ["oidcc-3rd_party-init-login", "oidcc-3rd_party-init-login-nohttps"],
 	},
+	"oidcc-client-basic-certification-test-plan": {
+		spec: "tests/rp/basic.spec.ts",
+		modules: [
+			"oidcc-client-test",
+			"oidcc-client-test-invalid-iss",
+			"oidcc-client-test-missing-sub",
+			"oidcc-client-test-invalid-aud",
+			"oidcc-client-test-missing-iat",
+			"oidcc-client-test-kid-absent-single-jwks",
+			"oidcc-client-test-kid-absent-multiple-jwks",
+			"oidcc-client-test-idtoken-sig-rs256",
+			"oidcc-client-test-idtoken-sig-none",
+			"oidcc-client-test-invalid-sig-rs256",
+			"oidcc-client-test-userinfo-invalid-sub",
+			"oidcc-client-test-nonce-invalid",
+			"oidcc-client-test-scope-userinfo-claims",
+			"oidcc-client-test-client-secret-basic",
+		],
+	},
 };
 
 export interface ConformanceProject {

@@ -5,8 +5,14 @@ The Relying Party under test for the RP plans (`oidcc-client-*`). It is built on
 [sample-openid-client-nodejs](https://gitlab.com/openid/sample-openid-client-nodejs) (openid-client v3).
 
 ```bash
-node targets/openid-client-rp/server.ts      # prints "ready" once listening on http://localhost:4000
+node targets/openid-client-rp/server.ts      # prints "ready" once listening on http://localhost:4000 (PORT)
 ```
+
+`PORT` (http, default 4000) and `RP_HTTPS_PORT` (https, default 4443, `0` disables) choose the listeners. The
+configs in `configs/openid-client-rp/` let the runner pick free ports (src/suite/target.ts): `"url":
+"http://localhost:${PORT}"`, `"env": { "RP_HTTPS_PORT": "${PORT_HTTPS}" }`, and use `${TARGET_URL}` and
+`${PORT_HTTPS}` wherever the RP's URLs appear (readyUrl, `client_driver.startUrl`, static `redirect_uri`, browser
+matches), so several projects and workers can run the RP at the same time.
 
 ## How upstream drives its RP, and what this target does instead
 
@@ -32,7 +38,7 @@ logout, session management and third party initiated login modules work too.
 ## Driver contract
 
 1. The runner starts the process from the config's `target.command` and waits until `target.readyUrl`
-   (`http://localhost:4000/ready`) answers 200.
+   (`${TARGET_URL}/ready`) answers 200.
 2. For every RP test module, once the suite's emulated OP is ready (module `WAITING`), the runner calls
 
    ```
@@ -69,29 +75,29 @@ logout, session management and third party initiated login modules work too.
 4. The runner then waits for the module to finish, exactly like run-test-plan.py. The module result in the suite
    is authoritative; `ok` is informational.
 
-Static RP configs must register the RP's endpoints at the suite: `client.redirect_uri` `http://localhost:4000/cb`
-(and for logout plans `post_logout_redirect_uri` `http://localhost:4000/logged-out`, `backchannel_logout_uri`
-`http://localhost:4000/backchannel-logout`, `frontchannel_logout_uri` `http://localhost:4000/frontchannel-logout`).
+Static RP configs must register the RP's endpoints at the suite: `client.redirect_uri` `${TARGET_URL}/cb`
+(and for logout plans `post_logout_redirect_uri` `${TARGET_URL}/logged-out`, `backchannel_logout_uri`
+`${TARGET_URL}/backchannel-logout`, `frontchannel_logout_uri` `${TARGET_URL}/frontchannel-logout`).
 
 ## RP endpoints
 
-| endpoint                                    | purpose                                                                                                                                                                                                                               |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /ready`                                | readiness probe                                                                                                                                                                                                                       |
-| `GET /start`                                | driver entry point (above)                                                                                                                                                                                                            |
-| `GET /jwks`                                 | the RP's public keys (also sent inline as `jwks` at registration when needed)                                                                                                                                                         |
-| `GET /login?flow=`                          | where the RP's user agent starts; 302 to the authorization endpoint                                                                                                                                                                   |
-| `GET /cb`                                   | `redirect_uri`: query responses; for fragment responses it serves a page that posts the fragment to `/cb-fragment`                                                                                                                    |
-| `POST /cb`                                  | `response_mode=form_post` responses                                                                                                                                                                                                   |
-| `POST /cb-fragment`                         | fragment responses (implicit / hybrid)                                                                                                                                                                                                |
-| `GET /request-object/<id>`                  | request objects passed by reference (`request_uri`)                                                                                                                                                                                   |
-| `GET /logout?flow=`                         | RP-initiated logout: 302 to `end_session_endpoint` with `id_token_hint`, `post_logout_redirect_uri`, `state`                                                                                                                          |
-| `GET /logged-out`                           | `post_logout_redirect_uri`                                                                                                                                                                                                            |
-| `POST /backchannel-logout`                  | `backchannel_logout_uri`: validates the `logout_token` (signature with the OP JWKS and the ID Token alg, `iss`, `aud`, `iat`, `jti`, `events`, no `nonce`, `sub` or `sid`); 200 + `Cache-Control: no-store` on success, 400 otherwise |
-| `GET /frontchannel-logout`                  | `frontchannel_logout_uri` (`iss`, `sid`): clears the session, 200 HTML                                                                                                                                                                |
-| `GET /session-check?flow=&phase=`           | session management: loads the OP's `check_session_iframe` and posts `client_id session_state` to it                                                                                                                                   |
-| `GET /session-status`                       | where the session check page reports the iframe's answer                                                                                                                                                                              |
-| `GET https://localhost:4443/initiate-login` | `initiate_login_uri` (`iss`, `login_hint`, `target_link_uri`), https because the suite requires it (ValidateClientInitiateLoginUri); certificate `configs/certs/localhost.crt` (`RP_HTTPS_PORT=0` disables)                           |
+| endpoint                                             | purpose                                                                                                                                                                                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /ready`                                         | readiness probe                                                                                                                                                                                                                       |
+| `GET /start`                                         | driver entry point (above)                                                                                                                                                                                                            |
+| `GET /jwks`                                          | the RP's public keys (also sent inline as `jwks` at registration when needed)                                                                                                                                                         |
+| `GET /login?flow=`                                   | where the RP's user agent starts; 302 to the authorization endpoint                                                                                                                                                                   |
+| `GET /cb`                                            | `redirect_uri`: query responses; for fragment responses it serves a page that posts the fragment to `/cb-fragment`                                                                                                                    |
+| `POST /cb`                                           | `response_mode=form_post` responses                                                                                                                                                                                                   |
+| `POST /cb-fragment`                                  | fragment responses (implicit / hybrid)                                                                                                                                                                                                |
+| `GET /request-object/<id>`                           | request objects passed by reference (`request_uri`)                                                                                                                                                                                   |
+| `GET /logout?flow=`                                  | RP-initiated logout: 302 to `end_session_endpoint` with `id_token_hint`, `post_logout_redirect_uri`, `state`                                                                                                                          |
+| `GET /logged-out`                                    | `post_logout_redirect_uri`                                                                                                                                                                                                            |
+| `POST /backchannel-logout`                           | `backchannel_logout_uri`: validates the `logout_token` (signature with the OP JWKS and the ID Token alg, `iss`, `aud`, `iat`, `jti`, `events`, no `nonce`, `sub` or `sid`); 200 + `Cache-Control: no-store` on success, 400 otherwise |
+| `GET /frontchannel-logout`                           | `frontchannel_logout_uri` (`iss`, `sid`): clears the session, 200 HTML                                                                                                                                                                |
+| `GET /session-check?flow=&phase=`                    | session management: loads the OP's `check_session_iframe` and posts `client_id session_state` to it                                                                                                                                   |
+| `GET /session-status`                                | where the session check page reports the iframe's answer                                                                                                                                                                              |
+| `GET https://localhost:${PORT_HTTPS}/initiate-login` | `initiate_login_uri` (`iss`, `login_hint`, `target_link_uri`), https because the suite requires it (ValidateClientInitiateLoginUri); certificate `configs/certs/localhost.crt` (`RP_HTTPS_PORT=0` disables)                           |
 
 ## What the RP does per module
 

@@ -157,17 +157,19 @@ export async function block<T>(name: string, fn: () => T | Promise<T>): Promise<
  */
 export function skipped(
 	name: string,
-	missing: { object: string } | { element: [string, string] },
+	missing: { object: string } | { element: [string, string] } | { string: string },
 	...requirements: string[]
 ): void {
 	const fields: LogFields =
 		"object" in missing
 			? { msg: "Skipped evaluation due to missing required object: " + missing.object, expected: missing.object }
-			: {
-					msg: `Skipped evaluation due to missing required element: ${missing.element[0]} ${missing.element[1]}`,
-					object: missing.element[0],
-					path: missing.element[1],
-				};
+			: "string" in missing
+				? { msg: "Skipped evaluation due to missing required string: " + missing.string, expected: missing.string }
+				: {
+						msg: `Skipped evaluation due to missing required element: ${missing.element[0]} ${missing.element[1]}`,
+						object: missing.element[0],
+						path: missing.element[1],
+					};
 	fields["result"] = "INFO";
 	// upstream logs the requirements of a skipped call even when there are none
 	fields["requirements"] = requirements;
