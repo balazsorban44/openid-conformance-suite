@@ -95,11 +95,13 @@ export class TestInstanceEventLog {
 	/** Wraps the given block in a startBlock()... endBlock() sequence. */
 	async runBlock(message: string | null, block: () => void | Promise<void>): Promise<string | null> {
 		this.startBlock(message);
+		let result: string | null;
 		try {
 			await block();
 		} finally {
-			return this.endBlock();
+			result = this.endBlock();
 		}
+		return result;
 	}
 }
 

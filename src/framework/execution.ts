@@ -128,7 +128,7 @@ export class TestExecutionManager {
 
 	/** Resolves when every started task (and the finalisation task) has settled */
 	async drain(): Promise<void> {
-		await Promise.allSettled([...this.tasks]);
+		await Promise.allSettled(this.tasks);
 		if (this.finalisation) {
 			await this.finalisation.catch(() => {});
 		}
