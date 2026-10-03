@@ -1,0 +1,8 @@
+[
+	{
+		"test-name": "oidcc-client-test-idtoken-sig-none",
+		"variant": "*",
+		"configuration-filename": "*",
+		"comment": "openid-client rejects unsigned (alg=none) id_tokens; the module skips itself when the client does not continue to userinfo"
+	}
+]

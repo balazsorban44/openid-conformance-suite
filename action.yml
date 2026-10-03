@@ -74,10 +74,8 @@ runs:
       run: |
         set -uo pipefail
         CONFIG="$(realpath "${{ inputs.config }}")"
-        export CONFORMANCE_CONFIG="$CONFIG"
-        cd "${{ github.action_path }}"
         set +e
-        node bin/openid-conformance.ts run --plan "$CONFORMANCE_PLAN" --config "$CONFIG"
+        node "${{ github.action_path }}/bin/openid-conformance.ts" run --plan "$CONFORMANCE_PLAN" --config "$CONFIG"
         STATUS=$?
         set -e
         echo "results=${CONFORMANCE_REPORT_DIR}/results.json" >> "$GITHUB_OUTPUT"

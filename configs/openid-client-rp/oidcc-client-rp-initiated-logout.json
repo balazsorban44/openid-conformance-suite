@@ -19,5 +19,6 @@
 	"client_driver": {
 		"startUrl": "http://localhost:4000/start"
 	},
-	"expectedFailures": "../expected-failures/openid-client-rp.json"
+	"expectedFailures": "../expected-failures/openid-client-rp.json",
+	"expectedSkips": "../expected-skips/openid-client-rp.json"
 }

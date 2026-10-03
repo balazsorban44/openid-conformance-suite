@@ -60,7 +60,7 @@ if (!planName || !configPath) {
 		test.beforeAll(async () => {
 			loaded = await loadConfig(resolve(configPath));
 			if (loaded.target) {
-				target = new Target(loaded.target);
+				target = new Target(loaded.target, process.env["CONFORMANCE_CWD"] ?? process.cwd());
 				await target.start();
 			}
 			// CONFORMANCE_TLS=1 serves the suite over https with the bundled localhost certificate (or

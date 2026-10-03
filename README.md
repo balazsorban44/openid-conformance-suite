@@ -85,8 +85,9 @@ for tooling.
   };
   ```
 
-- `target` (optional) starts your implementation before the plan and stops it afterwards. Leave it out if your
-  OP is already running or hosted elsewhere.
+- `target` (optional) starts your implementation before the plan and stops it afterwards; `command` runs in the
+  directory you invoke the CLI/action from (`cwd` and `env` are optional). Leave it out if your OP is already
+  running or hosted elsewhere.
 - `expectedFailures` / `expectedSkips` (optional) point at JSON lists in the official suite's
   `expected-failures-*.json` format for known deviations you want to tolerate.
 

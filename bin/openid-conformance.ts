@@ -110,7 +110,12 @@ async function list(opts: Record<string, unknown>): Promise<void> {
 function playwright(env: Record<string, string>, extra: string[]): number {
 	const cli = require.resolve("@playwright/test/cli");
 	const args = [cli, "test", "tests/plan.spec.ts", "--config", join(root, "playwright.config.ts"), ...extra];
-	const r = spawnSync(process.execPath, args, { stdio: "inherit", cwd: root, env: { ...process.env, ...env } });
+	const r = spawnSync(process.execPath, args, {
+		stdio: "inherit",
+		cwd: root,
+		// CONFORMANCE_CWD: the directory `target.command` of the config runs in (the caller's working directory)
+		env: { CONFORMANCE_CWD: process.cwd(), ...process.env, ...env },
+	});
 	return r.status ?? 1;
 }
 
@@ -142,8 +147,10 @@ async function main(): Promise<void> {
 			const env: Record<string, string> = {
 				CONFORMANCE_PLAN: plan,
 				CONFORMANCE_CONFIG: configPath,
-				CONFORMANCE_VARIANT: variants.map((v) => `[${v}]`).join(""),
 			};
+			if (variants.length > 0) {
+				env["CONFORMANCE_VARIANT"] = variants.map((v) => `[${v}]`).join("");
+			}
 			if (typeof opts["module"] === "string") {
 				env["CONFORMANCE_MODULE"] = opts["module"];
 			}

@@ -15,11 +15,11 @@ export default defineConfig({
 	expect: { timeout: 10_000 },
 	reporter: [
 		["list"],
-		["html", { open: "never", outputFolder: "playwright-report" }],
+		["html", { open: "never", outputFolder: process.env["PLAYWRIGHT_HTML_OUTPUT_DIR"] ?? "playwright-report" }],
 		["github"],
 		["./src/runner/reporter.ts"],
 	],
-	outputDir: "test-results",
+	outputDir: process.env["PLAYWRIGHT_TEST_OUTPUT_DIR"] ?? "test-results",
 	use: {
 		headless: true,
 		screenshot: "only-on-failure",
