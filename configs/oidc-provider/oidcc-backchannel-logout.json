@@ -7,7 +7,7 @@
 		"client_registration": "dynamic_client"
 	},
 	"server": {
-		"discoveryUrl": "https://localhost:3000/.well-known/openid-configuration"
+		"discoveryUrl": "${TARGET_URL}/.well-known/openid-configuration"
 	},
 	"client": {
 		"client_name": "first-openid-client"
@@ -17,12 +17,12 @@
 	},
 	"browser": [
 		{
-			"match": "https://localhost:3000/auth*",
+			"match": "${TARGET_URL}/auth*",
 			"tasks": [
 				{
 					"task": "Login",
 					"optional": true,
-					"match": "https://localhost:3000/interaction*",
+					"match": "${TARGET_URL}/interaction*",
 					"commands": [
 						["text", "name", "login", "foo", "optional"],
 						["text", "name", "password", "bar", "optional"],
@@ -32,7 +32,7 @@
 				{
 					"task": "Consent",
 					"optional": true,
-					"match": "https://localhost:3000/interaction*",
+					"match": "${TARGET_URL}/interaction*",
 					"commands": [["click", "class", "login-submit"]]
 				},
 				{
@@ -43,17 +43,17 @@
 			]
 		},
 		{
-			"match": "https://localhost:3000/session/end*",
+			"match": "${TARGET_URL}/session/end*",
 			"tasks": [
 				{
 					"task": "Choose logout option",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"commands": [["click", "css", "button[autofocus] "]]
 				},
 				{
 					"task": "process user choice, wait for redirect back",
 					"optional": true,
-					"match": "https://localhost:3000/session/end/confirm",
+					"match": "${TARGET_URL}/session/end/confirm",
 					"commands": [["wait", "match", "/test/.*/post", 10]]
 				},
 				{
@@ -68,12 +68,12 @@
 			"browser": [
 				{
 					"comment": "updates placeholder during the second authorization",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["wait", "xpath", "//*", 10, "Sign-in", "update-image-placeholder-optional"],
 								["text", "name", "login", "foo", "optional"],
@@ -84,7 +84,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -100,12 +100,12 @@
 			"browser": [
 				{
 					"comment": "updates placeholder during the second authorization",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["wait", "xpath", "//*", 10, "Sign-in", "update-image-placeholder-optional"],
 								["text", "name", "login", "foo", "optional"],
@@ -116,7 +116,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -132,11 +132,11 @@
 			"browser": [
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect redirect uri mismatch error page",
-							"match": "https://localhost:3000/auth*",
+							"match": "${TARGET_URL}/auth*",
 							"commands": [["wait", "xpath", "//*", 10, "oops! something went wrong", "update-image-placeholder"]]
 						}
 					]
@@ -147,11 +147,11 @@
 			"browser": [
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect redirect uri mismatch error page",
-							"match": "https://localhost:3000/auth*",
+							"match": "${TARGET_URL}/auth*",
 							"commands": [["wait", "xpath", "//*", 10, "oops! something went wrong", "update-image-placeholder"]]
 						}
 					]
@@ -162,11 +162,11 @@
 			"browser": [
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect redirect uri mismatch error page",
-							"match": "https://localhost:3000/auth*",
+							"match": "${TARGET_URL}/auth*",
 							"commands": [["wait", "xpath", "//*", 10, "oops! something went wrong", "update-image-placeholder"]]
 						}
 					]
@@ -177,11 +177,11 @@
 			"browser": [
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect redirect uri mismatch error page",
-							"match": "https://localhost:3000/auth*",
+							"match": "${TARGET_URL}/auth*",
 							"commands": [["wait", "xpath", "//*", 10, "oops! something went wrong", "update-image-placeholder"]]
 						}
 					]
@@ -192,11 +192,11 @@
 			"browser": [
 				{
 					"comment": "expect a login page with logo",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect a login page with logo",
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["wait", "xpath", "//*", 10, "Sign-in", "update-image-placeholder"]]
 						}
 					]
@@ -207,11 +207,11 @@
 			"browser": [
 				{
 					"comment": "expect a login page with policy document link",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect a login page with policy document link",
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["wait", "xpath", "//*", 10, "Sign-in", "update-image-placeholder"]]
 						}
 					]
@@ -222,11 +222,11 @@
 			"browser": [
 				{
 					"comment": "expect a login page with TOS document link",
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Expect a login page with TOS document link",
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["wait", "xpath", "//*", 10, "Sign-in", "update-image-placeholder"]]
 						}
 					]
@@ -236,12 +236,12 @@
 		"oidcc-rp-initiated-logout-bad-post-logout-redirect-uri": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -251,7 +251,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -263,11 +263,11 @@
 				},
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Expect error page",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [
 								["wait", "xpath", "//*", 10, "post_logout_redirect_uri not registered", "update-image-placeholder"]
 							]
@@ -279,12 +279,12 @@
 		"oidcc-rp-initiated-logout-query-added-to-post-logout-redirect-uri": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -294,7 +294,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -306,11 +306,11 @@
 				},
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Expect error page",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [
 								["wait", "xpath", "//*", 10, "post_logout_redirect_uri not registered", "update-image-placeholder"]
 							]
@@ -322,12 +322,12 @@
 		"oidcc-rp-initiated-logout-modified-id-token-hint": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -337,7 +337,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -349,11 +349,11 @@
 				},
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Expect error page",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [["wait", "xpath", "//*", 10, "could not validate id_token_hint", "update-image-placeholder"]]
 						}
 					]
@@ -363,12 +363,12 @@
 		"oidcc-rp-initiated-logout-bad-id-token-hint": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -378,7 +378,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -390,11 +390,11 @@
 				},
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Expect error page",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [
 								["wait", "xpath", "//*", 10, "unrecognized id_token_hint audience", "update-image-placeholder"]
 							]
@@ -406,12 +406,12 @@
 		"oidcc-rp-initiated-logout-no-id-token-hint": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -421,7 +421,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -433,11 +433,11 @@
 				},
 				{
 					"comment": "expect an immediate error page",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Expect error page",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [
 								[
 									"wait",
@@ -456,12 +456,12 @@
 		"oidcc-rp-initiated-logout-no-params": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -471,7 +471,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -483,16 +483,16 @@
 				},
 				{
 					"comment": "wait for the logout success",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Choose logout option",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [["click", "css", "button[autofocus] "]]
 						},
 						{
 							"task": "Expect success page",
-							"match": "https://localhost:3000/session/end/success",
+							"match": "${TARGET_URL}/session/end/success",
 							"commands": [["wait", "xpath", "//*", 10, "Sign-out Success", "update-image-placeholder"]]
 						}
 					]
@@ -502,12 +502,12 @@
 		"oidcc-rp-initiated-logout-no-post-logout-redirect-uri": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -517,7 +517,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -529,16 +529,16 @@
 				},
 				{
 					"comment": "wait for the logout success",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Choose logout option",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [["click", "css", "button[autofocus] "]]
 						},
 						{
 							"task": "Expect success page",
-							"match": "https://localhost:3000/session/end/success",
+							"match": "${TARGET_URL}/session/end/success",
 							"commands": [["wait", "xpath", "//*", 10, "Sign-out Success", "update-image-placeholder"]]
 						}
 					]
@@ -548,12 +548,12 @@
 		"oidcc-rp-initiated-logout-only-state": {
 			"browser": [
 				{
-					"match": "https://localhost:3000/auth*",
+					"match": "${TARGET_URL}/auth*",
 					"tasks": [
 						{
 							"task": "Login",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [
 								["text", "name", "login", "foo", "optional"],
 								["text", "name", "password", "bar", "optional"],
@@ -563,7 +563,7 @@
 						{
 							"task": "Consent",
 							"optional": true,
-							"match": "https://localhost:3000/interaction*",
+							"match": "${TARGET_URL}/interaction*",
 							"commands": [["click", "class", "login-submit"]]
 						},
 						{
@@ -575,16 +575,16 @@
 				},
 				{
 					"comment": "wait for the logout success",
-					"match": "https://localhost:3000/session/end*",
+					"match": "${TARGET_URL}/session/end*",
 					"tasks": [
 						{
 							"task": "Choose logout option",
-							"match": "https://localhost:3000/session/end*",
+							"match": "${TARGET_URL}/session/end*",
 							"commands": [["click", "css", "button[autofocus] "]]
 						},
 						{
 							"task": "Expect success page",
-							"match": "https://localhost:3000/session/end/success",
+							"match": "${TARGET_URL}/session/end/success",
 							"commands": [["wait", "xpath", "//*", 10, "Sign-out Success", "update-image-placeholder"]]
 						}
 					]
@@ -594,7 +594,8 @@
 	},
 	"target": {
 		"command": "node targets/oidc-provider/server.ts",
-		"readyUrl": "https://localhost:3000/.well-known/openid-configuration",
+		"url": "https://localhost:${PORT}",
+		"readyUrl": "${TARGET_URL}/.well-known/openid-configuration",
 		"env": {
 			"OIDC_PROVIDER_TLS_CERT": "configs/certs/localhost.crt",
 			"OIDC_PROVIDER_TLS_KEY": "configs/certs/localhost.key",

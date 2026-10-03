@@ -6,6 +6,14 @@
  *
  * Mirrors upstream `.gitlab-ci/run-tests.sh` (makeOidccTest / makeClientTest / local provider runs).
  */
+/**
+ * Plans (partly) rewritten as explicit Playwright specs (tests/op/*.spec.ts, tests/rp/*.spec.ts): the spec file and
+ * the modules it covers. tests/plan.spec.ts runs the rest of a plan's modules on the old framework, so a project
+ * keeps running its whole plan while the rewrite progresses; when a plan is complete, its modules list is the whole
+ * plan and plan.spec.ts no longer runs anything for it.
+ */
+export const portedPlans: Record<string, { spec: string; modules: string[] }> = {};
+
 export interface ConformanceProject {
 	name: string;
 	plan: string;

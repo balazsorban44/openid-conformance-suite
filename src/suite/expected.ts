@@ -1,7 +1,5 @@
-import type { LogEntry } from "../framework/EventLog.ts";
-import type { Result } from "../framework/TestModule.ts";
-import type { ExpectedFailure, ExpectedSkip } from "./config.ts";
-import { fnmatch } from "./glob.ts";
+import { fnmatch, type ExpectedFailure, type ExpectedSkip } from "./config.ts";
+import type { LogEntry } from "./log.ts";
 
 export interface ConditionRef {
 	current_block: string;
@@ -67,7 +65,7 @@ function isExpectedForThisTest(
 export function analyzeResultLogs(
 	testName: string,
 	variant: Record<string, string>,
-	testResult: Result | string,
+	testResult: string,
 	logs: LogEntry[],
 	expectedFailuresList: ExpectedFailure[],
 	expectedSkipsList: ExpectedSkip[],

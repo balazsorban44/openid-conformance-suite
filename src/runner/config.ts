@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { readConfig, substitute } from "../suite/config.ts";
 import type { BrowserHook } from "../framework/BrowserControl.ts";
 import { isJsonObject, type JsonObject } from "../framework/json.ts";
 
@@ -82,19 +82,13 @@ export interface ExpectedSkip {
 
 const RUNNER_KEYS = ["target", "client_driver", "expectedFailures", "expectedSkips", "suite_target"] as const;
 
-export async function loadConfig(path: string): Promise<LoadedConfig> {
+/**
+ * `vars` are substituted for `${NAME}` in every string (TARGET_URL / PORT of the started target, see
+ * src/suite/target.ts).
+ */
+export async function loadConfig(path: string, vars: Record<string, string> = {}): Promise<LoadedConfig> {
 	const abs = resolve(path);
-	let raw: Record<string, unknown>;
-	if (abs.endsWith(".json")) {
-		raw = JSON.parse(await readFile(abs, "utf8")) as Record<string, unknown>;
-	} else {
-		const mod = (await import(pathToFileURL(abs).href)) as { default?: unknown; config?: unknown };
-		const exported = mod.default ?? mod.config;
-		if (!exported || typeof exported !== "object") {
-			throw new Error(`Config module ${abs} must default-export the configuration object`);
-		}
-		raw = exported as Record<string, unknown>;
-	}
+	const raw = substitute(await readConfig(abs), vars);
 	const target = (raw["target"] as TargetConfig | undefined) ?? null;
 	const clientDriver = (raw["client_driver"] as ClientDriverConfig | undefined) ?? null;
 	const suiteTarget = (raw["suite_target"] as SuiteTargetConfig | undefined) ?? null;

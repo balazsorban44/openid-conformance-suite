@@ -1,6 +1,12 @@
-import type { LogEntry } from "../framework/EventLog.ts";
-import { escapeHtml } from "../framework/views.ts";
-import { findings, type Finding, type ModuleAnalysis } from "./expected.ts";
+/**
+ * Results of a conformance run: one {@link ModuleReport} per test module (attached by the fixtures as
+ * `module-report.json`), collected by the Playwright reporter below (playwright.config.ts) into
+ * conformance-report/results.json and summary.md (also appended to $GITHUB_STEP_SUMMARY).
+ */
+import type { Reporter, TestCase, TestResult } from "@playwright/test/reporter";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { emptyAnalysis, findings, type Finding, type ModuleAnalysis } from "./expected.ts";
 
 /** One line of results.json / the summary table */
 export interface ModuleReport {
@@ -108,54 +114,74 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * Render the event log of one module as a self-contained HTML page, in the spirit of the upstream
- * log-detail.html: one row per entry, coloured by result, with expandable details.
+ * Playwright reporter that collects the per-module reports attached by tests/plan.spec.ts (attachment
+ * `module-report.json`) and writes:
+ *   conformance-report/results.json  - machine readable
+ *   conformance-report/summary.md    - human/agent readable; also appended to $GITHUB_STEP_SUMMARY
  */
-export function renderLogHtml(
-	title: string,
-	entries: LogEntry[],
-	extra: { result: string; status: string; variant: Record<string, string> },
-): string {
-	const rows: string[] = [];
-	for (const e of entries) {
-		const { _id: _, testId: _testId, seq: _seq, src, time, ...rest } = e;
-		const result = typeof rest["result"] === "string" ? (rest["result"] as string) : "";
-		const blockId = typeof rest["blockId"] === "string" ? (rest["blockId"] as string) : null;
-		const msg = typeof rest["msg"] === "string" ? (rest["msg"] as string) : "";
-		delete rest["msg"];
-		delete rest["result"];
-		delete rest["blockId"];
-		const details =
-			Object.keys(rest).length > 0
-				? `<details><summary>details</summary><pre>${escapeHtml(JSON.stringify(rest, replacer, 2))}</pre></details>`
-				: "";
-		const img =
-			typeof rest["img"] === "string"
-				? `<img src="${escapeHtml(rest["img"])}" style="max-width:600px;display:block">`
-				: "";
-		rows.push(
-			`<tr class="r-${result || "none"}"${blockId ? ` style="border-left:8px solid #${blockId}"` : ""}><td class="t">${new Date(time).toISOString().slice(11, 23)}</td><td class="src">${escapeHtml(src)}</td><td class="res">${escapeHtml(result)}</td><td class="msg">${escapeHtml(msg)}${img}${details}</td></tr>`,
-		);
-	}
-	return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
-<style>
-body{font-family:system-ui,sans-serif;font-size:13px;margin:16px}
-table{border-collapse:collapse;width:100%}td{vertical-align:top;padding:4px 6px;border-bottom:1px solid #eee}
-td.t{white-space:nowrap;color:#888}td.src{white-space:nowrap;font-family:monospace}td.res{white-space:nowrap;font-weight:bold}
-tr.r-SUCCESS td.res{color:#1a7f37}tr.r-FAILURE{background:#ffebe9}tr.r-FAILURE td.res{color:#cf222e}
-tr.r-WARNING{background:#fff8c5}tr.r-WARNING td.res{color:#9a6700}tr.r-INFO td.res{color:#0969da}tr.r-REVIEW{background:#ddf4ff}
-pre{white-space:pre-wrap;word-break:break-all;background:#f6f8fa;padding:6px;max-height:400px;overflow:auto}
-details{margin-top:4px}summary{cursor:pointer;color:#0969da}
-</style></head><body>
-<h1>${escapeHtml(title)}</h1>
-<p><b>Result:</b> ${escapeHtml(extra.result)} · <b>Status:</b> ${escapeHtml(extra.status)} · <b>Variant:</b> <code>${escapeHtml(JSON.stringify(extra.variant))}</code> · ${entries.length} log entries</p>
-<table>${rows.join("\n")}</table>
-</body></html>`;
-}
+export default class ConformanceReporter implements Reporter {
+	private reports: ModuleReport[] = [];
+	private outDir = "conformance-report";
 
-function replacer(_k: string, v: unknown): unknown {
-	if (typeof v === "string" && v.startsWith("data:image/") && v.length > 200) {
-		return v.slice(0, 60) + "…(image omitted)";
+	onBegin(): void {
+		this.outDir = process.env["CONFORMANCE_REPORT_DIR"] ?? "conformance-report";
+		mkdirSync(this.outDir, { recursive: true });
 	}
-	return v;
+
+	onTestEnd(test: TestCase, result: TestResult): void {
+		const title = test.titlePath().slice(1).join(" › ");
+		const att = result.attachments.find((a) => a.name === "module-report.json");
+		const body = att?.body ?? (att?.path && existsSync(att.path) ? readFileSync(att.path) : undefined);
+		if (body) {
+			const r = JSON.parse(body.toString("utf8")) as ModuleReport;
+			r.title = title;
+			if (result.status !== "passed" && result.status !== "skipped" && !r.error && result.error?.message) {
+				r.error = result.error.message;
+			}
+			this.reports.push(r);
+		} else if (result.status === "failed" || result.status === "timedOut") {
+			this.reports.push({
+				plan: test.titlePath()[1] ?? "",
+				testName: test.title,
+				variant: {},
+				variantString: "",
+				testId: "",
+				status: "INTERRUPTED",
+				result: "UNKNOWN",
+				ok: false,
+				durationMs: result.duration,
+				analysis: emptyAnalysis(),
+				title,
+				error: result.error?.message ?? result.status,
+			});
+		}
+	}
+
+	onEnd(): void {
+		const resultsPath = join(this.outDir, "results.json");
+		// merge with results written by other shards / projects in the same directory
+		let existing: ModuleReport[] = [];
+		try {
+			existing = JSON.parse(readFileSync(resultsPath, "utf8")) as ModuleReport[];
+		} catch {
+			// missing or unreadable
+		}
+		const merged = [...existing.filter((e) => !this.reports.some((r) => r.title === e.title)), ...this.reports];
+		writeFileSync(resultsPath, JSON.stringify(merged, null, 2));
+		const md = renderSummaryMarkdown(this.reports, {
+			title: process.env["CONFORMANCE_SUMMARY_TITLE"] ?? "OpenID conformance results",
+		});
+		writeFileSync(join(this.outDir, "summary.md"), md);
+		const stepSummary = process.env["GITHUB_STEP_SUMMARY"];
+		if (stepSummary) {
+			appendFileSync(stepSummary, md + "\n");
+		}
+		if (process.env["CI"] || process.env["CONFORMANCE_PRINT_SUMMARY"]) {
+			process.stdout.write("\n" + md + "\n");
+		}
+	}
+
+	printsToStdio(): boolean {
+		return false;
+	}
 }

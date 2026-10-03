@@ -6,16 +6,18 @@ import { SuiteServer } from "../src/framework/server.ts";
 import { VariantSelection } from "../src/framework/variants.ts";
 import { expandPlan } from "../src/framework/VariantService.ts";
 import { findPlan } from "../src/registry.ts";
-import { loadConfig, type LoadedConfig } from "../src/runner/config.ts";
-import { analyzeResultLogs, describeProblems } from "../src/runner/expected.ts";
-import { globToRegExp } from "../src/runner/glob.ts";
-import { renderLogHtml, type ModuleReport } from "../src/runner/report.ts";
-import { projects } from "../src/runner/projects.ts";
-import { Target } from "../src/runner/target.ts";
+import { loadConfig, type LoadedConfig, type TargetConfig } from "../src/runner/config.ts";
+import { portedPlans, projects } from "../src/runner/projects.ts";
 import { runModule } from "../src/runner/TestRunner.ts";
+import { globToRegExp, readConfig } from "../src/suite/config.ts";
+import { analyzeResultLogs, describeProblems } from "../src/suite/expected.ts";
+import { renderLogHtml } from "../src/suite/log.ts";
+import type { ModuleReport } from "../src/suite/report.ts";
+import { startTarget, type RunningTarget } from "../src/suite/target.ts";
 
 /**
- * One Playwright test per test module instance of the selected plan.
+ * One Playwright test per test module instance of the selected plan, on the old class framework. Modules that are
+ * rewritten as explicit specs (portedPlans in src/runner/projects.ts, e.g. tests/op/basic.spec.ts) are left out.
  *
  * Selection: CONFORMANCE_PROJECT=<name from src/runner/projects.ts> (`openid-conformance ci --project op-basic-static`
  * sets it and names the Playwright project after it), or the environment:
@@ -43,24 +45,25 @@ if (!planName || !configPath) {
 		throw new Error(`Unknown test plan '${planName}'`);
 	}
 	const moduleRe = moduleFilter ? globToRegExp(moduleFilter) : null;
+	const ported = new Set(portedPlans[planName]?.modules ?? []);
 	const modules = expandPlan(planClass, VariantSelection.fromBracketString(variantString)).filter(
-		(m) => !moduleRe || moduleRe.test(m.testName),
+		(m) => (!moduleRe || moduleRe.test(m.testName)) && !ported.has(m.testName),
 	);
 
 	let loaded: LoadedConfig;
 	let server: SuiteServer;
-	let target: Target | null = null;
+	let target: RunningTarget | null = null;
 
 	test.describe(planName, () => {
 		// sequential (single worker) but independent: a failing module must not skip the rest of the plan
 		test.describe.configure({ mode: "default" });
 
 		test.beforeAll(async () => {
-			loaded = await loadConfig(resolve(configPath));
-			if (loaded.target) {
-				target = new Target(loaded.target, process.env["CONFORMANCE_CWD"] ?? process.cwd());
-				await target.start();
+			const raw = await readConfig(resolve(configPath));
+			if (raw["target"]) {
+				target = await startTarget(raw["target"] as TargetConfig, process.env["CONFORMANCE_CWD"] ?? process.cwd());
 			}
+			loaded = await loadConfig(resolve(configPath), target?.vars ?? {});
 			server = new SuiteServer({
 				port: Number(process.env["CONFORMANCE_PORT"] ?? 0),
 				host: process.env["CONFORMANCE_HOST"],

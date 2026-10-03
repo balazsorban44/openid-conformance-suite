@@ -1,18 +1,16 @@
-import assert from "node:assert/strict";
-import { test } from "vitest";
-import type { LogEntry } from "../framework/EventLog.ts";
-import type { ExpectedFailure, ExpectedSkip } from "./config.ts";
+import { expect, test } from "vitest";
+import type { LogEntry } from "./log.ts";
+import { fnmatch, type ExpectedFailure, type ExpectedSkip } from "./config.ts";
 import { analyzeResultLogs, describeProblems, emptyAnalysis } from "./expected.ts";
-import { fnmatch } from "./glob.ts";
 
 function entry(src: string, result: string | undefined, extra: Record<string, unknown> = {}): LogEntry {
 	return { _id: "x", testId: "t", src, time: 0, seq: 0, result, ...extra };
 }
 
 test("fnmatch", () => {
-	assert.ok(fnmatch("oidcc-*", "oidcc-server"));
-	assert.ok(!fnmatch("oidcc-*", "fapi-server"));
-	assert.ok(fnmatch("authlete-*.json", "authlete-oidcc.json"));
+	expect(fnmatch("oidcc-*", "oidcc-server")).toBe(true);
+	expect(fnmatch("oidcc-*", "fapi-server")).toBe(false);
+	expect(fnmatch("authlete-*.json", "authlete-oidcc.json")).toBe(true);
 });
 
 test("expected failure inside a block is matched; unexpected ones reported", () => {
@@ -40,11 +38,11 @@ test("expected failure inside a block is matched; unexpected ones reported", () 
 		[],
 		"my.json",
 	);
-	assert.equal(a.expected_failures.length, 1);
-	assert.equal(a.unexpected_failures.length, 0);
-	assert.equal(a.unexpected_warnings.length, 1);
-	assert.deepEqual(a.counts, { SUCCESS: 1, WARNING: 1, FAILURE: 1 });
-	assert.equal(a.ok, false);
+	expect(a.expected_failures.length).toBe(1);
+	expect(a.unexpected_failures.length).toBe(0);
+	expect(a.unexpected_warnings.length).toBe(1);
+	expect(a.counts).toEqual({ SUCCESS: 1, WARNING: 1, FAILURE: 1 });
+	expect(a.ok).toBe(false);
 });
 
 test("expected failure that does not happen is reported; variant subset matching", () => {
@@ -74,8 +72,8 @@ test("expected failure that does not happen is reported; variant subset matching
 		[],
 		"x.json",
 	);
-	assert.equal(a.expected_failures_did_not_happen.length, 1);
-	assert.equal(a.ok, false);
+	expect(a.expected_failures_did_not_happen.length).toBe(1);
+	expect(a.ok).toBe(false);
 });
 
 test("describeProblems lists what fails the module, not expected failures", () => {
@@ -85,7 +83,7 @@ test("describeProblems lists what fails the module, not expected failures", () =
 	a.expected_failures.push({ current_block: "", src: "C", msg: "expected" });
 	a.expected_warnings_did_not_happen.push({ current_block: "*", src: "D" });
 	a.unexpected_skip = true;
-	assert.deepEqual(describeProblems(a), [
+	expect(describeProblems(a)).toEqual([
 		"FAILURE A [Block]: boom",
 		"WARNING B: hmm",
 		"expected warning did not happen: D",
@@ -113,32 +111,26 @@ test('current-block "*" matches inside and outside blocks; a named block only in
 		entry("Cond", "FAILURE", { blockId: "unknown" }),
 	];
 	const star = analyzeResultLogs("m", {}, "FAILED", logs, [failure()], [], "c.json");
-	assert.deepEqual(
-		star.expected_failures.map((r) => r.current_block),
-		["", "Block one", ""],
-	);
-	assert.equal(star.ok, true);
+	expect(star.expected_failures.map((r) => r.current_block)).toEqual(["", "Block one", ""]);
+	expect(star.ok).toBe(true);
 
 	const named = analyzeResultLogs("m", {}, "FAILED", logs, [failure({ "current-block": "Block one" })], [], "c.json");
-	assert.deepEqual(named.expected_failures, [{ current_block: "Block one", src: "Cond", msg: undefined }]);
-	assert.deepEqual(
-		named.unexpected_failures.map((r) => r.current_block),
-		["", ""],
-	);
-	assert.equal(named.ok, false);
+	expect(named.expected_failures).toEqual([{ current_block: "Block one", src: "Cond", msg: undefined }]);
+	expect(named.unexpected_failures.map((r) => r.current_block)).toEqual(["", ""]);
+	expect(named.ok).toBe(false);
 });
 
 test("configuration-filename and test-name globs; variant subset", () => {
 	const logs = [entry("Cond", "FAILURE")];
 	const run = (f: ExpectedFailure, variant: Record<string, string> = {}) =>
 		analyzeResultLogs("oidcc-server", variant, "FAILED", logs, [f], [], "oidc-provider-basic.json");
-	assert.equal(run(failure({ "test-name": "oidcc-*", "configuration-filename": "oidc-provider-*.json" })).ok, true);
-	assert.equal(run(failure({ "test-name": "oidcc-*", "configuration-filename": "other-*.json" })).ok, false);
-	assert.equal(run(failure({ "test-name": "oidcc-server-*" })).ok, false);
-	assert.equal(run(failure({ "test-name": "oidcc-server", "configuration-filename": "" })).ok, true);
+	expect(run(failure({ "test-name": "oidcc-*", "configuration-filename": "oidc-provider-*.json" })).ok).toBe(true);
+	expect(run(failure({ "test-name": "oidcc-*", "configuration-filename": "other-*.json" })).ok).toBe(false);
+	expect(run(failure({ "test-name": "oidcc-server-*" })).ok).toBe(false);
+	expect(run(failure({ "test-name": "oidcc-server", "configuration-filename": "" })).ok).toBe(true);
 	const v = { "test-name": "oidcc-server", variant: { a: "1" } };
-	assert.equal(run(failure(v), { a: "1", b: "2" }).ok, true);
-	assert.equal(run(failure(v), { b: "2" }).ok, false);
+	expect(run(failure(v), { a: "1", b: "2" }).ok).toBe(true);
+	expect(run(failure(v), { b: "2" }).ok).toBe(false);
 });
 
 test("warnings, result mismatch, counts and ok", () => {
@@ -158,39 +150,39 @@ test("warnings, result mismatch, counts and ok", () => {
 		[],
 		"c.json",
 	);
-	assert.deepEqual(a.expected_warnings, [{ current_block: "", src: "Warn", msg: "w" }]);
-	assert.deepEqual(a.unexpected_warnings, [
+	expect(a.expected_warnings).toEqual([{ current_block: "", src: "Warn", msg: "w" }]);
+	expect(a.unexpected_warnings).toEqual([
 		{ current_block: "", src: "Cond", msg: "a warning where a failure is expected" },
 	]);
-	assert.deepEqual(a.expected_failures_did_not_happen, [{ current_block: "*", src: "Cond" }]);
-	assert.deepEqual(a.counts, { SUCCESS: 0, WARNING: 2, FAILURE: 0 });
-	assert.equal(a.ok, false);
+	expect(a.expected_failures_did_not_happen).toEqual([{ current_block: "*", src: "Cond" }]);
+	expect(a.counts).toEqual({ SUCCESS: 0, WARNING: 2, FAILURE: 0 });
+	expect(a.ok).toBe(false);
 
 	const passed = analyzeResultLogs("m", {}, "PASSED", [entry("Ok", "SUCCESS")], [], [], "c.json");
-	assert.equal(passed.ok, true);
+	expect(passed.ok).toBe(true);
 	for (const result of ["UNKNOWN", "RUNNING", ""]) {
-		assert.equal(analyzeResultLogs("m", {}, result, [], [], [], "c.json").ok, false, result);
+		expect(analyzeResultLogs("m", {}, result, [], [], [], "c.json").ok, result).toBe(false);
 	}
-	assert.equal(analyzeResultLogs("m", {}, "REVIEW", [], [], [], "c.json").ok, true);
+	expect(analyzeResultLogs("m", {}, "REVIEW", [], [], [], "c.json").ok).toBe(true);
 });
 
 test("expected skips: FAILED counts as skipped; a skip that did not happen fails", () => {
 	const skip: ExpectedSkip = { "test-name": "m", variant: "*", "configuration-filename": "c.json" };
 	const failed = analyzeResultLogs("m", {}, "FAILED", [entry("X", "FAILURE")], [], [skip], "c.json");
-	assert.equal(failed.expected_skip, true);
-	assert.equal(failed.unexpected_failures.length, 1); // the failure itself is still unexpected
-	assert.equal(failed.ok, false);
+	expect(failed.expected_skip).toBe(true);
+	expect(failed.unexpected_failures.length).toBe(1); // the failure itself is still unexpected
+	expect(failed.ok).toBe(false);
 	const passed = analyzeResultLogs("m", {}, "PASSED", [], [], [skip], "c.json");
-	assert.equal(passed.expected_skip_did_not_happen, true);
-	assert.equal(passed.ok, false);
+	expect(passed.expected_skip_did_not_happen).toBe(true);
+	expect(passed.ok).toBe(false);
 	const otherConfig = analyzeResultLogs("m", {}, "SKIPPED", [], [], [skip], "d.json");
-	assert.equal(otherConfig.unexpected_skip, true);
-	assert.equal(otherConfig.ok, false);
+	expect(otherConfig.unexpected_skip).toBe(true);
+	expect(otherConfig.ok).toBe(false);
 });
 
 test("unexpected skip and expected skip", () => {
 	const skipped = analyzeResultLogs("m", {}, "SKIPPED", [], [], [], "c.json");
-	assert.equal(skipped.unexpected_skip, true);
+	expect(skipped.unexpected_skip).toBe(true);
 	const expected = analyzeResultLogs(
 		"m",
 		{},
@@ -200,5 +192,5 @@ test("unexpected skip and expected skip", () => {
 		[{ "test-name": "m", variant: "*", "configuration-filename": "*" }],
 		"c.json",
 	);
-	assert.equal(expected.ok, true);
+	expect(expected.ok).toBe(true);
 });
