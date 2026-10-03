@@ -17,6 +17,10 @@
 		"client_id": "client2",
 		"client_secret": "client2-secret-0123456789abcdefghijklmnopqrstuvwxyz"
 	},
+	"client_secret_post": {
+		"client_id": "client-post",
+		"client_secret": "client-post-secret-0123456789abcdefghijklmnopqrstuvwxyz"
+	},
 	"browser": [
 		{
 			"match": "https://localhost:3000/auth*",

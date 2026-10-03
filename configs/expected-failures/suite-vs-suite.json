@@ -1,1 +1,344 @@
-[]
+[
+	{
+		"test-name": "oidcc-server",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-response-type-missing",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-idtoken-signature",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-idtoken-unsigned",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-userinfo-get",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-userinfo-post-header",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-userinfo-post-body",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-request-without-nonce-succeeds-for-code-flow",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-scope-profile",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-scope-email",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-scope-address",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-scope-phone",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-scope-all",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-alternate-happy-flow",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-display-page",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-display-popup",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-prompt-login",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-prompt-none-not-logged-in",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-prompt-none-logged-in",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-max-age-1",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-max-age-10000",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-request-with-unknown-parameter-succeeds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-id-token-hint",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-login-hint",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ui-locales",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-claims-locales",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-request-with-acr-values-succeeds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-codereuse",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-codereuse-30seconds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-registered-redirect-uri",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-post-request-succeeds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-server-client-secret-post",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-claims-essential",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-request-object-with-redirect-uri",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-refresh-token",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	},
+	{
+		"test-name": "oidcc-ensure-request-with-valid-pkce-succeeds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "WarnOnUnusableJwksKeys",
+		"expected-result": "warning",
+		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
+	}
+]

@@ -32,9 +32,12 @@ npx openid-conformance list            # plans, modules, variants
 npx openid-conformance run ... --module oidcc-server   # one module only
 ```
 
-One Playwright test = one test module instance (`<plan> › <module>[variants]`). Each test attaches:
-`log.json` (the full event log), `log.html` (rendered log, same shape as the upstream log-detail page),
-screenshots of every scripted-browser page on failure, and Playwright's video/trace when enabled.
+One Playwright test = one test module instance (`<plan> › <module>[variants]`). Each test writes into its
+`test-results/<test>/` directory (and attaches to the HTML report): `log.json` (the full event log), `log.html`
+(rendered log, same shape as the upstream log-detail page), `module-report.json` (result + expected-failure
+analysis), `target-output.txt` (stdout/stderr of the `target` process), screenshots of every scripted-browser
+page on failure, and Playwright's video/trace when enabled. `CONFORMANCE_VERBOSE=1` streams the event log to
+the console while running; `CONFORMANCE_VIDEO=off` skips video recording.
 
 Test outcome mapping: module result PASSED/WARNING/REVIEW -> passed (WARNING/REVIEW annotated), SKIPPED ->
 skipped, FAILED -> failed unless listed in the expected-failures file for the config (then it passes and is

@@ -409,6 +409,12 @@ class WebRunner {
 				);
 			}
 
+			// Consider this URL visited. Java records the visit after driver.get() returns; a user-driven browser
+			// (urlVisited() from the UI) records it before the implementation under test redirects anywhere, which is what
+			// e.g. oidcc-client-test-3rd-party-init-login checks for when the authorization request arrives, so the visit
+			// is recorded when the navigation starts.
+			this.control.urlVisited(this.url);
+
 			let response;
 			if (this.method === "POST") {
 				const u = new URL(this.url);
@@ -487,9 +493,6 @@ class WebRunner {
 					this.lastResponseContent,
 				),
 			);
-
-			// Consider this URL visited
-			this.control.urlVisited(this.url);
 
 			if (this.hook) {
 				await this.hook({

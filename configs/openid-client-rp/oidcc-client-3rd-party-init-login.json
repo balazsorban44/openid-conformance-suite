@@ -9,6 +9,18 @@
 		"client_registration": "dynamic_client",
 		"request_type": "plain_http_request"
 	},
+	"browser": [
+		{
+			"match": "https://localhost:4443/initiate-login*",
+			"tasks": [
+				{
+					"task": "Verify Complete",
+					"match": "http://localhost:4000/cb*",
+					"commands": [["wait", "id", "rp-login-complete", 10]]
+				}
+			]
+		}
+	],
 	"waitTimeoutSeconds": 5,
 	"target": {
 		"command": "node targets/openid-client-rp/server.ts",
