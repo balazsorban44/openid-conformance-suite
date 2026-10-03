@@ -1,7 +1,10 @@
 import { ConditionError } from "./Condition.ts";
+import { NamedError } from "./NamedError.ts";
+
+export { NamedError };
 
 /** Port of testmodule/TestInterruptedException.java */
-export class TestInterruptedException extends Error {
+export class TestInterruptedException extends NamedError {
 	readonly testId: string | null;
 
 	constructor(testId: string | null, msgOrCause: string | unknown, cause?: unknown) {
@@ -10,7 +13,6 @@ export class TestInterruptedException extends Error {
 		} else {
 			super(messageOf(msgOrCause), { cause: msgOrCause });
 		}
-		this.name = "TestInterruptedException";
 		this.testId = testId;
 	}
 
@@ -43,7 +45,6 @@ export class TestFailureException extends TestInterruptedException {
 		} else {
 			super(causeOrTestId, msgOrCause, cause);
 		}
-		this.name = "TestFailureException";
 	}
 
 	/**
@@ -66,12 +67,7 @@ export class TestFailureException extends TestInterruptedException {
 }
 
 /** Port of testmodule/TestSkippedException.java */
-export class TestSkippedException extends TestInterruptedException {
-	constructor(testId: string | null, msg: string) {
-		super(testId, msg);
-		this.name = "TestSkippedException";
-	}
-}
+export class TestSkippedException extends TestInterruptedException {}
 
 export function messageOf(e: unknown): string {
 	if (e instanceof Error) {

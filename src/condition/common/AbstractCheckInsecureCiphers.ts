@@ -5,6 +5,7 @@ import {
 	AbstractCondition,
 	args,
 	ConditionError,
+	NamedError,
 	type Environment,
 	type EnvironmentRequirements,
 } from "../../framework/index.ts";
@@ -21,23 +22,21 @@ const ALERT_DESCRIPTION_ILLEGAL_PARAMETER = 47;
 const PROBE_TIMEOUT_MS = 60_000;
 
 /** Port of org.bouncycastle.tls.TlsFatalAlertReceived: the server sent us a fatal alert */
-class TlsFatalAlertReceived extends Error {
+class TlsFatalAlertReceived extends NamedError {
 	readonly alertDescription: number;
 
 	constructor(alertDescription: number) {
 		super("Internal TLS error, received fatal alert: " + alertDescription);
-		this.name = "TlsFatalAlertReceived";
 		this.alertDescription = alertDescription;
 	}
 }
 
 /** Port of org.bouncycastle.tls.TlsFatalAlert: we aborted the handshake ourselves with the given alert */
-class TlsFatalAlert extends Error {
+class TlsFatalAlert extends NamedError {
 	readonly alertDescription: number;
 
 	constructor(alertDescription: number, message?: string) {
 		super(message ?? "TLS fatal alert: " + alertDescription);
-		this.name = "TlsFatalAlert";
 		this.alertDescription = alertDescription;
 	}
 }

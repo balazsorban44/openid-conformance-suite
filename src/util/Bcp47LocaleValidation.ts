@@ -1,12 +1,12 @@
 import { Bcp47SubtagRegistry } from "./Bcp47SubtagRegistry.ts";
+import { NamedError } from "../framework/exceptions.ts";
 
 /** Port of `java.util.IllformedLocaleException` (message includes " [at index N]" as in Java). */
-export class IllformedLocaleException extends Error {
+export class IllformedLocaleException extends NamedError {
 	readonly errorIndex: number;
 
 	constructor(message: string, errorIndex = -1) {
 		super(message + (errorIndex < 0 ? "" : " [at index " + errorIndex + "]"));
-		this.name = "IllformedLocaleException";
 		this.errorIndex = errorIndex;
 	}
 }

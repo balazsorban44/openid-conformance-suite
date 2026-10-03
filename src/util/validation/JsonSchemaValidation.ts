@@ -9,14 +9,10 @@ import {
 	type JsonValue,
 } from "../../framework/json.ts";
 import { JsonSchemaValidationResult, NodePath, SchemaValidationError } from "./JsonSchemaValidationResult.ts";
+import { NamedError } from "../../framework/exceptions.ts";
 
 /** Port of networknt `SchemaException` (e.g. a schema without `$schema`). */
-export class SchemaException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "SchemaException";
-	}
-}
+export class SchemaException extends NamedError {}
 
 type Draft = "draft-04" | "draft-06" | "draft-07" | "2019-09" | "2020-12";
 

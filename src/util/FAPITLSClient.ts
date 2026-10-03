@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { isIP, Socket } from "node:net";
 import { Duplex } from "node:stream";
 import { connect as tlsConnect, type ConnectionOptions, type SecureVersion } from "node:tls";
+import { NamedError } from "../framework/exceptions.ts";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Ports of the BouncyCastle TLS types the probing conditions use (org.bouncycastle.tls.*).
@@ -111,20 +112,10 @@ function alertName(description: number): string {
 }
 
 /** Port of `java.io.IOException`: the base of the errors {@link DefaultTlsClient.connect} rejects with. */
-export class IOException extends Error {
-	constructor(message?: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "IOException";
-	}
-}
+export class IOException extends NamedError {}
 
 /** Port of `java.net.SocketException` (e.g. message "Connection reset"). */
-export class SocketException extends IOException {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "SocketException";
-	}
-}
+export class SocketException extends IOException {}
 
 /** Port of `org.bouncycastle.tls.TlsFatalAlert`: a fatal alert raised locally (by the client). */
 export class TlsFatalAlert extends IOException {
@@ -132,7 +123,6 @@ export class TlsFatalAlert extends IOException {
 
 	constructor(alertDescription: number, cause?: unknown) {
 		super(alertName(alertDescription) + "(" + alertDescription + ")", cause === undefined ? undefined : { cause });
-		this.name = "TlsFatalAlert";
 		this.alertDescription = alertDescription;
 	}
 
@@ -147,7 +137,6 @@ export class TlsFatalAlertReceived extends IOException {
 
 	constructor(alertDescription: number) {
 		super(alertName(alertDescription) + "(" + alertDescription + ")");
-		this.name = "TlsFatalAlertReceived";
 		this.alertDescription = alertDescription;
 	}
 
@@ -495,7 +484,6 @@ export class ServerHelloReceived extends IOException {
 
 	constructor(serverVersion: ProtocolVersion) {
 		super();
-		this.name = "ServerHelloReceived";
 		this.serverVersion = serverVersion;
 	}
 

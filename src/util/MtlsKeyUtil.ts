@@ -1,12 +1,8 @@
 import { createPrivateKey, type KeyObject } from "node:crypto";
+import { NamedError } from "../framework/exceptions.ts";
 
 /** Port of `java.security.spec.InvalidKeySpecException` as thrown by {@link MtlsKeyUtil}. */
-export class InvalidKeySpecException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "InvalidKeySpecException";
-	}
-}
+export class InvalidKeySpecException extends NamedError {}
 
 const KEY_TYPES_FOR_ALG: Record<string, string[]> = {
 	RSA: ["rsa", "rsa-pss"],

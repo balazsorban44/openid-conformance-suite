@@ -1,4 +1,5 @@
 /** Emulation of `javax.naming.ldap.LdapName` / `Rdn` (RFC 2253 distinguished names). */
+import { NamedError } from "../../framework/exceptions.ts";
 
 /**
  * The equivalent of javax.naming.ldap.Rdn for the purpose of comparing DNs: a set of attribute type/value pairs.
@@ -10,12 +11,7 @@ export interface ParsedRdn {
 }
 
 /** Port of `javax.naming.InvalidNameException` */
-export class InvalidNameException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "InvalidNameException";
-	}
-}
+export class InvalidNameException extends NamedError {}
 
 /**
  * Parses an RFC 2253 distinguished name (what javax.naming.ldap.LdapName does), throws InvalidNameException if

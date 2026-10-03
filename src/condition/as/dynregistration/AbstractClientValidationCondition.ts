@@ -1,15 +1,17 @@
-import { AbstractCondition, isJsonArray, OIDFJSON, type JsonArray, type JsonObject } from "../../../framework/index.ts";
+import {
+	AbstractCondition,
+	isJsonArray,
+	NamedError,
+	OIDFJSON,
+	type JsonArray,
+	type JsonObject,
+} from "../../../framework/index.ts";
 
 /**
  * Port of `java.lang.IllegalStateException` as thrown by Gson's `JsonElement.getAsJsonArray()` on a non-array
  * element. Subclasses catch it (`catch (IllegalStateException ex)` upstream).
  */
-export class IllegalStateException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "IllegalStateException";
-	}
-}
+export class IllegalStateException extends NamedError {}
 
 /** Gson JsonElement.getAsJsonArray(): throws IllegalStateException if the element is not an array */
 export function getAsJsonArray(el: unknown): JsonArray {

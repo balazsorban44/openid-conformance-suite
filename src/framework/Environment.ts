@@ -1,4 +1,5 @@
 import { type JsonArray, type JsonObject, type JsonValue, isJsonObject, parseJsonObject } from "./json.ts";
+import { NamedError } from "./NamedError.ts";
 
 type PrimitiveTypes = { string: string; number: number; boolean: boolean };
 
@@ -318,16 +319,6 @@ function typeName(v: JsonValue | undefined): string {
  * To allow conditions catch these exceptions when necessary
  * i.e to catch and throw a nicer 'error(..., args(...))' from a condition
  */
-export class UnexpectedTypeException extends Error {
-	constructor(msg: string) {
-		super(msg);
-		this.name = "UnexpectedTypeException";
-	}
-}
+export class UnexpectedTypeException extends NamedError {}
 
-export class NoSuchElementException extends Error {
-	constructor(msg: string) {
-		super(msg);
-		this.name = "NoSuchElementException";
-	}
-}
+export class NoSuchElementException extends NamedError {}

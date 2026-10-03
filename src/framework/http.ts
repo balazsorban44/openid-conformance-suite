@@ -3,6 +3,7 @@ import { headersFromJson, mapToJsonObject, type LogArgs } from "./DataUtils.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
 import type { JsonObject } from "./json.ts";
 import type { TestLockManager } from "./TestLockManager.ts";
+import { NamedError } from "./NamedError.ts";
 
 /**
  * Outbound HTTP for conditions. Port of the behaviour of AbstractCondition.createRestTemplate() +
@@ -42,12 +43,7 @@ export interface HttpResponse {
 	cacheAgeSeconds?: number;
 }
 
-export class HttpClientException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "HttpClientException";
-	}
-}
+export class HttpClientException extends NamedError {}
 
 /** An interceptor around the real network call (used for the opt-in external endpoint cache) */
 export type HttpInterceptor = (

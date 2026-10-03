@@ -6,6 +6,7 @@ import {
 	isJsonArray,
 	isJsonObject,
 	parseJson,
+	NamedError,
 	type Environment,
 	type HttpResponse,
 	type JsonObject,
@@ -29,14 +30,13 @@ export const IGNORE_ALL_ERRORS_HANDLER: ResponseErrorHandler = {
 };
 
 /** Port of Spring's RestClientResponseException: thrown for a response that the error handler reports as an error */
-export class RestClientResponseException extends Error {
+export class RestClientResponseException extends NamedError {
 	readonly statusCode: number;
 	readonly statusText: string;
 	readonly responseBody: string;
 
 	constructor(statusCode: number, statusText: string, responseBody: string) {
 		super(statusCode + " " + statusText);
-		this.name = "RestClientResponseException";
 		this.statusCode = statusCode;
 		this.statusText = statusText;
 		this.responseBody = responseBody;

@@ -1,5 +1,6 @@
 import type { CryptoKey } from "jose";
 import type { Environment } from "../framework/Environment.ts";
+import { NamedError } from "../framework/NamedError.ts";
 import {
 	isJsonArray,
 	isJsonObject,
@@ -49,12 +50,7 @@ export {
 } from "./nimbus/algorithms.ts";
 
 /** Port of `org.openqa.selenium.InvalidArgumentException` as thrown by JWKUtil. */
-export class InvalidArgumentException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "InvalidArgumentException";
-	}
-}
+export class InvalidArgumentException extends NamedError {}
 
 /** A JWK that {@link JWKUtil.parseJWKSetLeniently} skipped, with the reason the JOSE library rejected it. */
 export class SkippedJwk {

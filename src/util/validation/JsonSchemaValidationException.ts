@@ -1,6 +1,7 @@
 import type { JsonSchemaValidationResult } from "./JsonSchemaValidationResult.ts";
+import { NamedError } from "../../framework/exceptions.ts";
 
-export class JsonSchemaValidationException extends Error {
+export class JsonSchemaValidationException extends NamedError {
 	private readonly validationResult: JsonSchemaValidationResult | null;
 
 	/**
@@ -22,7 +23,6 @@ export class JsonSchemaValidationException extends Error {
 			super(message);
 			this.validationResult = (causeOrResult as JsonSchemaValidationResult | null | undefined) ?? null;
 		}
-		this.name = "JsonSchemaValidationException";
 	}
 
 	getValidationResult(): JsonSchemaValidationResult | null {

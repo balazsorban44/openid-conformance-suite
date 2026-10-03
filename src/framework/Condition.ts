@@ -1,6 +1,7 @@
 import type { Environment } from "./Environment.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
 import type { TestLockManager } from "./TestLockManager.ts";
+import { NamedError } from "./NamedError.ts";
 
 /** Port of condition/Condition.java ConditionResult */
 export const ConditionResult = {
@@ -51,13 +52,12 @@ export type ConditionClass = (new () => Condition) & { name: string };
  * Record a failure from a condition. This should only be created from the error() methods in
  * AbstractCondition, which will also add a log entry.
  */
-export class ConditionError extends Error {
+export class ConditionError extends NamedError {
 	readonly testId: string;
 	readonly isPreOrPostError: boolean;
 
 	constructor(testId: string, message: string, options?: { cause?: unknown; isPreOrPostError?: boolean }) {
 		super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
-		this.name = "ConditionError";
 		this.testId = testId;
 		this.isPreOrPostError = options?.isPreOrPostError ?? false;
 	}

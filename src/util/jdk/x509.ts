@@ -4,14 +4,10 @@
  * `X509Certificate.getSubjectX500Principal().getName()` and `X509Certificate.getSubjectAlternativeNames()`.
  */
 import { X509Certificate, type KeyObject } from "node:crypto";
+import { NamedError } from "../../framework/exceptions.ts";
 
 /** Port of `java.security.cert.CertificateException` */
-export class CertificateException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "CertificateException";
-	}
-}
+export class CertificateException extends NamedError {}
 
 /**
  * `CertificateFactory.generateCertificates(stream)`: parses a sequence of DER encoded certificates (or PEM

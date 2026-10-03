@@ -1,12 +1,8 @@
 /** Emulation of `java.lang.String` / `java.util.Base64` / `java.net.URLEncoder` behaviour that differs from JS. */
+import { NamedError } from "../../framework/exceptions.ts";
 
 /** Port of `java.lang.IllegalArgumentException` as thrown by `Base64.getDecoder().decode()`. */
-export class IllegalArgumentException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "IllegalArgumentException";
-	}
-}
+export class IllegalArgumentException extends NamedError {}
 
 /** Java String.getBytes(US_ASCII): every non-ASCII character (code point) becomes '?' */
 export function toUsAscii(s: string): string {

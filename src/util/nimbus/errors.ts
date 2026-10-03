@@ -1,3 +1,4 @@
+import { NamedError } from "../../framework/NamedError.ts";
 /**
  * The exceptions the Nimbus JOSE+JWT API throws, as the port emulates them.
  *
@@ -10,12 +11,11 @@ import { errors } from "jose";
  * Port of `java.text.ParseException`, thrown where the Nimbus parse methods (`JWKSet.parse`, `JWK.parse`,
  * `JWTParser.parse`, `SignedJWT.parse`, `JWTClaimsSet.parse`, `JSONObjectUtils.parse`, ...) throw it.
  */
-export class ParseException extends Error {
+export class ParseException extends NamedError {
 	readonly errorOffset: number;
 
 	constructor(message: string, errorOffset = 0, options?: ErrorOptions) {
 		super(message, options);
-		this.name = "ParseException";
 		this.errorOffset = errorOffset;
 	}
 
@@ -25,20 +25,10 @@ export class ParseException extends Error {
 }
 
 /** Port of `com.nimbusds.jose.JOSEException`. */
-export class JOSEException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "JOSEException";
-	}
-}
+export class JOSEException extends NamedError {}
 
 /** Port of `com.nimbusds.jose.KeyLengthException`. */
-export class KeyLengthException extends JOSEException {
-	constructor(message: string) {
-		super(message);
-		this.name = "KeyLengthException";
-	}
-}
+export class KeyLengthException extends JOSEException {}
 
 /**
  * True for the errors Nimbus would report as a `JOSEException`: the {@link JOSEException} port (and its subclasses)

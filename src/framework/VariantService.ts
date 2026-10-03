@@ -8,6 +8,7 @@ import {
 	type VariantEnumClass,
 	type VariantMap,
 } from "./variants.ts";
+import { NamedError } from "./NamedError.ts";
 
 /** One module to run, with its fully resolved variant selection (port of VariantService.TestPlanModuleWithVariant) */
 export interface PlanModule {
@@ -19,12 +20,7 @@ export interface PlanModule {
 	variantFromPlanDefinition: VariantSelection;
 }
 
-export class VariantConfigurationError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "VariantConfigurationError";
-	}
-}
+export class VariantConfigurationError extends NamedError {}
 
 /*
  * Port of the parts of variant/VariantService.java needed to expand a plan into module instances and to

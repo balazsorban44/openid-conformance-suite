@@ -19,33 +19,19 @@
  *   el.toString()         -> JSON.stringify(el)
  *   JsonParser.parseString(s) -> parseJson(s)  (throws JsonParseException)
  */
+import { NamedError } from "./NamedError.ts";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 export type JsonArray = JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
 
-export class JsonParseException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "JsonParseException";
-	}
-}
+export class JsonParseException extends NamedError {}
 
-export class UnexpectedJsonTypeException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "UnexpectedJsonTypeException";
-	}
-}
+export class UnexpectedJsonTypeException extends NamedError {}
 
 /** Thrown if the value is JsonNull (port of OIDFJSON.ValueIsJsonNullException) */
-export class ValueIsJsonNullException extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "ValueIsJsonNullException";
-	}
-}
+export class ValueIsJsonNullException extends NamedError {}
 
 export function isJsonObject(v: unknown): v is JsonObject {
 	return typeof v === "object" && v !== null && !Array.isArray(v);

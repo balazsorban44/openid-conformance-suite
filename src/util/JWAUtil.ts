@@ -1,9 +1,9 @@
 import { JWS_FAMILY_HMAC_SHA, JWS_FAMILY_SIGNATURE } from "./nimbus/algorithms.ts";
+import { NamedError } from "../framework/NamedError.ts";
 
-export class InvalidAlgorithmException extends Error {
+export class InvalidAlgorithmException extends NamedError {
 	constructor(algorithm: string) {
 		super("Invalid algorithm:" + algorithm);
-		this.name = "InvalidAlgorithmException";
 	}
 }
 

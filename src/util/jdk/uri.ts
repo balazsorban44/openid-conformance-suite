@@ -3,14 +3,10 @@
  * would accept or reject different inputs).
  */
 import { isIPv6 } from "node:net";
+import { NamedError } from "../../framework/exceptions.ts";
 
 /** Port of `java.net.URISyntaxException`. */
-export class URISyntaxException extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options);
-		this.name = "URISyntaxException";
-	}
-}
+export class URISyntaxException extends NamedError {}
 
 /** The components of a `java.net.URI` that the ported conditions use. */
 export interface JavaURI {
