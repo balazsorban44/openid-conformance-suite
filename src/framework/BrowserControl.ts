@@ -436,11 +436,19 @@ class WebRunner {
 				const inputs = [...new URLSearchParams(params).entries()]
 					.map(([k, v]) => `<input type="hidden" name="${escapeAttr(k)}" value="${escapeAttr(v)}">`)
 					.join("");
-				const navigation = page.waitForNavigation({ waitUntil: "load" }).catch(() => null);
 				await page.setContent(
-					`<html><body><form id="f" method="post" action="${escapeAttr(urlWithoutQuery)}">${inputs}</form><script>document.getElementById('f').submit()</script></body></html>`,
+					`<html><body><form id="f" method="post" action="${escapeAttr(urlWithoutQuery)}">${inputs}</form></body></html>`,
 				);
-				response = await navigation;
+				// register the listeners before submitting so the (possibly immediate) response is not missed
+				const responsePromise = page
+					.waitForResponse((r) => r.request().isNavigationRequest() && r.url().startsWith(urlWithoutQuery), {
+						timeout: 60_000,
+					})
+					.catch(() => null);
+				const navigated = page.waitForURL((u) => u.protocol !== "about:", { timeout: 60_000, waitUntil: "load" });
+				await page.evaluate('document.getElementById("f").submit()');
+				await navigated;
+				response = await responsePromise;
 			} else {
 				this.control._log(
 					"WebRunner",

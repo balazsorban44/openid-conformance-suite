@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Start my OP            # anything that makes your OP reachable from the job
-        run: npm start &             # (or use `target` in the config file, see below)
+      - name: Start my OP # anything that makes your OP reachable from the job
+        run: npm start & # (or use `target` in the config file, see below)
       - uses: balazsorban44/openid-conformance-suite@main
         with:
           plan: oidcc-basic-certification-test-plan
@@ -38,32 +38,32 @@ for tooling.
 
 ```json
 {
-  "alias": "my-op",
-  "server": { "discoveryUrl": "http://localhost:3000/.well-known/openid-configuration" },
-  "client": { "client_name": "first-client" },
-  "client2": { "client_name": "second-client" },
-  "browser": [
-    {
-      "match": "http://localhost:3000/auth*",
-      "tasks": [
-        {
-          "task": "Login",
-          "optional": true,
-          "match": "http://localhost:3000/interaction*",
-          "commands": [
-            ["text", "name", "login", "user", "optional"],
-            ["text", "name", "password", "secret", "optional"],
-            ["click", "class", "login-submit"]
-          ]
-        },
-        { "task": "Verify Complete", "match": "*/callback*", "commands": [["wait", "id", "submission_complete", 10]] }
-      ]
-    }
-  ],
-  "target": {
-    "command": "node ./start-my-op.js",
-    "readyUrl": "http://localhost:3000/.well-known/openid-configuration"
-  }
+	"alias": "my-op",
+	"server": { "discoveryUrl": "http://localhost:3000/.well-known/openid-configuration" },
+	"client": { "client_name": "first-client" },
+	"client2": { "client_name": "second-client" },
+	"browser": [
+		{
+			"match": "http://localhost:3000/auth*",
+			"tasks": [
+				{
+					"task": "Login",
+					"optional": true,
+					"match": "http://localhost:3000/interaction*",
+					"commands": [
+						["text", "name", "login", "user", "optional"],
+						["text", "name", "password", "secret", "optional"],
+						["click", "class", "login-submit"]
+					]
+				},
+				{ "task": "Verify Complete", "match": "*/callback*", "commands": [["wait", "id", "submission_complete", 10]] }
+			]
+		}
+	],
+	"target": {
+		"command": "node ./start-my-op.js",
+		"readyUrl": "http://localhost:3000/.well-known/openid-configuration"
+	}
 }
 ```
 
@@ -73,15 +73,15 @@ for tooling.
 
   ```ts
   export default {
-    alias: "my-op",
-    server: { discoveryUrl: "http://localhost:3000/.well-known/openid-configuration" },
-    client: { client_name: "first-client" },
-    browser: async ({ page, url }) => {
-      await page.getByLabel("Username").fill("user");
-      await page.getByLabel("Password").fill("secret");
-      await page.getByRole("button", { name: "Sign in" }).click();
-      await page.waitForURL("**/callback*");
-    },
+  	alias: "my-op",
+  	server: { discoveryUrl: "http://localhost:3000/.well-known/openid-configuration" },
+  	client: { client_name: "first-client" },
+  	browser: async ({ page, url }) => {
+  		await page.getByLabel("Username").fill("user");
+  		await page.getByLabel("Password").fill("secret");
+  		await page.getByRole("button", { name: "Sign in" }).click();
+  		await page.waitForURL("**/callback*");
+  	},
   };
   ```
 
@@ -96,10 +96,10 @@ For RP plans the suite emulates an OP and your RP must be driven through it, onc
 
 ```json
 {
-  "alias": "my-rp",
-  "client": { "client_id": "my-rp", "client_secret": "..." },
-  "target": { "command": "node ./start-my-rp.js", "readyUrl": "http://localhost:4000/ready" },
-  "client_driver": { "startUrl": "http://localhost:4000/start" }
+	"alias": "my-rp",
+	"client": { "client_id": "my-rp", "client_secret": "..." },
+	"target": { "command": "node ./start-my-rp.js", "readyUrl": "http://localhost:4000/ready" },
+	"client_driver": { "startUrl": "http://localhost:4000/start" }
 }
 ```
 
@@ -124,14 +124,14 @@ Node.js 24 or newer; no build step (native TypeScript).
 
 ## What is in the box
 
-| | |
-|---|---|
-| `src/condition/`, `src/sequence/`, `src/openid/` | 1:1 ports of the Java conditions, sequences, test modules and plans |
-| `src/framework/` | the test framework (environment, condition runner, status machine, event log, HTTP client/server, Playwright browser control) |
-| `targets/` | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP |
-| `configs/` | the CI test configurations and expected-failure lists |
-| `tests/plan.spec.ts` | the Playwright entry point |
-| `action.yml` | the composite GitHub Action |
+|                                                  |                                                                                                                               |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `src/condition/`, `src/sequence/`, `src/openid/` | 1:1 ports of the Java conditions, sequences, test modules and plans                                                           |
+| `src/framework/`                                 | the test framework (environment, condition runner, status machine, event log, HTTP client/server, Playwright browser control) |
+| `targets/`                                       | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                          |
+| `configs/`                                       | the CI test configurations and expected-failure lists                                                                         |
+| `tests/plan.spec.ts`                             | the Playwright entry point                                                                                                    |
+| `action.yml`                                     | the composite GitHub Action                                                                                                   |
 
 CI runs every OP plan against `oidc-provider`, every RP plan against the `openid-client` RP, and the OP plan
 against the suite's own emulated OP (suite-vs-suite), on every push to `main` and every pull request.

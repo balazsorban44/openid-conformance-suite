@@ -54,7 +54,8 @@ if (!planName || !configPath) {
 	let target: Target | null = null;
 
 	test.describe(planName, () => {
-		test.describe.configure({ mode: "serial" });
+		// sequential (single worker) but independent: a failing module must not skip the rest of the plan
+		test.describe.configure({ mode: "default" });
 
 		test.beforeAll(async () => {
 			loaded = await loadConfig(resolve(configPath));
@@ -109,10 +110,15 @@ if (!planName || !configPath) {
 					context: context as BrowserContext,
 					timeoutSeconds: Number(process.env["CONFORMANCE_MODULE_TIMEOUT"] ?? 150),
 					onLog: process.env["CONFORMANCE_VERBOSE"]
-						? (e) =>
+						? (e) => {
+								const extra = ["url", "match", "error", "request_uri", "response_status_code"]
+									.filter((k) => e[k] != null)
+									.map((k) => `${k}=${String(e[k])}`)
+									.join(" ");
 								process.stdout.write(
-									`${e.src}: ${String(e["msg"] ?? "")} ${e["result"] ? `[${String(e["result"])}]` : ""}\n`,
-								)
+									`${e.src}: ${String(e["msg"] ?? "")} ${e["result"] ? `[${String(e["result"])}]` : ""} ${extra}\n`,
+								);
+							}
 						: undefined,
 				});
 

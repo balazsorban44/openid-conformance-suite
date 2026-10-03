@@ -600,5 +600,6 @@
 			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt"
 		}
 	},
-	"expectedFailures": "../expected-failures/oidc-provider.json"
+	"expectedFailures": "../expected-failures/oidc-provider.json",
+	"expectedSkips": "../expected-skips/oidc-provider.json"
 }

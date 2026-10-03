@@ -281,9 +281,16 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	const defaultLogoutSource = defaults.features.rpInitiatedLogout.logoutSource;
 
 	const configuration = {
+		// OIDC Core 3.1.2.1: the authorization endpoint MUST support POST (oidcc-ensure-post-request-succeeds);
+		// oidc-provider then requires SameSite=None on its long-lived (session) cookies
+		enableHttpPostMethods: true,
 		clients: staticClients,
 		jwks,
-		cookies: { keys: [randomBytes(32).toString("base64url")] },
+		cookies: {
+			keys: [randomBytes(32).toString("base64url")],
+			long: { sameSite: "none", signed: true },
+			short: { sameSite: "lax", signed: true },
+		},
 		// oidcc-* "Login"/"Consent" browser tasks: devInteractions renders the login form with name="login",
 		// name="password" and a .login-submit button (title "Sign-in"), and the consent form with a .login-submit
 		// button, exactly the pages upstream's browser configuration and screenshots expect. Any login/password works.

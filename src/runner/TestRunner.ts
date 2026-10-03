@@ -47,6 +47,24 @@ export interface ModuleRunResult {
 	nested?: { testName: string; result: Result; status: Status; entries: LogEntry[] };
 }
 
+/**
+ * Port of DBTestPlanService.getModuleConfig: `override: { "<testName>": { ...keys } }` moves the module's overridden
+ * top-level keys into the configuration (replacing, not merging) and removes `override` itself.
+ */
+export function applyOverride(config: JsonObject, moduleName: string): JsonObject {
+	const override = config["override"];
+	delete config["override"];
+	if (override != null && typeof override === "object" && !Array.isArray(override)) {
+		const overrides = override[moduleName];
+		if (overrides != null && typeof overrides === "object" && !Array.isArray(overrides)) {
+			for (const [k, v] of Object.entries(overrides)) {
+				config[k] = v;
+			}
+		}
+	}
+	return config;
+}
+
 /** The "logged in user" owning the tests (Java: the OIDC subject/issuer of the suite user) */
 const OWNER: Record<string, string> = {
 	sub: process.env["CONFORMANCE_OWNER"] ?? "ci",
@@ -71,7 +89,10 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 		onError: (error, source) => module.handleException(error, source),
 		afterTask: () => module.forceReleaseLock(),
 	});
-	const config = structuredClone(opts.loaded.config) as JsonObject;
+	const config = applyOverride(
+		structuredClone(opts.loaded.config) as JsonObject,
+		opts.moduleClass.meta?.testName ?? "",
+	);
 	// suite-vs-suite: start the emulated OP (an RP test module of this suite) and point the OP tests at it
 	const emulated = opts.loaded.suiteTarget ? await startEmulatedOp(opts.loaded.suiteTarget, opts) : null;
 	if (emulated) {

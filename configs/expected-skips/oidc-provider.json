@@ -1,0 +1,26 @@
+[
+	{
+		"test-name": "oidcc-idtoken-unsigned",
+		"variant": "*",
+		"configuration-filename": "*",
+		"comment": "oidc-provider does not support id_token_signed_response_alg=none"
+	},
+	{
+		"test-name": "oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",
+		"variant": "*",
+		"configuration-filename": "*",
+		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+	},
+	{
+		"test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+		"variant": "*",
+		"configuration-filename": "*",
+		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+	},
+	{
+		"test-name": "oidcc-ensure-request-object-with-redirect-uri",
+		"variant": "*",
+		"configuration-filename": "*",
+		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+	}
+]
