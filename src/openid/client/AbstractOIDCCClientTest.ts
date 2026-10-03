@@ -1265,7 +1265,11 @@ export abstract class AbstractOIDCCClientTest extends AbstractTestModule {
 			"RFC7519-4.1.4",
 		);
 		await this.callAndContinueOnFailure(ValidateRequestObjectIat, ConditionResult.WARNING, "OIDCC-6.1");
-		await this.callAndContinueOnFailure(EnsureNumericRequestObjectClaimsAreNotNull, ConditionResult.WARNING, "OIDCC-13.3");
+		await this.callAndContinueOnFailure(
+			EnsureNumericRequestObjectClaimsAreNotNull,
+			ConditionResult.WARNING,
+			"OIDCC-13.3",
+		);
 		await this.callAndContinueOnFailure(ValidateRequestObjectMaxAge, ConditionResult.FAILURE, "OIDCC-13.3");
 		await this.callAndContinueOnFailure(
 			EnsureRequestObjectDoesNotContainRequestOrRequestUri,

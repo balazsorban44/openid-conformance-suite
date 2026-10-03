@@ -2,7 +2,65 @@
 import type { AbstractTestModule } from "./framework/AbstractTestModule.ts";
 import type { TestPlanClass } from "./framework/plan.ts";
 import type { TestModuleClass } from "./framework/TestModule.ts";
+import { OIDCCAlternateHappyFlow } from "./openid/OIDCCAlternateHappyFlow.ts";
+import { OIDCCAuthCodeReuse } from "./openid/OIDCCAuthCodeReuse.ts";
+import { OIDCCAuthCodeReuseAfter30Seconds } from "./openid/OIDCCAuthCodeReuseAfter30Seconds.ts";
+import { OIDCCClaimsLocales } from "./openid/OIDCCClaimsLocales.ts";
+import { OIDCCDisplayPage } from "./openid/OIDCCDisplayPage.ts";
+import { OIDCCDisplayPopup } from "./openid/OIDCCDisplayPopup.ts";
+import { OIDCCEnsureRequestWithAcrValuesSucceeds } from "./openid/OIDCCEnsureRequestWithAcrValuesSucceeds.ts";
+import { OIDCCEnsureRequestWithUnknownParameterSucceeds } from "./openid/OIDCCEnsureRequestWithUnknownParameterSucceeds.ts";
+import { OIDCCEnsureRequestWithValidPkceSucceeds } from "./openid/OIDCCEnsureRequestWithValidPkceSucceeds.ts";
+import { OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow } from "./openid/OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow.ts";
+import { OIDCCIdTokenHint } from "./openid/OIDCCIdTokenHint.ts";
+import { OIDCCIdTokenRS256 } from "./openid/OIDCCIdTokenRS256.ts";
+import { OIDCCIdTokenSignature } from "./openid/OIDCCIdTokenSignature.ts";
+import { OIDCCLoginHint } from "./openid/OIDCCLoginHint.ts";
+import { OIDCCPromptNoneLoggedIn } from "./openid/OIDCCPromptNoneLoggedIn.ts";
+import { OIDCCPromptNoneNotLoggedIn } from "./openid/OIDCCPromptNoneNotLoggedIn.ts";
+import { OIDCCRedirectUriQueryAdded } from "./openid/OIDCCRedirectUriQueryAdded.ts";
+import { OIDCCRedirectUriQueryOK } from "./openid/OIDCCRedirectUriQueryOK.ts";
+import { OIDCCScopeAddress } from "./openid/OIDCCScopeAddress.ts";
+import { OIDCCScopeAll } from "./openid/OIDCCScopeAll.ts";
+import { OIDCCScopeEmail } from "./openid/OIDCCScopeEmail.ts";
+import { OIDCCScopePhone } from "./openid/OIDCCScopePhone.ts";
+import { OIDCCScopeProfile } from "./openid/OIDCCScopeProfile.ts";
 import { OIDCCServerTest } from "./openid/OIDCCServerTest.ts";
+import { OIDCCServerTestClientSecretPost } from "./openid/OIDCCServerTestClientSecretPost.ts";
+import { OIDCCUiLocales } from "./openid/OIDCCUiLocales.ts";
+import { OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported } from "./openid/OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported.ts";
+import { OIDCCUserInfoGet } from "./openid/OIDCCUserInfoGet.ts";
+import { OIDCCUserInfoPostBody } from "./openid/OIDCCUserInfoPostBody.ts";
+import { OIDCCUserInfoPostHeader } from "./openid/OIDCCUserInfoPostHeader.ts";
+import { OIDCCClient3rdPartyInitiatedLoginTest } from "./openid/client/OIDCCClient3rdPartyInitiatedLoginTest.ts";
+import { OIDCCClientTest } from "./openid/client/OIDCCClientTest.ts";
+import { OIDCCClientTestClientSecretBasic } from "./openid/client/OIDCCClientTestClientSecretBasic.ts";
+import { OIDCCClientTestFormPostError } from "./openid/client/OIDCCClientTestFormPostError.ts";
+import { OIDCCClientTestIdTokenSigAlgNone } from "./openid/client/OIDCCClientTestIdTokenSigAlgNone.ts";
+import { OIDCCClientTestIdTokenSignedUsingRS256 } from "./openid/client/OIDCCClientTestIdTokenSignedUsingRS256.ts";
+import { OIDCCClientTestInvalidAudInIdToken } from "./openid/client/OIDCCClientTestInvalidAudInIdToken.ts";
+import { OIDCCClientTestInvalidIdTokenSignatureWithRS256 } from "./openid/client/OIDCCClientTestInvalidIdTokenSignatureWithRS256.ts";
+import { OIDCCClientTestInvalidIssuerInIdToken } from "./openid/client/OIDCCClientTestInvalidIssuerInIdToken.ts";
+import { OIDCCClientTestInvalidSubInUserinfoResponse } from "./openid/client/OIDCCClientTestInvalidSubInUserinfoResponse.ts";
+import { OIDCCClientTestKidAbsentMultipleMatchingKeysInJwks } from "./openid/client/OIDCCClientTestKidAbsentMultipleMatchingKeysInJwks.ts";
+import { OIDCCClientTestKidAbsentSingleJwks } from "./openid/client/OIDCCClientTestKidAbsentSingleJwks.ts";
+import { OIDCCClientTestMissingIatInIdToken } from "./openid/client/OIDCCClientTestMissingIatInIdToken.ts";
+import { OIDCCClientTestMissingSubInIdToken } from "./openid/client/OIDCCClientTestMissingSubInIdToken.ts";
+import { OIDCCClientTestNonceInvalid } from "./openid/client/OIDCCClientTestNonceInvalid.ts";
+import { OIDCCClientTestRequestUriSignedWithNone } from "./openid/client/OIDCCClientTestRequestUriSignedWithNone.ts";
+import { OIDCCClientTestRequestUriSignedWithRS256 } from "./openid/client/OIDCCClientTestRequestUriSignedWithRS256.ts";
+import { OIDCCClientTestScopeUserInfoClaims } from "./openid/client/OIDCCClientTestScopeUserInfoClaims.ts";
+import { OIDCCClientTestSignedUserinfo } from "./openid/client/OIDCCClientTestSignedUserinfo.ts";
+import { OIDCCClientTestUserinfoBearerBody } from "./openid/client/OIDCCClientTestUserinfoBearerBody.ts";
+import { OIDCCClientTestUserinfoBearerHeader } from "./openid/client/OIDCCClientTestUserinfoBearerHeader.ts";
+import { OIDCCClientTestDiscoveryIssuerMismatch } from "./openid/client/config/OIDCCClientTestDiscoveryIssuerMismatch.ts";
+import { OIDCCClientTestDiscoveryJwksUriKeys } from "./openid/client/config/OIDCCClientTestDiscoveryJwksUriKeys.ts";
+import { OIDCCClientTestDiscoveryOpenIDConfiguration } from "./openid/client/config/OIDCCClientTestDiscoveryOpenIDConfiguration.ts";
+import { OIDCCClientTestDiscoveryWebfingerAcct } from "./openid/client/config/OIDCCClientTestDiscoveryWebfingerAcct.ts";
+import { OIDCCClientTestDiscoveryWebfingerURL } from "./openid/client/config/OIDCCClientTestDiscoveryWebfingerURL.ts";
+import { OIDCCClientTestDynamicRegistration } from "./openid/client/config/OIDCCClientTestDynamicRegistration.ts";
+import { OIDCCClientTestSigningKeyRotation } from "./openid/client/config/OIDCCClientTestSigningKeyRotation.ts";
+import { OIDCCClientTestSigningKeyRotationJustBeforeSigning } from "./openid/client/config/OIDCCClientTestSigningKeyRotationJustBeforeSigning.ts";
 import { OIDCCClientTestBackChannelLogout } from "./openid/client/logout/OIDCCClientTestBackChannelLogout.ts";
 import { OIDCCClientTestBackChannelLogoutAlgNone } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutAlgNone.ts";
 import { OIDCCClientTestBackChannelLogoutNoEvent } from "./openid/client/logout/OIDCCClientTestBackChannelLogoutNoEvent.ts";
@@ -17,6 +75,9 @@ import { OIDCCClientTestRPInitLogout } from "./openid/client/logout/OIDCCClientT
 import { OIDCCClientTestRPInitLogoutInvalidState } from "./openid/client/logout/OIDCCClientTestRPInitLogoutInvalidState.ts";
 import { OIDCCClientTestRPInitLogoutNoState } from "./openid/client/logout/OIDCCClientTestRPInitLogoutNoState.ts";
 import { OIDCCClientTestSessionManagement } from "./openid/client/logout/OIDCCClientTestSessionManagement.ts";
+import { OIDCCClient3rdPartyInitiatedLoginTestPlan } from "./openid/client/OIDCCClient3rdPartyInitiatedLoginTestPlan.ts";
+import { OIDCCClientBasicTestPlan } from "./openid/client/OIDCCClientBasicTestPlan.ts";
+import { OIDCCClientDynamicTestPlan } from "./openid/client/OIDCCClientDynamicTestPlan.ts";
 import { OIDCCClientBackChannelLogoutRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientBackChannelLogoutRPBasicTestPlan.ts";
 import { OIDCCClientFrontChannelLogoutRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientFrontChannelLogoutRPBasicTestPlan.ts";
 import { OIDCCClientLogoutTestPlan } from "./openid/client/logout/plan/OIDCCClientLogoutTestPlan.ts";
@@ -24,7 +85,65 @@ import { OIDCCClientRPInitiatedLogoutRPBasicTestPlan } from "./openid/client/log
 import { OIDCCClientSessionManagementRPBasicTestPlan } from "./openid/client/logout/plan/OIDCCClientSessionManagementRPBasicTestPlan.ts";
 
 export const modules: TestModuleClass<AbstractTestModule>[] = [
+	OIDCCAlternateHappyFlow, // oidcc-alternate-happy-flow
+	OIDCCAuthCodeReuse, // oidcc-codereuse
+	OIDCCAuthCodeReuseAfter30Seconds, // oidcc-codereuse-30seconds
+	OIDCCClaimsLocales, // oidcc-claims-locales
+	OIDCCDisplayPage, // oidcc-display-page
+	OIDCCDisplayPopup, // oidcc-display-popup
+	OIDCCEnsureRequestWithAcrValuesSucceeds, // oidcc-ensure-request-with-acr-values-succeeds
+	OIDCCEnsureRequestWithUnknownParameterSucceeds, // oidcc-ensure-request-with-unknown-parameter-succeeds
+	OIDCCEnsureRequestWithValidPkceSucceeds, // oidcc-ensure-request-with-valid-pkce-succeeds
+	OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow, // oidcc-ensure-request-without-nonce-succeeds-for-code-flow
+	OIDCCIdTokenHint, // oidcc-id-token-hint
+	OIDCCIdTokenRS256, // oidcc-idtoken-rs256
+	OIDCCIdTokenSignature, // oidcc-idtoken-signature
+	OIDCCLoginHint, // oidcc-login-hint
+	OIDCCPromptNoneLoggedIn, // oidcc-prompt-none-logged-in
+	OIDCCPromptNoneNotLoggedIn, // oidcc-prompt-none-not-logged-in
+	OIDCCRedirectUriQueryAdded, // oidcc-redirect-uri-query-added
+	OIDCCRedirectUriQueryOK, // oidcc-redirect-uri-query-OK
+	OIDCCScopeAddress, // oidcc-scope-address
+	OIDCCScopeAll, // oidcc-scope-all
+	OIDCCScopeEmail, // oidcc-scope-email
+	OIDCCScopePhone, // oidcc-scope-phone
+	OIDCCScopeProfile, // oidcc-scope-profile
 	OIDCCServerTest, // oidcc-server
+	OIDCCServerTestClientSecretPost, // oidcc-server-client-secret-post
+	OIDCCUiLocales, // oidcc-ui-locales
+	OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported, // oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported
+	OIDCCUserInfoGet, // oidcc-userinfo-get
+	OIDCCUserInfoPostBody, // oidcc-userinfo-post-body
+	OIDCCUserInfoPostHeader, // oidcc-userinfo-post-header
+	OIDCCClient3rdPartyInitiatedLoginTest, // oidcc-client-test-3rd-party-init-login
+	OIDCCClientTest, // oidcc-client-test
+	OIDCCClientTestClientSecretBasic, // oidcc-client-test-client-secret-basic
+	OIDCCClientTestFormPostError, // oidcc-client-test-form-post-error
+	OIDCCClientTestIdTokenSigAlgNone, // oidcc-client-test-idtoken-sig-none
+	OIDCCClientTestIdTokenSignedUsingRS256, // oidcc-client-test-idtoken-sig-rs256
+	OIDCCClientTestInvalidAudInIdToken, // oidcc-client-test-invalid-aud
+	OIDCCClientTestInvalidIdTokenSignatureWithRS256, // oidcc-client-test-invalid-sig-rs256
+	OIDCCClientTestInvalidIssuerInIdToken, // oidcc-client-test-invalid-iss
+	OIDCCClientTestInvalidSubInUserinfoResponse, // oidcc-client-test-userinfo-invalid-sub
+	OIDCCClientTestKidAbsentMultipleMatchingKeysInJwks, // oidcc-client-test-kid-absent-multiple-jwks
+	OIDCCClientTestKidAbsentSingleJwks, // oidcc-client-test-kid-absent-single-jwks
+	OIDCCClientTestMissingIatInIdToken, // oidcc-client-test-missing-iat
+	OIDCCClientTestMissingSubInIdToken, // oidcc-client-test-missing-sub
+	OIDCCClientTestNonceInvalid, // oidcc-client-test-nonce-invalid
+	OIDCCClientTestRequestUriSignedWithNone, // oidcc-client-test-request-uri-signed-none
+	OIDCCClientTestRequestUriSignedWithRS256, // oidcc-client-test-request-uri-signed-rs256
+	OIDCCClientTestScopeUserInfoClaims, // oidcc-client-test-scope-userinfo-claims
+	OIDCCClientTestSignedUserinfo, // oidcc-client-test-userinfo-signed
+	OIDCCClientTestUserinfoBearerBody, // oidcc-client-test-userinfo-bearer-body
+	OIDCCClientTestUserinfoBearerHeader, // oidcc-client-test-userinfo-bearer-header
+	OIDCCClientTestDiscoveryIssuerMismatch, // oidcc-client-test-discovery-issuer-mismatch
+	OIDCCClientTestDiscoveryJwksUriKeys, // oidcc-client-test-discovery-jwks-uri-keys
+	OIDCCClientTestDiscoveryOpenIDConfiguration, // oidcc-client-test-discovery-openid-config
+	OIDCCClientTestDiscoveryWebfingerAcct, // oidcc-client-test-discovery-webfinger-acct
+	OIDCCClientTestDiscoveryWebfingerURL, // oidcc-client-test-discovery-webfinger-url
+	OIDCCClientTestDynamicRegistration, // oidcc-client-test-dynamic-registration
+	OIDCCClientTestSigningKeyRotation, // oidcc-client-test-signing-key-rotation
+	OIDCCClientTestSigningKeyRotationJustBeforeSigning, // oidcc-client-test-signing-key-rotation-just-before-signing
 	OIDCCClientTestBackChannelLogout, // oidcc-client-test-rp-backchannel-rpinitlogout
 	OIDCCClientTestBackChannelLogoutAlgNone, // oidcc-client-test-rp-backchannel-rpinitlogout-alg-none
 	OIDCCClientTestBackChannelLogoutNoEvent, // oidcc-client-test-rp-backchannel-rpinitlogout-no-event
@@ -42,6 +161,9 @@ export const modules: TestModuleClass<AbstractTestModule>[] = [
 ];
 
 export const plans: TestPlanClass[] = [
+	OIDCCClient3rdPartyInitiatedLoginTestPlan, // oidcc-client-test-3rd-party-init-login-test-plan
+	OIDCCClientBasicTestPlan, // oidcc-client-basic-certification-test-plan
+	OIDCCClientDynamicTestPlan, // oidcc-client-dynamic-certification-test-plan
 	OIDCCClientBackChannelLogoutRPBasicTestPlan, // oidcc-client-back-channel-logout-rp-basic
 	OIDCCClientFrontChannelLogoutRPBasicTestPlan, // oidcc-client-front-channel-logout-rp-basic
 	OIDCCClientLogoutTestPlan, // oidcc-client-logout-test-plan

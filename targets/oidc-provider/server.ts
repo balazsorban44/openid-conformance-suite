@@ -12,6 +12,7 @@
  *   OIDC_PROVIDER_CLIENTS             JSON array of static client metadata (overrides clients.json)
  *   OIDC_PROVIDER_CLIENTS_FILE        path to a JSON file with static clients (default targets/oidc-provider/clients.json)
  *   OIDC_PROVIDER_JWKS                private JWKS JSON to use instead of keys generated at startup
+ *   OIDC_PROVIDER_AUTO_APPROVE=1      self-test mode for the RP target: no login/consent/logout user interaction
  *   DEBUG_OIDC_PROVIDER=1             log every request and provider error
  */
 import { createHash, randomBytes } from "node:crypto";
@@ -42,6 +43,11 @@ export interface StartOptions {
 	jwks?: { keys: JWK[] };
 	/** log requests and errors */
 	debug?: boolean;
+	/**
+	 * Self-test mode for the RP target (OIDC_PROVIDER_AUTO_APPROVE=1): login (as "foo"), consent and the logout
+	 * confirmation complete without user interaction. Never used for the OP plans.
+	 */
+	autoApprove?: boolean;
 }
 
 export interface RunningProvider {
@@ -221,6 +227,7 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 	}
 	const host = opts.host ?? "localhost";
 	const debug = opts.debug ?? process.env["DEBUG_OIDC_PROVIDER"] === "1";
+	const autoApprove = opts.autoApprove ?? process.env["OIDC_PROVIDER_AUTO_APPROVE"] === "1";
 	const staticClients = opts.clients ?? loadStaticClients();
 	const staticClientIds = new Set(staticClients.map((c) => String(c["client_id"])));
 	const jwks = opts.jwks ?? (process.env["OIDC_PROVIDER_JWKS"] ? JSON.parse(process.env["OIDC_PROVIDER_JWKS"]) : null) ?? (await generateJwks());
@@ -301,7 +308,13 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 					if (frames.length) {
 						pendingFrontchannel.set(session.state.secret, { clientId: session.state.clientId, frames });
 					}
-					return defaultLogoutSource(ctx, form);
+					await defaultLogoutSource(ctx, form);
+					if (autoApprove) {
+						ctx.body = String(ctx.body).replace(
+							"</body>",
+							'<script>document.querySelector("button[autofocus]").click()</script></body>',
+						);
+					}
 				},
 			},
 		},
@@ -444,6 +457,11 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 			console.log(ctx.method, ctx.url);
 		}
 
+		if (autoApprove && ctx.method === "GET" && ctx.path.startsWith("/interaction/")) {
+			await autoApproveInteraction(provider, ctx);
+			return;
+		}
+
 		// check_session_iframe (oidcc-session-management-*)
 		if (ctx.method === "GET" && ctx.path === "/session/check") {
 			ctx.type = "html";
@@ -515,6 +533,32 @@ export async function start(opts: StartOptions = {}): Promise<RunningProvider> {
 				server.close(() => resolve());
 			}),
 	};
+}
+
+/** autoApprove mode: finish the login / consent prompt like the devInteractions forms would */
+async function autoApproveInteraction(provider: Any, ctx: Any): Promise<void> {
+	const { prompt, grantId, session, params } = await provider.interactionDetails(ctx.req, ctx.res);
+	let result: Record<string, unknown>;
+	if (prompt.name === "login") {
+		result = { login: { accountId: "foo" } };
+	} else {
+		const grant = grantId
+			? await provider.Grant.find(grantId)
+			: new provider.Grant({ accountId: session.accountId, clientId: params.client_id });
+		const { details } = prompt;
+		if (details.missingOIDCScope) {
+			grant.addOIDCScope(details.missingOIDCScope.join(" "));
+		}
+		if (details.missingOIDCClaims) {
+			grant.addOIDCClaims(details.missingOIDCClaims);
+		}
+		for (const [indicator, scope] of Object.entries((details.missingResourceScopes ?? {}) as Record<string, string[]>)) {
+			grant.addResourceScope(indicator, scope.join(" "));
+		}
+		result = { consent: { grantId: await grant.save() } };
+	}
+	ctx.respond = false;
+	await provider.interactionFinished(ctx.req, ctx.res, result, { mergeWithLastSubmission: prompt.name !== "login" });
 }
 
 function freePort(): Promise<number> {
