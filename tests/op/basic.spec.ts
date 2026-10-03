@@ -90,13 +90,11 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 		});
 	});
 
-	// upstream: openid/OIDCCIdTokenSignature.java (OP-IDToken-Signature, OP-IDToken-kid)
 	test.describe(() => {
-		test.skip(
-			({ variant }) => variant.client_registration === "static_client",
-			"registers a client without an id_token alg",
-		);
+		// upstream @VariantNotApplicable: the module registers a client without an id_token signing alg
+		test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients");
 
+		// upstream: openid/OIDCCIdTokenSignature.java (OP-IDToken-Signature, OP-IDToken-kid)
 		test("oidcc-idtoken-signature: without a requested algorithm the id_token is signed with RS256 and names its key", async ({
 			op,
 			client,

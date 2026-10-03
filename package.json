@@ -25,7 +25,8 @@
 		"check": "pnpm typecheck && pnpm lint && pnpm fmt:check",
 		"test": "playwright test",
 		"test:unit": "vitest run",
-		"sync-upstream": "node scripts/sync-upstream.ts"
+		"sync-upstream": "node scripts/sync-upstream.ts",
+		"lock-symbols": "node scripts/upstream-lock-symbols.ts --write"
 	},
 	"dependencies": {
 		"@playwright/test": "^1.63.0",

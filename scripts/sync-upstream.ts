@@ -5,6 +5,7 @@
  *   node scripts/sync-upstream.ts --fetch                 clone/update upstream into .upstream/
  *   node scripts/sync-upstream.ts [--status]              list ported files whose Java source changed since the pin
  *   node scripts/sync-upstream.ts --diff <ts path>        git diff of the Java source (pinned..HEAD)
+ *   node scripts/sync-upstream.ts --diff <ts>#<symbol>    the same for a rewritten function/test (lock `symbols`)
  *   node scripts/sync-upstream.ts --closure <JavaFQN>...  Java files in the plans' closure missing from the lock
  *   node scripts/sync-upstream.ts --add <JavaFQN>...      add those files (and their closure) to the lock
  *   node scripts/sync-upstream.ts --pin                   re-pin commit + blob hashes to upstream HEAD
@@ -19,7 +20,13 @@ const upstreamDir = process.env["UPSTREAM"] ?? join(root, ".upstream");
 
 interface LockFile {
 	upstream: { repo: string; commit: string; date: string };
+	/** 1:1 ports (src/condition, src/openid, ...): TS path -> Java file */
 	files: Record<string, { java: string; blob: string; loc: number; note?: string }>;
+	/**
+	 * The rewrite (src/suite, src/op, src/rp, tests): Java file -> the function or test that ports it; several Java
+	 * files can map to one TS file. Maintained by scripts/upstream-lock-symbols.ts from the `upstream:` comments.
+	 */
+	symbols?: Record<string, { blob: string; loc: number; ts: string; symbol: string }>;
 }
 
 const lock = JSON.parse(readFileSync(lockPath, "utf8")) as LockFile;
@@ -85,17 +92,38 @@ function status(): void {
 	for (const d of deleted) {
 		console.log(`  ${d}  <- ${lock.files[d].java}`);
 	}
-	process.exitCode = changed.length + deleted.length > 0 ? 1 : 0;
+	// the rewritten functions/tests (several Java files per TS file)
+	const symbolChanges: string[] = [];
+	for (const [java, info] of Object.entries(lock.symbols ?? {})) {
+		const blob = blobOf(java);
+		if (blob !== info.blob) {
+			symbolChanges.push(`  ${info.ts}#${info.symbol}  <- ${java}${blob === null ? " (deleted upstream)" : ""}`);
+		}
+	}
+	console.log(
+		`rewritten symbols changed upstream: ${symbolChanges.length} of ${Object.keys(lock.symbols ?? {}).length}`,
+	);
+	for (const line of symbolChanges) {
+		console.log(line);
+	}
+	process.exitCode = changed.length + deleted.length + symbolChanges.length > 0 ? 1 : 0;
 }
 
 function diff(ts: string): void {
 	ensureUpstream();
-	const info = lock.files[ts];
-	if (!info) {
+	const [path, symbol] = ts.split("#");
+	const java = symbol
+		? Object.entries(lock.symbols ?? {})
+				.filter(([, s]) => s.ts === path && s.symbol === symbol)
+				.map(([j]) => j)
+		: lock.files[ts]
+			? [lock.files[ts].java]
+			: [];
+	if (java.length === 0) {
 		console.error(`not in lock: ${ts}`);
 		process.exit(2);
 	}
-	const out = execFileSync("git", ["diff", lock.upstream.commit, "HEAD", "--", info.java], {
+	const out = execFileSync("git", ["diff", lock.upstream.commit, "HEAD", "--", ...java], {
 		cwd: upstreamDir,
 		encoding: "utf8",
 	});
@@ -198,6 +226,13 @@ function pin(): void {
 			info.loc = locOf(info.java);
 		}
 	}
+	for (const [java, info] of Object.entries(lock.symbols ?? {})) {
+		const blob = blobOf(java);
+		if (blob) {
+			info.blob = blob;
+			info.loc = locOf(java);
+		}
+	}
 	lock.upstream.commit = git(["rev-parse", "HEAD"]);
 	lock.upstream.date = git(["log", "-1", "--format=%cI"]);
 	save();
@@ -206,7 +241,7 @@ function pin(): void {
 
 function save(): void {
 	lock.files = Object.fromEntries(Object.entries(lock.files).sort(([a], [b]) => a.localeCompare(b)));
-	writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n");
+	writeFileSync(lockPath, JSON.stringify(lock, null, "\t") + "\n");
 }
 
 const [cmd = "--status", ...args] = process.argv.slice(2);

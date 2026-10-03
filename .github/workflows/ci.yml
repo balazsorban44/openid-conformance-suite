@@ -31,6 +31,8 @@ jobs:
       - run: pnpm fmt:check
       - name: registry is up to date
         run: node scripts/gen-registry.ts && git diff --exit-code -- src/registry.ts
+      - name: upstream.lock.json symbols are up to date
+        run: node scripts/upstream-lock-symbols.ts --check
       - run: pnpm test:unit
 
   matrix:
@@ -96,4 +98,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm exec playwright install --with-deps chromium
-      - run: node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server\["
+      - run: node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
