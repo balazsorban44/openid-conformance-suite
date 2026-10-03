@@ -4541,6 +4541,12 @@
 			"ts": "src/op/endpoint.ts",
 			"symbol": "ensureHttpStatusCode"
 		},
+		"src/main/java/net/openid/conformance/condition/client/AbstractSetScopeInClientConfiguration.java": {
+			"blob": "acf6f5cc6e59cdfcb89dcea32abaf8cc40c7f5a5",
+			"loc": 20,
+			"ts": "src/op/registration.ts",
+			"symbol": "setScopeInClientConfiguration"
+		},
 		"src/main/java/net/openid/conformance/condition/client/AbstractValidateErrorDescriptionFromResponseError.java": {
 			"blob": "9976e395c2c6e632e0efe8540e039aa81a4b8dce",
 			"loc": 34,
@@ -4583,6 +4589,12 @@
 			"ts": "src/op/token.ts",
 			"symbol": "addBasicAuthClientSecretToRequest"
 		},
+		"src/main/java/net/openid/conformance/condition/client/AddClaimsLocalesSeToAuthorizationEndpointRequest.java": {
+			"blob": "83e94ca974f3751a7074368c08396a02ede2e7d7",
+			"loc": 28,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addClaimsLocalesSeToAuthorizationEndpointRequest"
+		},
 		"src/main/java/net/openid/conformance/condition/client/AddClientAssertionToRequest.java": {
 			"blob": "8beffb812fdd24d2ca34eb4368112f3b21aaaafc",
 			"loc": 27,
@@ -4607,11 +4619,29 @@
 			"ts": "src/op/registration.ts",
 			"symbol": "createDynamicRegistrationRequest"
 		},
+		"src/main/java/net/openid/conformance/condition/client/AddDisplayPageToAuthorizationEndpointRequest.java": {
+			"blob": "a31cf427851cdd5ef9016ba20190ae1dbb87c752",
+			"loc": 28,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addDisplayPageToAuthorizationEndpointRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/client/AddDisplayPopupToAuthorizationEndpointRequest.java": {
+			"blob": "889cd4eb7e6ea51bc0b01241511f781c1beb651c",
+			"loc": 28,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addDisplayPopupToAuthorizationEndpointRequest"
+		},
 		"src/main/java/net/openid/conformance/condition/client/AddFormBasedClientSecretToRequest.java": {
 			"blob": "d923e0494096d9d1026ed27a0bf7724e558f08a9",
 			"loc": 26,
 			"ts": "src/op/token.ts",
 			"symbol": "addFormBasedClientSecretToRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/client/AddIdTokenHintFromFirstLoginToAuthorizationEndpointRequest.java": {
+			"blob": "1481cb6e47271cc35c8d5ffe3df510dba6f2e279",
+			"loc": 30,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addIdTokenHintFromFirstLoginToAuthorizationEndpointRequest"
 		},
 		"src/main/java/net/openid/conformance/condition/client/AddImplicitGrantTypeToDynamicRegistrationRequest.java": {
 			"blob": "95ae171d5cee09f1a86d3e718d0d67bb71bdf1e0",
@@ -4619,11 +4649,23 @@
 			"ts": "src/op/registration.ts",
 			"symbol": "createDynamicRegistrationRequest"
 		},
+		"src/main/java/net/openid/conformance/condition/client/AddLoginHintFromConfigurationToAuthorizationEndpointRequest.java": {
+			"blob": "9818bc0e36c5922188d86f3fc225983bb7e0ce5e",
+			"loc": 50,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addLoginHintFromConfigurationToAuthorizationEndpointRequest"
+		},
 		"src/main/java/net/openid/conformance/condition/client/AddNonceToAuthorizationEndpointRequest.java": {
 			"blob": "e28d4a46eecf971d62e1511522d166c02e02d3e8",
 			"loc": 33,
 			"ts": "src/op/authorization.ts",
 			"symbol": "addNonceToAuthorizationEndpointRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/client/AddPromptNoneToAuthorizationEndpointRequest.java": {
+			"blob": "8c7e8d8c78a6843cdc86abb964382e32315b3582",
+			"loc": 28,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addPromptNoneToAuthorizationEndpointRequest"
 		},
 		"src/main/java/net/openid/conformance/condition/client/AddPublicJwksToDynamicRegistrationRequest.java": {
 			"blob": "cde543da4fa94562f027c89e6019cf28db4e1a2c",
@@ -4655,11 +4697,29 @@
 			"ts": "src/op/registration.ts",
 			"symbol": "createDynamicRegistrationRequest"
 		},
+		"src/main/java/net/openid/conformance/condition/client/AddUiLocalesFromConfigurationToAuthorizationEndpointRequest.java": {
+			"blob": "8123310c12e61ac63d71bc153bd01466e603e392",
+			"loc": 39,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addUiLocalesFromConfigurationToAuthorizationEndpointRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/client/AddUserInfoEssentialNameClaimToAuthorizationEndpointRequest.java": {
+			"blob": "690e0a28fc1bcebfb313bca177972e9d657bc066",
+			"loc": 32,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addUserInfoEssentialNameClaimToAuthorizationEndpointRequest"
+		},
 		"src/main/java/net/openid/conformance/condition/client/BuildPlainRedirectToAuthorizationEndpoint.java": {
 			"blob": "a382e2adef15eb0a0f337e559c9bcbd171d08b6a",
 			"loc": 73,
 			"ts": "src/op/authorization.ts",
 			"symbol": "buildPlainRedirectToAuthorizationEndpoint"
+		},
+		"src/main/java/net/openid/conformance/condition/client/BuildPlainRedirectToAuthorizationEndpointReorderedParams.java": {
+			"blob": "6f225f823145068aaaa5cfaf997123bad46251cc",
+			"loc": 23,
+			"ts": "src/op/authorization.ts",
+			"symbol": "buildPlainRedirectToAuthorizationEndpointReorderedParams"
 		},
 		"src/main/java/net/openid/conformance/condition/client/CallDynamicRegistrationEndpoint.java": {
 			"blob": "a2c3606a149698eaabf17c2fd281b8915c85216a",
@@ -4678,6 +4738,18 @@
 			"loc": 63,
 			"ts": "src/op/token.ts",
 			"symbol": "callTokenEndpoint"
+		},
+		"src/main/java/net/openid/conformance/condition/client/CallUserInfoEndpoint.java": {
+			"blob": "ecf29a9e2a6db740c0bc7523295a3a492cbf652a",
+			"loc": 64,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "callUserInfoEndpoint"
+		},
+		"src/main/java/net/openid/conformance/condition/client/CallUserInfoEndpointWithBearerTokenInBody.java": {
+			"blob": "faf055d1695d9a7241d229b30eb18b336962f533",
+			"loc": 29,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "callUserInfoEndpointWithBearerTokenInBody"
 		},
 		"src/main/java/net/openid/conformance/condition/client/CheckCallbackContentTypeIsFormUrlEncoded.java": {
 			"blob": "69f1030e71140af1d0ca332e2adcaa135592ace9",
@@ -4726,6 +4798,18 @@
 			"loc": 62,
 			"ts": "src/op/authorization.ts",
 			"symbol": "checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint"
+		},
+		"src/main/java/net/openid/conformance/condition/client/CheckIdTokenAuthTimeClaimsSameIfPresent.java": {
+			"blob": "2ec7df63c8930799eed9808cf9d0201fcfa36ff5",
+			"loc": 40,
+			"ts": "src/op/id-token.ts",
+			"symbol": "checkIdTokenAuthTimeClaimsSameIfPresent"
+		},
+		"src/main/java/net/openid/conformance/condition/client/CheckIdTokenSubConsistentForSecondAuthorization.java": {
+			"blob": "0bf665276ed5d0644c8ec52f25500689474285e2",
+			"loc": 35,
+			"ts": "src/op/id-token.ts",
+			"symbol": "checkIdTokenSubConsistentForSecondAuthorization"
 		},
 		"src/main/java/net/openid/conformance/condition/client/CheckIfAuthorizationEndpointError.java": {
 			"blob": "3dd6554685f349c6eeed604fb4b8ed04e31a9903",
@@ -4847,6 +4931,12 @@
 			"ts": "src/op/id-token.ts",
 			"symbol": "ensureIdTokenContainsKid"
 		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureIdTokenDoesNotContainEmailForScopeEmail.java": {
+			"blob": "89fe6809a91e0f30aa53d47222b279815fffea73",
+			"loc": 23,
+			"ts": "src/op/id-token.ts",
+			"symbol": "ensureIdTokenDoesNotContainEmailForScopeEmail"
+		},
 		"src/main/java/net/openid/conformance/condition/client/EnsureIdTokenDoesNotContainName.java": {
 			"blob": "136cc52a56a45f5ef5745c3bddcd9daf4c5446b8",
 			"loc": 23,
@@ -4870,6 +4960,12 @@
 			"loc": 15,
 			"ts": "src/op/id-token.ts",
 			"symbol": "ensureIdTokenUpdatedAtValid"
+		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources.java": {
+			"blob": "ad81a02bf5d9dd9c4ce467ef4ddbd44ca4097ecd",
+			"loc": 47,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources"
 		},
 		"src/main/java/net/openid/conformance/condition/client/EnsureMinimumAuthorizationCodeEntropy.java": {
 			"blob": "830df525976775ceaf55f8127d27f16be8958b6f",
@@ -4906,6 +5002,30 @@
 			"loc": 43,
 			"ts": "src/op/discovery.ts",
 			"symbol": "ensureServerConfigurationSupportsPrivateKeyJwt"
+		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureUserInfoContainsName.java": {
+			"blob": "87a964987b9a353ad7be67806d49fdad30d51cb5",
+			"loc": 23,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "ensureUserInfoContainsName"
+		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureUserInfoContainsSub.java": {
+			"blob": "96c8726bcd4456cde860eec85ba606d815a26eb9",
+			"loc": 23,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "ensureUserInfoContainsSub"
+		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureUserInfoDoesNotContainName.java": {
+			"blob": "2babfcffdb6b75bd7ef00f1eaa3e9e35583a3a00",
+			"loc": 24,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "ensureUserInfoDoesNotContainName"
+		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureUserInfoUpdatedAtValid.java": {
+			"blob": "3cbf80ad1550ebb3a556417828cab0c3618dae3f",
+			"loc": 15,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "ensureUserInfoUpdatedAtValid"
 		},
 		"src/main/java/net/openid/conformance/condition/client/ExtractAccessTokenFromTokenResponse.java": {
 			"blob": "b4ee5d5aa55236d15d0189236f800258abcaf9c9",
@@ -4985,6 +5105,12 @@
 			"ts": "src/op/discovery.ts",
 			"symbol": "extractTLSTestValuesFromServerConfiguration"
 		},
+		"src/main/java/net/openid/conformance/condition/client/ExtractUserInfoFromUserInfoEndpointResponse.java": {
+			"blob": "14400b785f76fda5fc6a74a6e14feb7d0bcd9119",
+			"loc": 35,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "extractUserInfoFromUserInfoEndpointResponse"
+		},
 		"src/main/java/net/openid/conformance/condition/client/FetchServerKeys.java": {
 			"blob": "04ea58a55f2d9386b730df6cd75033e3c2556ebf",
 			"loc": 67,
@@ -5015,6 +5141,12 @@
 			"ts": "src/op/discovery.ts",
 			"symbol": "getStaticServerConfiguration"
 		},
+		"src/main/java/net/openid/conformance/condition/client/OIDCCCheckScopesSupportedContainScopeTest.java": {
+			"blob": "307735dd03102d35ac67ed4c78f8180740d84b67",
+			"loc": 53,
+			"ts": "src/op/discovery.ts",
+			"symbol": "oidccCheckScopesSupportedContainScopeTest"
+		},
 		"src/main/java/net/openid/conformance/condition/client/RejectAuthCodeInAuthorizationEndpointResponse.java": {
 			"blob": "e039df380b3e1cc4887128743acdb418f762b5fc",
 			"loc": 24,
@@ -5032,6 +5164,12 @@
 			"loc": 18,
 			"ts": "src/op/authorization.ts",
 			"symbol": "rejectErrorInUrlQuery"
+		},
+		"src/main/java/net/openid/conformance/condition/client/ReverseScopeOrderInAuthorizationEndpointRequest.java": {
+			"blob": "afd9a7b52e86ca6e34e0eb25bf242c87364ee727",
+			"loc": 21,
+			"ts": "src/op/authorization.ts",
+			"symbol": "reverseScopeOrderInAuthorizationEndpointRequest"
 		},
 		"src/main/java/net/openid/conformance/condition/client/ServerAllowedReusingAuthorizationCode.java": {
 			"blob": "3355dc0302e58f42192eb2624e86d281b48fd703",
@@ -5057,11 +5195,47 @@
 			"ts": "src/op/discovery.ts",
 			"symbol": "setProtectedResourceUrlToUserInfoEndpoint"
 		},
+		"src/main/java/net/openid/conformance/condition/client/SetResourceMethodToPost.java": {
+			"blob": "ca740a41b16f977129ca2d1a368a3a5286872285",
+			"loc": 25,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "setResourceMethodToPost"
+		},
 		"src/main/java/net/openid/conformance/condition/client/SetScopeInClientConfigurationToOpenId.java": {
 			"blob": "49453a5c3845e5d6c845da6beace70441390321b",
 			"loc": 25,
 			"ts": "src/op/registration.ts",
 			"symbol": "setScopeInClientConfigurationToOpenId"
+		},
+		"src/main/java/net/openid/conformance/condition/client/SetScopeInClientConfigurationToOpenIdAddress.java": {
+			"blob": "2308a8f2e7a2de09bf45c1074a33b47fa19cd90e",
+			"loc": 14,
+			"ts": "src/op/registration.ts",
+			"symbol": "setScopeInClientConfigurationToOpenIdAddress"
+		},
+		"src/main/java/net/openid/conformance/condition/client/SetScopeInClientConfigurationToOpenIdEmail.java": {
+			"blob": "1c49d3b2332cf463364c336f126a9b7fc5c207de",
+			"loc": 14,
+			"ts": "src/op/registration.ts",
+			"symbol": "setScopeInClientConfigurationToOpenIdEmail"
+		},
+		"src/main/java/net/openid/conformance/condition/client/SetScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile.java": {
+			"blob": "76f28926fc34156d9cc31c718a66725ec5d3779e",
+			"loc": 14,
+			"ts": "src/op/registration.ts",
+			"symbol": "setScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile"
+		},
+		"src/main/java/net/openid/conformance/condition/client/SetScopeInClientConfigurationToOpenIdPhone.java": {
+			"blob": "90ef22c794d609f7b2ce9277662a1d43fb687078",
+			"loc": 14,
+			"ts": "src/op/registration.ts",
+			"symbol": "setScopeInClientConfigurationToOpenIdPhone"
+		},
+		"src/main/java/net/openid/conformance/condition/client/SetScopeInClientConfigurationToOpenIdProfile.java": {
+			"blob": "393f75835aab01b68fa663277e6041c7c805258d",
+			"loc": 14,
+			"ts": "src/op/registration.ts",
+			"symbol": "setScopeInClientConfigurationToOpenIdProfile"
 		},
 		"src/main/java/net/openid/conformance/condition/client/SignClientAuthenticationAssertion.java": {
 			"blob": "f67b74c669e78a9d321f233217129bfd604571b8",
@@ -5080,6 +5254,12 @@
 			"loc": 75,
 			"ts": "src/op/registration.ts",
 			"symbol": "unregisterDynamicallyRegisteredClient"
+		},
+		"src/main/java/net/openid/conformance/condition/client/UserInfoEndpointWithAccessTokenInBodyNotSupported.java": {
+			"blob": "d4c4bbc480b8661b113ddfd513d6a2c3251a629d",
+			"loc": 13,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "userInfoEndpointWithAccessTokenInBodyNotSupported"
 		},
 		"src/main/java/net/openid/conformance/condition/client/ValidateAtHash.java": {
 			"blob": "fd860902b50ef8e78153c16667006be6cf9ffe46",
@@ -5159,6 +5339,12 @@
 			"ts": "src/op/authorization.ts",
 			"symbol": "validateIssIfPresentInAuthorizationResponse"
 		},
+		"src/main/java/net/openid/conformance/condition/client/ValidateUserInfoStandardClaims.java": {
+			"blob": "b882dce338dd48cfcd07d23bf907000ef9f04fac",
+			"loc": 26,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "validateUserInfoStandardClaims"
+		},
 		"src/main/java/net/openid/conformance/condition/client/VerifyClientManagementCredentials.java": {
 			"blob": "c704592d0267fc7d507900f48a0a904f94d46dd3",
 			"loc": 64,
@@ -5170,6 +5356,18 @@
 			"loc": 35,
 			"ts": "src/op/registration.ts",
 			"symbol": "verifyDynamicRegistrationResponseClientCredentials"
+		},
+		"src/main/java/net/openid/conformance/condition/client/VerifyScopesReturnedInUserInfoClaims.java": {
+			"blob": "5b680f5dddc0979e85883eafb49fc0e44891e015",
+			"loc": 15,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "verifyScopesReturnedInUserInfoClaims"
+		},
+		"src/main/java/net/openid/conformance/condition/client/VerifyUserInfoAndIdTokenInTokenEndpointSameSub.java": {
+			"blob": "a78566dde1620ad8bf83a1605904a2aac805aa77",
+			"loc": 9,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "verifyUserInfoAndIdTokenInTokenEndpointSameSub"
 		},
 		"src/main/java/net/openid/conformance/condition/common/AbstractCheckDistinctKeyIdValueInJWKs.java": {
 			"blob": "8f73a39c8646c7ea7eca7e9a2fbc78868c316609",
@@ -5249,11 +5447,47 @@
 			"ts": "src/op/jwks.ts",
 			"symbol": "validateJwks"
 		},
+		"src/main/java/net/openid/conformance/openid/OIDCCAlternateHappyFlow.java": {
+			"blob": "ed878a35e407ad5162393f2bf104544ba895d765",
+			"loc": 27,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-alternate-happy-flow"
+		},
 		"src/main/java/net/openid/conformance/openid/OIDCCAuthCodeReuse.java": {
 			"blob": "b41dd832f3bf40a6b2a8b4112346a1ea1022abac",
 			"loc": 27,
 			"ts": "tests/op/basic.spec.ts",
 			"symbol": "oidcc-codereuse"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCClaimsEssential.java": {
+			"blob": "50349cef1f707d7f612c3f3a3962dbf2ed4e67e0",
+			"loc": 51,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-claims-essential"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCClaimsLocales.java": {
+			"blob": "64f36b5d4da8df0a6969f37ccae317ca67db7933",
+			"loc": 22,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-claims-locales"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCDisplayPage.java": {
+			"blob": "aeedfb483e019738e485f1ed05eb6156ed379a77",
+			"loc": 22,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-display-page"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCDisplayPopup.java": {
+			"blob": "fab39d38d534086d4074ace973cadbaec16259da",
+			"loc": 22,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-display-popup"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCIdTokenHint.java": {
+			"blob": "c47d76a96a6a517a0e78ba2b79c0f0b32d9a4414",
+			"loc": 25,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-id-token-hint"
 		},
 		"src/main/java/net/openid/conformance/openid/OIDCCIdTokenSignature.java": {
 			"blob": "e65359e4f1a5d4e55fa786560d4c97b5c8faffef",
@@ -5261,17 +5495,77 @@
 			"ts": "tests/op/basic.spec.ts",
 			"symbol": "oidcc-idtoken-signature"
 		},
+		"src/main/java/net/openid/conformance/openid/OIDCCLoginHint.java": {
+			"blob": "2a97f926a6112571584a121e65ade7d84d65c9e3",
+			"loc": 26,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-login-hint"
+		},
 		"src/main/java/net/openid/conformance/openid/OIDCCResponseTypeMissing.java": {
 			"blob": "c54c429e8bb249d44de04b17ede2627401aeb07d",
 			"loc": 60,
 			"ts": "tests/op/basic.spec.ts",
 			"symbol": "oidcc-response-type-missing"
 		},
+		"src/main/java/net/openid/conformance/openid/OIDCCScopeAddress.java": {
+			"blob": "bf387a01ba6b7f9ac709026b564605bfb81ed69f",
+			"loc": 21,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-scope-address"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCScopeAll.java": {
+			"blob": "c9b7dbdd3d13d0e8c1cfa6cababcce35014594aa",
+			"loc": 21,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-scope-all"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCScopeEmail.java": {
+			"blob": "f5f01a1f28841e3ee6a6c208b6ca62afe979323c",
+			"loc": 43,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-scope-email"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCScopePhone.java": {
+			"blob": "a51ef380fe66ca3ae8c2da9a0335cd4d5dd36b87",
+			"loc": 21,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-scope-phone"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCScopeProfile.java": {
+			"blob": "294bd99b8a1226cf6a9e21ec437014a7b7a2d704",
+			"loc": 21,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-scope-profile"
+		},
 		"src/main/java/net/openid/conformance/openid/OIDCCServerTest.java": {
 			"blob": "68ab759a192533ae9ac3498bf3a5ca77819dbe82",
 			"loc": 85,
 			"ts": "tests/op/basic.spec.ts",
 			"symbol": "oidcc-server"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCUiLocales.java": {
+			"blob": "e248a7546284f892e0233c051f8f54bb98991949",
+			"loc": 22,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-ui-locales"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCUserInfoGet.java": {
+			"blob": "0b49f316a22f42b1a0c8f5447f218fc3aec98a13",
+			"loc": 14,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-userinfo-get"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCUserInfoPostBody.java": {
+			"blob": "47ce9f36f48cfac527d953910ca676e3dd3264a6",
+			"loc": 39,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-userinfo-post-body"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCUserInfoPostHeader.java": {
+			"blob": "0a45f3af1a8adbf55937d094b0466b772404ca34",
+			"loc": 27,
+			"ts": "tests/op/basic.spec.ts",
+			"symbol": "oidcc-userinfo-post-header"
 		},
 		"src/main/java/net/openid/conformance/sequence/client/CallDynamicRegistrationEndpointAndVerifySuccessfulResponse.java": {
 			"blob": "5be150c7dd6ae673a22191cd22ac5de33520b16b",

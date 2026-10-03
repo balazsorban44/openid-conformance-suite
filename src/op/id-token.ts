@@ -114,7 +114,7 @@ export function validateIdToken(
 	c.success("ID token iss, aud, exp, iat, auth_time, acr & nbf claims passed validation checks");
 }
 
-interface ElementValidator {
+export interface ElementValidator {
 	description: string;
 	isValid(v: unknown): boolean;
 }
@@ -125,7 +125,7 @@ function isBlank(s: string): boolean {
 	return /^[\s\u001c-\u001f]*$/.test(s);
 }
 
-const VALIDATE_STRING: ElementValidator = {
+export const VALIDATE_STRING: ElementValidator = {
 	description: "a string with content",
 	// a claim that is not returned SHOULD be omitted, not null or empty; "null" has been seen as a user's name
 	isValid: (v) => typeof v === "string" && !isBlank(v) && v.toLowerCase() !== "null",
@@ -135,7 +135,7 @@ function isSaneBirthYear(year: number): boolean {
 	return year >= 1850 && year <= new Date().getFullYear();
 }
 
-const VALIDATE_BIRTHDATE: ElementValidator = {
+export const VALIDATE_BIRTHDATE: ElementValidator = {
 	description: "a valid birthdate in the format stated in OpenID Connect Standard - YYYY-MM-DD, 0000-MM-DD or YYYY",
 	isValid(v) {
 		if (!VALIDATE_STRING.isValid(v)) {
@@ -157,9 +157,9 @@ const VALIDATE_BIRTHDATE: ElementValidator = {
 	},
 };
 
-const VALIDATE_BOOLEAN: ElementValidator = { description: "a boolean", isValid: (v) => typeof v === "boolean" };
-const VALIDATE_NUMBER: ElementValidator = { description: "a number", isValid: (v) => typeof v === "number" };
-const VALIDATE_JSON_OBJECT: ElementValidator = {
+export const VALIDATE_BOOLEAN: ElementValidator = { description: "a boolean", isValid: (v) => typeof v === "boolean" };
+export const VALIDATE_NUMBER: ElementValidator = { description: "a number", isValid: (v) => typeof v === "number" };
+export const VALIDATE_JSON_OBJECT: ElementValidator = {
 	description: "a JSON object",
 	isValid: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
 };
@@ -168,7 +168,7 @@ const VALIDATE_JSON_OBJECT: ElementValidator = {
  * Validates an object of standard claims, logging each claim (upstream AbstractValidateOpenIdStandardClaims
  * ObjectValidator); unknown claims are collected in `unknown`.
  */
-function objectValidator(
+export function objectValidator(
 	c: Condition,
 	context: string | null,
 	claims: Map<string, ElementValidator>,
@@ -651,4 +651,67 @@ export function ensureIdTokenDoesNotContainNonRequestedClaims(
 		);
 	}
 	c.success("no non-requested id_token claims found");
+}
+
+/** upstream: condition/client/EnsureIdTokenDoesNotContainEmailForScopeEmail.java */
+export function ensureIdTokenDoesNotContainEmailForScopeEmail(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureIdTokenDoesNotContainEmailForScopeEmail", ...requirements);
+	const email = stringClaim(idToken, "email");
+	if (email != null) {
+		// see discussion on certification email list, 10th March 2020
+		c.failure(
+			"Unexpectedly found email in id_token. The conformance suite did not request the 'email' claim is returned in the id_token and hence did not expect the server to include it; as per the spec link for this response_type scope=email is a short hand for 'please give me access to the user's email address in the userinfo response'. Technically returning unrequested claims does not violate the specifications but it could be a bug in the server and may result in user data being exposed in unintended ways if the relying party did not expect the email to be in the id_token, and then uses the id_token to provide proof of the authentication event to other parties.",
+			{ email },
+		);
+	}
+	c.success("email claim not found in id_token, which is expected as it was not requested to be returned there");
+}
+
+/**
+ * auth_time (when both id_tokens have it) is the same in the id_tokens of two authorizations.
+ *
+ * upstream: condition/client/CheckIdTokenAuthTimeClaimsSameIfPresent.java
+ */
+export function checkIdTokenAuthTimeClaimsSameIfPresent(
+	firstIdToken: ParsedJwt,
+	secondIdToken: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckIdTokenAuthTimeClaimsSameIfPresent", ...requirements);
+	const fields = { first_id_token: firstIdToken.claims, second_id_token: secondIdToken.claims };
+	if ("auth_time" in firstIdToken.claims && "auth_time" in secondIdToken.claims) {
+		const firstAuthTime = longClaim(firstIdToken, "auth_time");
+		const authTime = longClaim(secondIdToken, "auth_time");
+		if (firstAuthTime !== authTime) {
+			c.failure("The id_tokens contain different auth_time claims, but must contain the same auth_time.", fields);
+		}
+		c.success("auth_time is the same in the second id_token", fields);
+	} else {
+		c.log(
+			"auth_time cannot be checked as it is missing from the id_tokens for at least one of the authorizations",
+			fields,
+		);
+	}
+}
+
+/**
+ * The sub of the id_tokens of two authorizations is the same.
+ *
+ * upstream: condition/client/CheckIdTokenSubConsistentForSecondAuthorization.java
+ */
+export function checkIdTokenSubConsistentForSecondAuthorization(
+	firstIdToken: ParsedJwt,
+	secondIdToken: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckIdTokenSubConsistentForSecondAuthorization", ...requirements);
+	const fields = { first_id_token: firstIdToken.claims, second_id_token: secondIdToken.claims };
+	// UPSTREAM: Java's subFirst.equals(...) throws a NullPointerException when the first id_token has no sub
+	if (stringClaim(firstIdToken, "sub") !== stringClaim(secondIdToken, "sub")) {
+		c.failure(
+			"The id_token from the first and second authorization contain different sub claims, but must contain the same sub.",
+			fields,
+		);
+	}
+	c.success("sub is the same in the second id_token", fields);
 }

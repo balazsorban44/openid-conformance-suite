@@ -17,6 +17,7 @@ import { randomAlphanumeric } from "../suite/random.ts";
 import { htmlResponse, type IncomingRequest } from "../suite/server.ts";
 import { toUriString } from "../util/UriComponentsBuilder.ts";
 import { checkErrorDescriptionContainsCRLFTAB, validateErrorDescription, validateErrorUri } from "./endpoint.ts";
+import type { ParsedJwt } from "../suite/jose.ts";
 import type { Op } from "./op.ts";
 import type { Client } from "./registration.ts";
 
@@ -173,6 +174,13 @@ export interface AuthorizationRequestOptions {
 	 * (upstream `sequence.skip(Condition, reason)`), e.g. `{ response_type: "Miss out the response_type" }`
 	 */
 	omit?: { state?: string; nonce?: string; response_type?: string };
+	/**
+	 * Steps the module adds to the request after the standard ones, before the redirect URL is built (upstream
+	 * `createAuthorizationRequestSequence().then(condition)`), e.g. `(params) => addDisplayPage(params)`
+	 */
+	steps?: (params: Record<string, unknown>) => void;
+	/** The module's `createAuthorizationRedirect` (default: buildPlainRedirectToAuthorizationEndpoint) */
+	buildRedirect?: (op: Pick<Op, "metadata">, params: Record<string, unknown>) => string;
 }
 
 /**
@@ -215,7 +223,8 @@ export function createAuthorizationRequest(
 	if (responseMode === "form_post") {
 		setAuthorizationEndpointRequestResponseModeToFormPost(params);
 	}
-	const url = buildPlainRedirectToAuthorizationEndpoint(op, params);
+	opts.steps?.(params);
+	const url = (opts.buildRedirect ?? buildPlainRedirectToAuthorizationEndpoint)(op, params);
 	return {
 		params,
 		state,
@@ -788,4 +797,225 @@ export function expectResponseTypeMissingErrorPage(...requirements: string[]): s
 		{ upload: placeholder },
 	);
 	return placeholder;
+}
+
+/**
+ * buildPlainRedirectToAuthorizationEndpoint with the parameters in reverse alphabetical order, to test that the
+ * OP handles different parameter orderings.
+ *
+ * upstream: condition/client/BuildPlainRedirectToAuthorizationEndpointReorderedParams.java
+ */
+export function buildPlainRedirectToAuthorizationEndpointReorderedParams(
+	op: Pick<Op, "metadata">,
+	params: Record<string, unknown>,
+): string {
+	const c: Condition = condition("BuildPlainRedirectToAuthorizationEndpointReorderedParams");
+	const endpoint = op.metadata.authorization_endpoint;
+	if (!endpoint) {
+		c.failure("Couldn't find authorization endpoint");
+	}
+	const query: [string, string][] = Object.keys(params)
+		.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+		.map((key) => {
+			const v = params[key];
+			return [key, typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)];
+		});
+	const url = toUriString(endpoint, query);
+	c.success("Sending to authorization endpoint", { redirect_to_authorization_endpoint: url, auth_request: params });
+	return url;
+}
+
+/** upstream: condition/client/ReverseScopeOrderInAuthorizationEndpointRequest.java (AbstractReverseScopeOrder) */
+export function reverseScopeOrderInAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ReverseScopeOrderInAuthorizationEndpointRequest", ...requirements);
+	const scope = params["scope"];
+	if (scope == null || scope === "") {
+		c.failure("no scope found");
+	}
+	// Java's String.split drops trailing empty strings, JS keeps them
+	const scopes = String(scope).split(" ");
+	while (scopes.length > 0 && scopes[scopes.length - 1] === "") {
+		scopes.pop();
+	}
+	if (scopes.length < 2) {
+		c.failure("'scope' in the configuration must contain more than one scope to run this test");
+	}
+	const reversed = scopes.toReversed().join(" ");
+	params["scope"] = reversed;
+	c.log("Reversed order of scopes in authorization_endpoint_request", { original: scope, reversed });
+}
+
+/** upstream: condition/client/AddClaimsLocalesSeToAuthorizationEndpointRequest.java */
+export function addClaimsLocalesSeToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["claims_locales"] = "se";
+	condition("AddClaimsLocalesSeToAuthorizationEndpointRequest", ...requirements).success(
+		"Added claims_locales=se to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+/** upstream: condition/client/AddDisplayPageToAuthorizationEndpointRequest.java */
+export function addDisplayPageToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["display"] = "page";
+	condition("AddDisplayPageToAuthorizationEndpointRequest", ...requirements).log(
+		"Added display=page to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+/** upstream: condition/client/AddDisplayPopupToAuthorizationEndpointRequest.java */
+export function addDisplayPopupToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["display"] = "popup";
+	condition("AddDisplayPopupToAuthorizationEndpointRequest", ...requirements).log(
+		"Added display=popup to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+/** upstream: condition/client/AddUiLocalesFromConfigurationToAuthorizationEndpointRequest.java */
+export function addUiLocalesFromConfigurationToAuthorizationEndpointRequest(
+	op: Pick<Op, "config">,
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddUiLocalesFromConfigurationToAuthorizationEndpointRequest", ...requirements);
+	const server = op.config["server"] as Record<string, unknown> | undefined;
+	let uiLocales = server?.["ui_locales"];
+	let msg: string;
+	if (typeof uiLocales !== "string" || uiLocales === "") {
+		uiLocales = "se";
+		msg = "No ui_locales in test configuration, added ui_locales=se to authorization endpoint request";
+	} else {
+		msg = "Added ui_locales from test configuration to authorization endpoint request";
+	}
+	params["ui_locales"] = uiLocales;
+	c.success(msg, { ...params });
+}
+
+/** upstream: condition/client/AddLoginHintFromConfigurationToAuthorizationEndpointRequest.java */
+export function addLoginHintFromConfigurationToAuthorizationEndpointRequest(
+	op: Pick<Op, "config" | "metadata">,
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddLoginHintFromConfigurationToAuthorizationEndpointRequest", ...requirements);
+	const server = op.config["server"] as Record<string, unknown> | undefined;
+	let loginHint = server?.["login_hint"];
+	let msg: string;
+	if (typeof loginHint !== "string" || loginHint === "") {
+		const issuer = op.metadata.issuer;
+		try {
+			loginHint = "buffy@" + new URL(issuer as string).hostname;
+		} catch (e) {
+			c.failureFrom("Couldn't parse issuer as URL", e, { issuer });
+		}
+		msg =
+			"No login_hint in test configuration, created one based on issuer and added login_hint to authorization endpoint request";
+	} else {
+		msg = "Added login_hint from test configuration to authorization endpoint request";
+	}
+	params["login_hint"] = loginHint;
+	c.success(msg, { ...params });
+}
+
+/** upstream: condition/client/AddPromptNoneToAuthorizationEndpointRequest.java */
+export function addPromptNoneToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["prompt"] = "none";
+	condition("AddPromptNoneToAuthorizationEndpointRequest", ...requirements).success(
+		"Added prompt=none to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+/** upstream: condition/client/AddIdTokenHintFromFirstLoginToAuthorizationEndpointRequest.java */
+export function addIdTokenHintFromFirstLoginToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	firstIdToken: Pick<ParsedJwt, "value">,
+	...requirements: string[]
+): void {
+	params["id_token_hint"] = firstIdToken.value;
+	condition("AddIdTokenHintFromFirstLoginToAuthorizationEndpointRequest", ...requirements).success(
+		"Added id_token_hint to authorization endpoint request",
+		{ ...params },
+	);
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Requests a claim from `location` of the `claims` request parameter.
+ *
+ * upstream: condition/client/AbstractAddClaimToAuthorizationEndpointRequest.addClaim (the id_token / userinfo
+ * "essential name" conditions below)
+ */
+function addClaimToAuthorizationEndpointRequest(
+	name: string,
+	params: Record<string, unknown>,
+	location: "id_token" | "userinfo",
+	claim: string,
+	value: string | null,
+	essential: boolean,
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	const invalid = (what: string): never =>
+		c.failure("Invalid " + what + " entry in authorization_endpoint_request", {
+			authorization_endpoint_request: params,
+		});
+	let claims: Record<string, unknown>;
+	if ("claims" in params) {
+		const existing = params["claims"];
+		claims = isObject(existing) ? existing : invalid("claims");
+	} else {
+		claims = {};
+		params["claims"] = claims;
+	}
+	let forLocation: Record<string, unknown>;
+	if (location in claims) {
+		const existing = claims[location];
+		forLocation = isObject(existing) ? existing : invalid(location);
+	} else {
+		forLocation = {};
+		claims[location] = forLocation;
+	}
+	const body: Record<string, unknown> = {};
+	if (value != null) {
+		body["value"] = value;
+	}
+	body["essential"] = essential;
+	forLocation[claim] = body;
+	c.success("Added " + claim + " claim to authorization_endpoint_request", { authorization_endpoint_request: params });
+}
+
+/** upstream: condition/client/AddUserInfoEssentialNameClaimToAuthorizationEndpointRequest.java */
+export function addUserInfoEssentialNameClaimToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	addClaimToAuthorizationEndpointRequest(
+		"AddUserInfoEssentialNameClaimToAuthorizationEndpointRequest",
+		params,
+		"userinfo",
+		"name",
+		null,
+		true,
+		requirements,
+	);
 }

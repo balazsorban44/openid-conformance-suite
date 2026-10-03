@@ -15,7 +15,28 @@
 export const portedPlans: Record<string, { spec: string; modules: string[] }> = {
 	"oidcc-basic-certification-test-plan": {
 		spec: "tests/op/basic.spec.ts",
-		modules: ["oidcc-server", "oidcc-response-type-missing", "oidcc-idtoken-signature", "oidcc-codereuse"],
+		modules: [
+			"oidcc-server",
+			"oidcc-response-type-missing",
+			"oidcc-idtoken-signature",
+			"oidcc-codereuse",
+			"oidcc-scope-address",
+			"oidcc-scope-all",
+			"oidcc-scope-email",
+			"oidcc-scope-phone",
+			"oidcc-scope-profile",
+			"oidcc-claims-essential",
+			"oidcc-claims-locales",
+			"oidcc-userinfo-get",
+			"oidcc-userinfo-post-body",
+			"oidcc-userinfo-post-header",
+			"oidcc-alternate-happy-flow",
+			"oidcc-display-page",
+			"oidcc-display-popup",
+			"oidcc-ui-locales",
+			"oidcc-login-hint",
+			"oidcc-id-token-hint",
+		],
 	},
 };
 

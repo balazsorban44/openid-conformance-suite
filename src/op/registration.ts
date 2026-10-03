@@ -495,3 +495,38 @@ export async function unregisterDynamicallyRegisteredClient(client: Client): Pro
 	}
 	c.success("Client successfully unregistered");
 }
+
+/** upstream: condition/client/AbstractSetScopeInClientConfiguration.java */
+function setScopeInClientConfiguration(name: string, client: Client, scope: string): void {
+	client.scope = scope;
+	condition(name).log(`Set scope in client configuration to "${scope}"`, { scope });
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdAddress.java */
+export function setScopeInClientConfigurationToOpenIdAddress(client: Client): void {
+	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdAddress", client, "openid address");
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile.java */
+export function setScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile(client: Client): void {
+	setScopeInClientConfiguration(
+		"SetScopeInClientConfigurationToOpenIdEmailPhoneAddressProfile",
+		client,
+		"openid email phone address profile",
+	);
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdEmail.java */
+export function setScopeInClientConfigurationToOpenIdEmail(client: Client): void {
+	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdEmail", client, "openid email");
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdPhone.java */
+export function setScopeInClientConfigurationToOpenIdPhone(client: Client): void {
+	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdPhone", client, "openid phone");
+}
+
+/** upstream: condition/client/SetScopeInClientConfigurationToOpenIdProfile.java */
+export function setScopeInClientConfigurationToOpenIdProfile(client: Client): void {
+	setScopeInClientConfiguration("SetScopeInClientConfigurationToOpenIdProfile", client, "openid profile");
+}

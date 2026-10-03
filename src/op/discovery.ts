@@ -2,9 +2,11 @@
  * The OP's configuration: discovery (or a static `server` object from the test configuration) and the checks
  * upstream runs on it before a test starts.
  */
-import { condition, type Condition } from "../suite/conditions.ts";
+import { condition, soft, type Condition } from "../suite/conditions.ts";
 import { endpointResponse, HttpError, jsonBody, request, type EndpointResponse } from "../suite/http.ts";
 import type { TestConfig } from "../suite/config.ts";
+import type { Op } from "./op.ts";
+import type { Client } from "./registration.ts";
 
 /** The OP's metadata (upstream env "server"): the discovery document or the configured `server` object */
 export interface ServerMetadata {
@@ -291,4 +293,52 @@ export function setProtectedResourceUrlToUserInfoEndpoint(metadata: ServerMetada
 		{ protected_resource_url: url },
 	);
 	return url;
+}
+
+/**
+ * The scopes the test requests are listed in the discovery document's scopes_supported. Returns true when they
+ * are (a failure throws).
+ *
+ * upstream: condition/client/OIDCCCheckScopesSupportedContainScopeTest.java
+ */
+export function oidccCheckScopesSupportedContainScopeTest(metadata: ServerMetadata, client: Client): true {
+	const c: Condition = condition("OIDCCCheckScopesSupportedContainScopeTest");
+	const scopesSupported = metadata["scopes_supported"];
+	const expected = client.scope as string;
+	let errorMessage: string | null = null;
+	if (scopesSupported == null) {
+		errorMessage = "'scopes_support' is missing from discovery document";
+	} else if (!Array.isArray(scopesSupported)) {
+		errorMessage = "'scopes_support' in discovery document is not a array";
+	} else {
+		for (const scope of expected.split(" ")) {
+			if (!scopesSupported.map((s) => String(s)).includes(scope)) {
+				errorMessage = "'scopes_support' in discovery document doesn't contain expected scopes";
+			}
+		}
+	}
+	if (errorMessage != null) {
+		c.failure(errorMessage, { expected, actual: scopesSupported });
+	}
+	c.success("'scopes_supported' in discovery document contain expected scopes", {
+		expected,
+		actual: scopesSupported,
+	});
+	return true;
+}
+
+/**
+ * The scope tests are skipped when the discovery document says the OP does not support the scopes they request.
+ * Returns the reason to skip the test, or null.
+ *
+ * upstream: AbstractOIDCCReturnedClaimsServerTest.skipTestIfScopesNotSupported
+ */
+export function scopesNotSupportedReason(op: Pick<Op, "metadata" | "variant">, client: Client): string | null {
+	if (op.variant.server_metadata !== "discovery") {
+		return null;
+	}
+	const supported = soft(() => oidccCheckScopesSupportedContainScopeTest(op.metadata, client), "info");
+	return supported
+		? null
+		: "scopes_supported from the discovery endpoint indicates the server doesn't support the scopes required for this test; so the test has been skipped";
 }
