@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/no-explicit-any": "warn",
+    "no-async-promise-executor": "off",
+    "no-underscore-dangle": "off",
+    "unicorn/no-null": "off",
+    "unicorn/prefer-string-replace-all": "off",
+    "unicorn/no-useless-undefined": "off",
+    "no-unused-private-class-members": "off",
+    "typescript/no-unsafe-function-type": "off",
+    "eslint/no-await-in-loop": "off",
+    "typescript/no-this-alias": "off",
+    "unicorn/prefer-ternary": "off",
+    "oxc/no-rest-spread-properties": "off"
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "test-results",
+    "playwright-report",
+    "conformance-report",
+    ".upstream"
+  ]
+}
