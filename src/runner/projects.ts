@@ -167,13 +167,11 @@ export interface ConformanceProject {
 	plan: string;
 	variant: string;
 	config: string;
-	/** modules not run in this project: testName -> why (shown as the Playwright skip reason) */
-	skipModules?: Record<string, string>;
 	/**
-	 * Run every module on the old framework (tests/plan.spec.ts), ignoring portedPlans: for setups the rewritten
-	 * fixtures do not support yet (suite_target, the suite's own RP module acting as the OP)
+	 * modules not run in this project: testName -> why (the Playwright skip reason; the `conformance` fixture of
+	 * tests/fixtures.ts and tests/plan.spec.ts skip them)
 	 */
-	legacy?: boolean;
+	skipModules?: Record<string, string>;
 }
 
 const DISCOVERY_DYNAMIC = "[server_metadata=discovery][client_registration=dynamic_client]";
@@ -184,8 +182,10 @@ const OP_CODE_BASIC =
 const RP_CODE_BASIC =
 	"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]";
 
-const ONE_FLOW = "the emulated OP serves one authorization flow; a second token request fails";
-const REQUEST_OBJECT_400 = "the emulated OP (request_type=plain_http_request) answers request objects with a 400 page";
+const INVALID_REQUEST_500 =
+	"the emulated OP fails an invalid authorization request (as an RP test would) and answers with a 500 server_error";
+const REQUEST_OBJECT_500 =
+	"the emulated OP (request_type=plain_http_request) fails a request object (EnsureRequestDoesNotContainRequestObject) and answers with a 500 server_error";
 
 export const projects: ConformanceProject[] = [
 	// ---- OP plans against panva oidc-provider ----
@@ -292,22 +292,16 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-basic-certification-test-plan",
 		variant: DISCOVERY_DYNAMIC,
 		config: "configs/suite-vs-suite/oidcc-basic.json",
-		legacy: true,
-		// the emulated OP is upstream's single-flow RP test module (oidcc-client-test); what it cannot do is skipped
-		// here, what it does differently is in configs/expected-failures/suite-vs-suite.json
+		// the emulated OP is the RP tests' OP with oidcc-client-test's options (tests/suite-target.ts); what it cannot
+		// do is skipped here, what it does differently is in configs/expected-failures/suite-vs-suite.json
 		skipModules: {
-			"oidcc-prompt-login": ONE_FLOW,
-			"oidcc-prompt-none-logged-in": ONE_FLOW,
-			"oidcc-max-age-1": ONE_FLOW,
-			"oidcc-max-age-10000": ONE_FLOW,
-			"oidcc-id-token-hint": ONE_FLOW,
 			"oidcc-refresh-token": "the emulated OP knows one registered client; this module registers a second one",
-			"oidcc-response-type-missing":
-				"the emulated OP answers an invalid request with a 400 page instead of an error redirect",
-			"oidcc-ensure-registered-redirect-uri":
-				"the emulated OP answers an invalid request with a 400 page instead of an error page",
-			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported": REQUEST_OBJECT_400,
-			"oidcc-ensure-request-object-with-redirect-uri": REQUEST_OBJECT_400,
+			"oidcc-response-type-missing": INVALID_REQUEST_500 + " instead of an error redirect",
+			"oidcc-ensure-registered-redirect-uri": INVALID_REQUEST_500 + " instead of an error page",
+			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported": REQUEST_OBJECT_500,
+			"oidcc-ensure-request-object-with-redirect-uri": REQUEST_OBJECT_500,
+			"oidcc-claims-essential":
+				"the emulated OP fails an authorization request with a claims parameter in the query (UPSTREAM: its claims checks read the parameter as a JSON object without parsing it) and answers with a 500 server_error",
 		},
 	},
 ];

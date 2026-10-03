@@ -52,6 +52,7 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
   request-object.ts   request objects (request_type request_object / request_uri): fetching, claim and signature checks
   webfinger.ts        WebFinger issuer discovery (/.well-known/webfinger on the test's server)
 tests/fixtures.ts     the `test` with the `op`, `client`, `client2`, `configureClient`, `rp`, `variant`, `plan` fixtures
+tests/suite-target.ts suite-vs-suite: the emulated OP the `suiteTarget` fixture starts for an OP test (`suite_target`)
 tests/op/*.spec.ts    one file per OP plan (basic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
                       session-management, 3rdparty-init-login so far)
 tests/rp/*.spec.ts    one file per RP plan (basic.spec.ts, dynamic.spec.ts); tests/rp/shared.ts: the bodies of
@@ -253,6 +254,20 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   skips, or expected ones that did not happen fail the test; a test stopped (by a thrown check) only by failures
   the config expects is marked "expected to fail" and passes. Any other exception is logged as a FAILURE entry and
   the module status is INTERRUPTED.
+- `skipModules` of the CI project (src/runner/projects.ts): the `conformance` fixture skips a listed module with the
+  reason given there, so it applies to every spec (tests/plan.spec.ts does the same for the old framework).
+- **suite-vs-suite** (`suiteTarget`, tests/suite-target.ts): a config with `suite_target` (configs/suite-vs-suite)
+  runs the OP tests against this suite's own emulated OP. Per test, before `op` discovers the OP, the fixture starts
+  `startEmulatedOp` (src/rp/op.ts) on a second suite server (alias `suite_target.alias`, same TLS setting) with an
+  event log of its own, with the options of the RP module `suite_target.module` names (`emulatedOpModules` in
+  tests/rp/shared.ts; `oidccClientTestOptions()` is also what tests/rp/basic.spec.ts starts), the variant
+  `suite_target.variant` (parameters it leaves out follow the OP test's variant) and the config
+  `suite_target.config`, and sets the module's `server.discoveryUrl` to it. The emulated OP's checks log into its
+  own log (startEmulatedOp keeps the context it was started in for every request it serves), attached as
+  `emulated-op-log.json` / `emulated-op-log.html`, and are not part of the module's expected-failures analysis. It
+  serves any number of flows until the test ends; what it cannot serve is in the project's `skipModules`, what it does
+  differently in configs/expected-failures/suite-vs-suite.json. Modules that only use `conformance` (no `op`) do not
+  get it.
 
 ## Checks (upstream conditions)
 
@@ -357,8 +372,7 @@ sequential (browser entries, setup checks run by the test where they are used).
 `portedPlans` in src/runner/projects.ts lists, per plan, the spec file and the modules it covers.
 playwright.config.ts adds the spec to the selected project and tests/plan.spec.ts leaves those modules out, so a
 CI project keeps running its whole plan. Porting a module: write the test, add the module to `portedPlans`, run
-the project, diff the fingerprints against the old framework's run, `pnpm lock-symbols`. A project marked `legacy: true`
-(suite-vs-suite: the emulated OP is an old-framework RP module) runs every module on the old framework.
+the project, diff the fingerprints against the old framework's run, `pnpm lock-symbols`.
 
 ## Sync with upstream
 

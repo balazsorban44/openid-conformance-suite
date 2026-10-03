@@ -7,6 +7,7 @@
  */
 import * as authz from "../../src/rp/authorization.ts";
 import * as idToken from "../../src/rp/id-token.ts";
+import type { EmulatedOpOptions } from "../../src/rp/op.ts";
 import * as registration from "../../src/rp/registration.ts";
 import type { Rp } from "../../src/rp/rp.ts";
 
@@ -38,3 +39,17 @@ export async function idTokenSigNone({ rp }: { rp: Rp }): Promise<void> {
 	}
 	await client;
 }
+
+/**
+ * The emulated OP of oidcc-client-test (openid/client/OIDCCClientTest.java): the default flow with the nonce
+ * interoperability check. The RP basic plan's test starts it, and so does the suite-vs-suite project, whose OP tests
+ * run against this suite's own emulated OP (tests/suite-target.ts).
+ */
+export function oidccClientTestOptions(): EmulatedOpOptions {
+	return { checkNonce: authz.checkNonceInteroperability };
+}
+
+/** The RP test modules a configuration's `suite_target.module` can name: the options of their emulated OP */
+export const emulatedOpModules: Record<string, () => EmulatedOpOptions> = {
+	"oidcc-client-test": oidccClientTestOptions,
+};

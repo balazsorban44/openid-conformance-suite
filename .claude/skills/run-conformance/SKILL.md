@@ -42,7 +42,7 @@ One Playwright test = one test module instance (`<plan> › <module>: <behaviour
 `test-results/<test>/` directory (and attaches to the HTML report): `log.json` (the full event log), `log.html`
 (rendered log, same shape as the upstream log-detail page), `module-report.json` (result + expected-failure
 analysis), `target-output.txt` (stdout/stderr of the `target` process), screenshots of every scripted-browser
-page on failure, `emulated-op-log.html` for suite-vs-suite runs, and Playwright's video/trace when enabled.
+page on failure, `emulated-op-log.json` / `emulated-op-log.html` for suite-vs-suite runs, and Playwright's video/trace when enabled.
 
 Test outcome (`src/suite/expected.ts`, a port of upstream's `run-test-plan.py` analysis): a module's test passes
 when its log has no FAILURE or WARNING entry that is not in the config's expected-failures list, every listed
@@ -83,12 +83,13 @@ by the port:
 - `browser` may be a `.ts` config exporting `{ ...json, browser: async ({ page, url }) => {...} }` instead of the
   task array.
 - `suite_target` (suite-vs-suite): `{ "module": "oidcc-client-test", "alias": "emulated-op", "variant": {...},
-"config": {...} }` runs that RP test module in-process as the OP for every module of the plan and points
-  `server.discoveryUrl` at it. Variant parameters left out of `suite_target.variant` are taken from the module
-  under test (so `client_auth_type` follows e.g. `oidcc-server-client-secret-post`). The emulated module keeps
-  answering requests after its own single flow finished (`setKeepServingAfterFinish`, not in upstream), because
-  OP modules call userinfo twice, authorize twice, etc.; what it cannot emulate (single-use codes, the unusable
-  keys it publishes on purpose) is listed in `configs/expected-failures/suite-vs-suite.json`.
+"config": {...} }` starts that RP test module's emulated OP (src/rp, tests/suite-target.ts) in-process for every
+  OP test, on a server and log of its own, and points `server.discoveryUrl` at it. Variant parameters left out of
+  `suite_target.variant` are taken from the module under test (so `client_auth_type` follows e.g.
+  `oidcc-server-client-secret-post`). The emulated OP answers any number of requests until the test ends (OP
+  modules call userinfo twice, authorize twice, etc.); what it cannot serve is in the project's `skipModules`, what
+  it does differently (single-use codes, the unusable keys it publishes on purpose) is listed in
+  `configs/expected-failures/suite-vs-suite.json`.
 
 Modules that upstream starts manually from the UI (`autoStart() == false`, i.e. `oidcc-server-rotate-keys`) are
 started right away, as upstream's `run-test-plan.py` does in CI.

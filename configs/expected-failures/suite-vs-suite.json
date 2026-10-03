@@ -382,9 +382,18 @@
 		"variant": "*",
 		"configuration-filename": "*",
 		"current-block": "*",
-		"condition": "CheckErrorFromTokenEndpointResponseErrorInvalidGrant",
+		"condition": "ServerAllowedReusingAuthorizationCode",
+		"expected-result": "warning",
+		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
+	},
+	{
+		"test-name": "oidcc-codereuse-30seconds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "CheckTokenEndpointHttpStatus400",
 		"expected-result": "failure",
-		"comment": "the emulated OP does not implement single-use authorization codes"
+		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
 	},
 	{
 		"test-name": "oidcc-codereuse-30seconds",
@@ -393,7 +402,25 @@
 		"current-block": "*",
 		"condition": "CheckErrorFromTokenEndpointResponseErrorInvalidGrant",
 		"expected-result": "failure",
-		"comment": "the emulated OP does not implement single-use authorization codes"
+		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
+	},
+	{
+		"test-name": "oidcc-codereuse-30seconds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "ValidateErrorFromTokenEndpointResponseError",
+		"expected-result": "failure",
+		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
+	},
+	{
+		"test-name": "oidcc-codereuse-30seconds",
+		"variant": "*",
+		"configuration-filename": "*",
+		"current-block": "*",
+		"condition": "EnsureHttpStatusCodeIs4xx",
+		"expected-result": "warning",
+		"comment": "the second token request replaced the access token; the emulated OP answers the first one with a 500 server_error (RequireBearerAccessToken fails, as an RP test would)"
 	},
 	{
 		"test-name": "oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",

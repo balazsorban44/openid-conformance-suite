@@ -45,7 +45,7 @@ if (!planName || !configPath) {
 		throw new Error(`Unknown test plan '${planName}'`);
 	}
 	const moduleRe = moduleFilter ? globToRegExp(moduleFilter) : null;
-	const ported = new Set(project?.legacy ? [] : (portedPlans[planName]?.modules ?? []));
+	const ported = new Set(portedPlans[planName]?.modules ?? []);
 	const modules = expandPlan(planClass, VariantSelection.fromBracketString(variantString)).filter(
 		(m) => (!moduleRe || moduleRe.test(m.testName)) && !ported.has(m.testName),
 	);

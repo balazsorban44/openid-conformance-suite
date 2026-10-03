@@ -2,7 +2,7 @@
 	"description": "suite vs suite: OP basic plan against this suite's own emulated OP (oidcc-client-test)",
 	"alias": "suite-op-tests",
 	"server": {
-		"discoveryUrl": "set by the runner from suite_target"
+		"discoveryUrl": "set from suite_target by the suiteTarget fixture (tests/suite-target.ts)"
 	},
 	"client": {
 		"client_name": "suite-vs-suite-client"

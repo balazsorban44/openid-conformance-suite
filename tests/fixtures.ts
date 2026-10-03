@@ -16,6 +16,10 @@
  * - `rp`: for RP tests, the emulated OP (`rp.start(options)`, on the test's own server; its issuer is the server's
  *   base url) and the client driver that makes the RP under test log in against it (`rp.driveClient()`).
  * - `variant`: the variant (the plan's fixed values + the selection from CONFORMANCE_VARIANT / the project).
+ * - `suiteTarget` (suite-vs-suite, the config's `suite_target`): this suite's emulated OP, started per test on a
+ *   server and log of its own, as the OP the `op` fixture discovers (tests/suite-target.ts); null otherwise.
+ *
+ * A module listed in the project's `skipModules` is skipped (the `conformance` fixture) with the reason given there.
  *
  * Selection (environment): CONFORMANCE_PROJECT (a project from src/runner/projects.ts) or CONFORMANCE_CONFIG +
  * CONFORMANCE_VARIANT; CONFORMANCE_MODULE (a glob on module names) is applied by playwright.config.ts as `grep`.
@@ -44,6 +48,7 @@ import { startServer, type TestServer } from "../src/suite/server.ts";
 import { startTarget, type RunningTarget } from "../src/suite/target.ts";
 import type { RpVariant } from "../src/rp/op.ts";
 import { createRp, type Rp } from "../src/rp/rp.ts";
+import { startSuiteTarget, type SuiteTarget } from "./suite-target.ts";
 
 export { expect };
 
@@ -69,12 +74,15 @@ interface Suite {
 	target: RunningTarget | null;
 	/** The user's variant selection (CONFORMANCE_VARIANT or the project's) */
 	selection: Record<string, string>;
+	/** The project's modules that are not run: testName -> why (the skip reason) */
+	skipModules: Record<string, string>;
 }
 
 interface Fixtures {
 	plan: PlanOption;
 	variant: OpVariant;
 	conformance: Conformance;
+	suiteTarget: SuiteTarget | null;
 	op: Op;
 	client: RegisteredClient;
 	client2: RegisteredClient;
@@ -104,11 +112,12 @@ export function variantString(v: Record<string, string>): string {
 		.join("");
 }
 
-function selection(): { config: string | undefined; variant: string } {
+function selection(): { config: string | undefined; variant: string; skipModules: Record<string, string> } {
 	const project = projects.find((p) => p.name === process.env["CONFORMANCE_PROJECT"]);
 	return {
 		config: process.env["CONFORMANCE_CONFIG"] ?? project?.config,
 		variant: process.env["CONFORMANCE_VARIANT"] ?? project?.variant ?? "",
+		skipModules: project?.skipModules ?? {},
 	};
 }
 
@@ -145,7 +154,7 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 				: null;
 			try {
 				const loaded = await loadConfig(path, raw, target?.vars ?? {});
-				await use({ loaded, target, selection: parseVariant(sel.variant) });
+				await use({ loaded, target, selection: parseVariant(sel.variant), skipModules: sel.skipModules });
 			} finally {
 				if (!process.env["CONFORMANCE_KEEP_SERVER"]) {
 					await target?.stop();
@@ -161,6 +170,8 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 
 	conformance: async ({ plan, variant, suite, context }, use, testInfo) => {
 		const testName = moduleName(testInfo.title);
+		// a module the project does not run (e.g. one the suite-vs-suite emulated OP cannot serve)
+		testInfo.skip(testName in suite.skipModules, suite.skipModules[testName]);
 		const started = Date.now();
 		const log = createLog(undefined, process.env["CONFORMANCE_VERBOSE"] ? printEntry : undefined);
 		const uninstall = useLog(log, { testName, step: (name, fn) => test.step(name, fn) });
@@ -197,7 +208,23 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 		}
 	},
 
-	op: async ({ conformance, variant }, use) => {
+	suiteTarget: async ({ conformance, variant, suite }, use, testInfo) => {
+		const target = suite.loaded.suiteTarget;
+		if (target == null) {
+			await use(null);
+			return;
+		}
+		const started = await startSuiteTarget({ target, variant, tls: tls(), testInfo });
+		// the OP under test is the emulated OP: discovered at its server (it replaces the config's server.discoveryUrl)
+		conformance.config.server = { ...conformance.config.server, discoveryUrl: started.discoveryUrl };
+		try {
+			await use(started);
+		} finally {
+			await started.close();
+		}
+	},
+
+	op: async ({ conformance, variant, suiteTarget: _suiteTarget }, use) => {
 		const { config, log, server, browser, testName } = conformance;
 		// upstream: condition/client/CreateRedirectUri.java
 		const redirectUri = server.baseUrl + "/callback";

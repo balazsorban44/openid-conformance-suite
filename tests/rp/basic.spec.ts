@@ -32,7 +32,8 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 
 	// upstream: openid/client/OIDCCClientTest.java (rp-response_type-code)
 	test("oidcc-client-test: the RP logs in with the code flow and calls the userinfo endpoint", async ({ rp }) => {
-		const op = await rp.start({ checkNonce: authz.checkNonceInteroperability });
+		// the module's emulated OP; the suite-vs-suite project serves the OP tests with the same one
+		const op = await rp.start(shared.oidccClientTestOptions());
 		const client = rp.driveClient();
 		await op.clientRegistered();
 		await op.expect("authorization");

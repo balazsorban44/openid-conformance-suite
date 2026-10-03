@@ -373,6 +373,9 @@ export async function startEmulatedOp(
 		events.set(endpoint, queue);
 	}
 
+	// the handlers log into the log of the context the OP was started in (the test's, or the emulated OP's own when
+	// another test talks to it: suite-vs-suite), whatever context the server delivers the request in
+	const opContext = currentContext();
 	// requests are handled one at a time, like upstream's per-test lock
 	let lock: Promise<unknown> = Promise.resolve();
 	function serve(
@@ -390,7 +393,7 @@ export async function startEmulatedOp(
 				try {
 					// a request handler is not a Playwright step of the test: blocks only go to the log
 					const { response, event } = await withContext(
-						{ severity: "failure", step: (_name, fn) => fn() },
+						{ ...opContext, severity: "failure", step: (_name, fn) => fn() },
 						async () => {
 							await options.onRequest?.(endpoint, req, op);
 							return handle(req);
