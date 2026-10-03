@@ -63,24 +63,13 @@
 			]
 		},
 		{
-			"comment": "the suite's own session check page: the check_session_iframe answer sends the browser to the session_result page",
-			"match": "*/session_verify*",
+			"comment": "the suite's own session check page (first and second time): its iframes talk to the OP's check_session_iframe and then send the browser to the session_result page",
+			"match": "*session_verify*",
 			"tasks": [
 				{
-					"task": "Verify Complete",
-					"match": "*/session_result*",
-					"commands": [["wait", "xpath", "//h1", 10, "Result captured"]]
-				}
-			]
-		},
-		{
-			"comment": "the suite's own session check page: the check_session_iframe answer sends the browser to the session_result page",
-			"match": "*/second_session_verify*",
-			"tasks": [
-				{
-					"task": "Verify Complete",
-					"match": "*/second_session_result*",
-					"commands": [["wait", "xpath", "//h1", 10, "Result captured"]]
+					"task": "Wait for the session check result",
+					"match": "*session_verify*",
+					"commands": [["wait", "match", "session_result", 10]]
 				}
 			]
 		}
