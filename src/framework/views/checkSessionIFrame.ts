@@ -54,9 +54,11 @@ registerView("checkSessionIFrame", (model) => {
     function receiveMessage(event){
         console.log("check_session_iframe received message via postMessage");
         console.log(event);
-        var splitData = event.data.split(' ');
-        var clientIdInMessage = splitData[0];
-        var splitStateAndSalt = splitData[1].split('.');
+        // UPSTREAM: the template splits on the first space, but a client_id may itself contain spaces (the
+        // suite's own RFC6749AppendixASyntaxUtils client ids do); session_state cannot, so split on the last one
+        var lastSpace = event.data.lastIndexOf(' ');
+        var clientIdInMessage = event.data.substring(0, lastSpace);
+        var splitStateAndSalt = event.data.substring(lastSpace + 1).split('.');
         var sessionStateInMessage = splitStateAndSalt[0];
         var saltInMessage = splitStateAndSalt[1];
 
