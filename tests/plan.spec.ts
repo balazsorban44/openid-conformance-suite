@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
@@ -145,30 +145,36 @@ if (!planName || !configPath) {
 					title,
 				};
 
-				await testInfo.attach("log.json", {
-					body: JSON.stringify(run.entries, null, 2),
-					contentType: "application/json",
-				});
-				await testInfo.attach("log.html", {
-					body: renderLogHtml(title, run.entries, { result: run.result, status: run.status, variant: run.variant }),
-					contentType: "text/html",
-				});
+				// attachments are written as files into the test's output directory (test-results/<test>/) so they are
+				// readable without opening the HTML report, and attached so the report links them too
+				const attach = async (name: string, body: string | Buffer, contentType: string) => {
+					const path = testInfo.outputPath(name);
+					writeFileSync(path, body);
+					await testInfo.attach(name, { path, contentType });
+				};
+				await attach("log.json", JSON.stringify(run.entries, null, 2), "application/json");
+				await attach(
+					"log.html",
+					renderLogHtml(title, run.entries, { result: run.result, status: run.status, variant: run.variant }),
+					"text/html",
+				);
 				if (run.nested) {
-					await testInfo.attach("emulated-op-log.html", {
-						body: renderLogHtml(`${title} (emulated OP: ${run.nested.testName})`, run.nested.entries, {
+					await attach(
+						"emulated-op-log.html",
+						renderLogHtml(`${title} (emulated OP: ${run.nested.testName})`, run.nested.entries, {
 							result: run.nested.result,
 							status: run.nested.status,
 							variant: {},
 						}),
-						contentType: "text/html",
-					});
+						"text/html",
+					);
 				}
 				for (const s of run.screenshots) {
-					await testInfo.attach(s.name + ".png", { body: s.png, contentType: "image/png" });
+					await attach(s.name + ".png", s.png, "image/png");
 				}
-				await testInfo.attach("module-report.json", { body: JSON.stringify(report), contentType: "application/json" });
+				await attach("module-report.json", JSON.stringify(report), "application/json");
 				if (target && target.output.length > 0) {
-					await testInfo.attach("target-output.txt", { body: target.output.join(""), contentType: "text/plain" });
+					await attach("target-output.txt", target.output.join(""), "text/plain");
 				}
 
 				for (const f of analysis.expected_failures) {

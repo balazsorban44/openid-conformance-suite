@@ -44,6 +44,8 @@ const POST_LOGOUT_REDIRECT_URI = `${BASE}/logged-out`;
 const BACKCHANNEL_LOGOUT_URI = `${BASE}/backchannel-logout`;
 const FRONTCHANNEL_LOGOUT_URI = `${BASE}/frontchannel-logout`;
 const INITIATE_LOGIN_URI = `${HTTPS_BASE}/initiate-login`;
+/** set once the https listener is up; request_uri values are then https (required when the request object is unsigned) */
+let httpsEnabled = false;
 const BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -380,8 +382,10 @@ function moduleSpec(module: string): ModuleSpec {
 		case "oidcc-client-test-dynamic-registration":
 			return { kind: "register" };
 		case "oidcc-client-test-signing-key-rotation":
-		case "oidcc-client-test-signing-key-rotation-just-before-signing":
 			return { kind: "key-rotation" };
+		case "oidcc-client-test-signing-key-rotation-just-before-signing":
+			// a single login: the id_token is signed with a key the cached JWKS does not contain, openid-client refetches
+			return { kind: "login" };
 		case "oidcc-client-test-3rd-party-init-login":
 			return { kind: "3rd-party" };
 		case "oidcc-client-test-rp-init-logout":
@@ -865,8 +869,9 @@ async function buildAuthorizationUrl(flow: Flow, extra: Record<string, string> =
 	if (flow.requestType === "request_uri") {
 		const id = randomUUID();
 		requestObjects.set(id, requestObject);
-		url.searchParams.set("request_uri", `${BASE}/request-object/${id}`);
-		step(flow, `request object (alg ${alg}) hosted at ${BASE}/request-object/${id}`);
+		const requestUri = `${httpsEnabled ? HTTPS_BASE : BASE}/request-object/${id}`;
+		url.searchParams.set("request_uri", requestUri);
+		step(flow, `request object (alg ${alg}) hosted at ${requestUri}`);
 	} else {
 		url.searchParams.set("request", requestObject);
 		step(flow, `request object (alg ${alg}) passed by value`);
@@ -1665,6 +1670,7 @@ export async function start(): Promise<RunningRp> {
 				https.listen(HTTPS_PORT, "localhost", () => resolve());
 			});
 			servers.push(https);
+			httpsEnabled = true;
 		}
 	}
 	return {
