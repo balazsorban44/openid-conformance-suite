@@ -483,6 +483,24 @@ export abstract class AbstractCondition implements Condition {
 		});
 	}
 
+	/**
+	 * Same as createHttpClient but additionally installs the opt-in external endpoint cache
+	 * (condition/client/CachingHttpInterceptor), consulted before issuing the real HTTP request.
+	 */
+	protected async createRestTemplateWithCache(env: Environment): Promise<HttpClient> {
+		const { CachingHttpInterceptor } = await import("../condition/client/CachingHttpInterceptor.ts");
+		const interceptor = new CachingHttpInterceptor(env);
+		return new HttpClient({
+			source: this.getMessage(),
+			log: this._log,
+			lockManager: this.lockManager,
+			mutualTls: this.useMtlsForHttpRequests() ? env.getObject("mutual_tls_authentication") : null,
+			restrictAllowedTLSVersions: true,
+			timeoutSeconds: this.getHttpClientTimeoutSeconds(),
+			interceptor: (req, exec) => interceptor.intercept(req, exec),
+		});
+	}
+
 	/** Alias to keep ported code close to the Java (createRestTemplate(env)) */
 	protected createRestTemplate(env: Environment, restrictAllowedTLSVersions = true): HttpClient {
 		return this.createHttpClient(env, restrictAllowedTLSVersions);

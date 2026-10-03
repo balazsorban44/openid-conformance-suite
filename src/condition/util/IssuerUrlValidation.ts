@@ -12,7 +12,8 @@ export class IssuerUrlValidation {
 	// RFC 3986 appendix B
 	private static readonly URI_PATTERN = /^(?:([^:/?#]+):)?(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/s;
 
-	private static readonly HOSTNAME_PATTERN = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)*[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.?$/;
+	private static readonly HOSTNAME_PATTERN =
+		/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)*[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.?$/;
 	private static readonly IPV4_PATTERN = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 	private static readonly IPV6_PATTERN = /^\[[0-9A-Fa-f:.]+\]$/;
 

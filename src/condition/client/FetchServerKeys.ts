@@ -22,9 +22,7 @@ export class FetchServerKeys extends AbstractCondition {
 
 			this.log("Fetching server key", args("jwks_uri", jwksUri));
 
-			// UPSTREAM: Java uses createRestTemplateWithCache(env) (opt-in cache via options.cache_external_metadata);
-			// the TS framework has no cached HTTP client yet, so every fetch goes to the network.
-			const client = this.createHttpClient(env);
+			const client = await this.createRestTemplateWithCache(env);
 			try {
 				let jwkString: string | null;
 				try {

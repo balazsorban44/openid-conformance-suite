@@ -42,13 +42,18 @@ export function resultIcon(result: string, ok: boolean): string {
  * GitHub-flavoured markdown summary for one or more plans (written to $GITHUB_STEP_SUMMARY and
  * conformance-report/summary.md). Human and agent readable: one table per plan, then the failing conditions.
  */
-export function renderSummaryMarkdown(reports: ModuleReport[], opts: { title?: string; reportUrl?: string } = {}): string {
+export function renderSummaryMarkdown(
+	reports: ModuleReport[],
+	opts: { title?: string; reportUrl?: string } = {},
+): string {
 	const lines: string[] = [];
 	const total = reports.length;
 	const okCount = reports.filter((r) => r.ok).length;
 	lines.push(`## ${opts.title ?? "OpenID conformance results"}`);
 	lines.push("");
-	lines.push(`**${okCount}/${total} modules OK** (${countBy(reports)})${opts.reportUrl ? ` · [full report](${opts.reportUrl})` : ""}`);
+	lines.push(
+		`**${okCount}/${total} modules OK** (${countBy(reports)})${opts.reportUrl ? ` · [full report](${opts.reportUrl})` : ""}`,
+	);
 	lines.push("");
 	const byPlan = new Map<string, ModuleReport[]>();
 	for (const r of reports) {
@@ -63,7 +68,9 @@ export function renderSummaryMarkdown(reports: ModuleReport[], opts: { title?: s
 			const a = r.analysis;
 			const notes: string[] = [];
 			for (const f of a.unexpected_failures) {
-				notes.push(`❌ \`${f.src}\`${f.current_block ? ` in "${f.current_block}"` : ""}${f.msg ? `: ${truncate(f.msg, 160)}` : ""}`);
+				notes.push(
+					`❌ \`${f.src}\`${f.current_block ? ` in "${f.current_block}"` : ""}${f.msg ? `: ${truncate(f.msg, 160)}` : ""}`,
+				);
 			}
 			for (const f of a.unexpected_warnings) {
 				notes.push(`⚠️ \`${f.src}\`${f.msg ? `: ${truncate(f.msg, 120)}` : ""}`);
@@ -116,7 +123,11 @@ function truncate(s: string, n: number): string {
  * Render the event log of one module as a self-contained HTML page, in the spirit of the upstream
  * log-detail.html: one row per entry, coloured by result, with expandable details.
  */
-export function renderLogHtml(title: string, entries: LogEntry[], extra: { result: string; status: string; variant: Record<string, string> }): string {
+export function renderLogHtml(
+	title: string,
+	entries: LogEntry[],
+	extra: { result: string; status: string; variant: Record<string, string> },
+): string {
 	const rows: string[] = [];
 	const blockColours = new Map<string, string>();
 	for (const e of entries) {
@@ -133,8 +144,14 @@ export function renderLogHtml(title: string, entries: LogEntry[], extra: { resul
 		delete rest["msg"];
 		delete rest["result"];
 		delete rest["blockId"];
-		const details = Object.keys(rest).length > 0 ? `<details><summary>details</summary><pre>${escapeHtml(JSON.stringify(rest, replacer, 2))}</pre></details>` : "";
-		const img = typeof rest["img"] === "string" ? `<img src="${escapeHtml(rest["img"])}" style="max-width:600px;display:block">` : "";
+		const details =
+			Object.keys(rest).length > 0
+				? `<details><summary>details</summary><pre>${escapeHtml(JSON.stringify(rest, replacer, 2))}</pre></details>`
+				: "";
+		const img =
+			typeof rest["img"] === "string"
+				? `<img src="${escapeHtml(rest["img"])}" style="max-width:600px;display:block">`
+				: "";
 		rows.push(
 			`<tr class="r-${result || "none"}"${blockId ? ` style="border-left:8px solid #${blockId}"` : ""}><td class="t">${new Date(time).toISOString().slice(11, 23)}</td><td class="src">${escapeHtml(src)}</td><td class="res">${escapeHtml(result)}</td><td class="msg">${escapeHtml(msg)}${img}${details}</td></tr>`,
 		);

@@ -7,9 +7,14 @@ export class EnsureScopeContainsAtLeastOneOfProfileEmailPhoneAddress extends Abs
 		const scope = env.getString("scope") as string;
 		const scopes = scope.split(" ");
 
-		if (scopes.includes("profile") || scopes.includes("email") || scopes.includes("phone") || scopes.includes("address")) {
+		if (
+			scopes.includes("profile") ||
+			scopes.includes("email") ||
+			scopes.includes("phone") ||
+			scopes.includes("address")
+		) {
 			this.logSuccess(
-				"Found at least one of profile, email, phone and address " + "scopes in request",
+				"Found at least one of profile, email, phone and address scopes in request",
 				args("actual", scopes),
 			);
 			return env;

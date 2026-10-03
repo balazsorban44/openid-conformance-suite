@@ -1,4 +1,10 @@
-import { AbstractCondition, args, type Environment, type EnvironmentRequirements, type JsonObject } from "../../framework/index.ts";
+import {
+	AbstractCondition,
+	args,
+	type Environment,
+	type EnvironmentRequirements,
+	type JsonObject,
+} from "../../framework/index.ts";
 import { JWKUtil } from "../../util/JWKUtil.ts";
 
 /**

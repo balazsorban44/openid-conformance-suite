@@ -1,5 +1,5 @@
 export class PEMFormatter {
-	private static readonly PEM_PATTERN = /^-----BEGIN [^-]+-----$(.*?)^-----END [^-]+-----$/gmsd;
+	private static readonly PEM_PATTERN = /^-----BEGIN [^-]+-----$(.*?)^-----END [^-]+-----$/dgms;
 
 	static extractPEMHeader(input: string): string[] {
 		const headerList: string[] = [];

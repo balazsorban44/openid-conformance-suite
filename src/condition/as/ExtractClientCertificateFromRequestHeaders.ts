@@ -104,7 +104,7 @@ function derStringValue(buf: Uint8Array, el: DerElement): string | null {
 function escapeRfc2253(value: string): string {
 	let out = "";
 	for (const c of value) {
-		if (",+<>;\"\\".includes(c)) {
+		if (',+<>;"\\'.includes(c)) {
 			out += "\\" + c;
 		} else {
 			out += c;
@@ -138,7 +138,7 @@ function nameToRfc2253(buf: Uint8Array, name: DerElement): string {
 		rdns.push(avas.join("+"));
 	}
 	// RFC 2253 lists the RDNs in reverse order
-	return rdns.reverse().join(",");
+	return rdns.toReversed().join(",");
 }
 
 // GeneralName tags (context specific, implicit) in the subject alternative name extension
@@ -219,7 +219,7 @@ export class ExtractClientCertificateFromRequestHeaders extends AbstractConditio
 					continue;
 				}
 				const extensions = readDerChildren(der, readDer(der, field.contentStart));
-				for (const ext of readDerChildren(der, extensions[0])) {
+				for (const ext of extensions) {
 					const parts = readDerChildren(der, ext);
 					if (derOid(der, parts[0]) !== OID_SUBJECT_ALT_NAME) {
 						continue;

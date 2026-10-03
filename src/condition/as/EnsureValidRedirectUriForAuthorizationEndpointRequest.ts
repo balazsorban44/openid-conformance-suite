@@ -46,7 +46,10 @@ export class EnsureValidRedirectUriForAuthorizationEndpointRequest extends Abstr
 			throw this.error("Invalid redirect_uri", args("redirect_uri", actual));
 		}
 		if (actual.includes("#")) {
-			throw this.error("Invalid redirect_uri. redirect_uri includes a fragment component.", args("redirect_uri", actual));
+			throw this.error(
+				"Invalid redirect_uri. redirect_uri includes a fragment component.",
+				args("redirect_uri", actual),
+			);
 		}
 
 		if (!isJsonArray(redirectUrisElement)) {
@@ -86,7 +89,10 @@ export class EnsureValidRedirectUriForAuthorizationEndpointRequest extends Abstr
 						args("actual", actual, "expected", redirectUris),
 					);
 				}
-				this.logSuccess("redirect_uri is one of the allowed redirect uris", args("actual", actual, "expected", redirectUris));
+				this.logSuccess(
+					"redirect_uri is one of the allowed redirect uris",
+					args("actual", actual, "expected", redirectUris),
+				);
 				env.putString("authorization_endpoint_request_redirect_uri", actual);
 				return env;
 			}

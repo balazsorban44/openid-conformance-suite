@@ -91,8 +91,12 @@ export function analyzeResultLogs(
 		ok: true,
 	};
 
-	const testExpectedFailures = expectedFailuresList.filter((o) => isExpectedForThisTest(o, testName, variant, configFilename));
-	const testExpectedSkips = expectedSkipsList.filter((o) => isExpectedForThisTest(o, testName, variant, configFilename));
+	const testExpectedFailures = expectedFailuresList.filter((o) =>
+		isExpectedForThisTest(o, testName, variant, configFilename),
+	);
+	const testExpectedSkips = expectedSkipsList.filter((o) =>
+		isExpectedForThisTest(o, testName, variant, configFilename),
+	);
 	const used = new Set<ExpectedFailure>();
 
 	const blockNames = new Map<string, string>();

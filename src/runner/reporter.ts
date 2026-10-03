@@ -72,7 +72,9 @@ export default class ConformanceReporter implements Reporter {
 		}
 		const merged = [...existing.filter((e) => !this.reports.some((r) => r.title === e.title)), ...this.reports];
 		writeFileSync(resultsPath, JSON.stringify(merged, null, 2));
-		const md = renderSummaryMarkdown(this.reports, { title: process.env["CONFORMANCE_SUMMARY_TITLE"] ?? "OpenID conformance results" });
+		const md = renderSummaryMarkdown(this.reports, {
+			title: process.env["CONFORMANCE_SUMMARY_TITLE"] ?? "OpenID conformance results",
+		});
 		writeFileSync(join(this.outDir, "summary.md"), md);
 		const stepSummary = process.env["GITHUB_STEP_SUMMARY"];
 		if (stepSummary) {

@@ -94,7 +94,10 @@ function diff(ts: string): void {
 		console.error(`not in lock: ${ts}`);
 		process.exit(2);
 	}
-	const out = execFileSync("git", ["diff", lock.upstream.commit, "HEAD", "--", info.java], { cwd: upstreamDir, encoding: "utf8" });
+	const out = execFileSync("git", ["diff", lock.upstream.commit, "HEAD", "--", info.java], {
+		cwd: upstreamDir,
+		encoding: "utf8",
+	});
 	process.stdout.write(out || "(no changes)\n");
 }
 

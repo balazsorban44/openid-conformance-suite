@@ -67,7 +67,14 @@ export async function runModule(opts: ModuleRunOptions): Promise<ModuleRunResult
 	if (opts.loaded.browserHook) {
 		browserConfig.browser = opts.loaded.browserHook;
 	}
-	const browser = new BrowserControl(browserConfig, testId, eventLog, executionManager, imageService, async () => opts.context);
+	const browser = new BrowserControl(
+		browserConfig,
+		testId,
+		eventLog,
+		executionManager,
+		imageService,
+		async () => opts.context,
+	);
 	module.setProperties(testId, null, eventLog, browser, executionManager, imageService, {});
 
 	const alias = typeof config["alias"] === "string" && config["alias"] ? config["alias"] : null;
@@ -169,7 +176,10 @@ async function driveClient(
 	url.searchParams.set("issuer", suiteUrl.endsWith("/") ? suiteUrl : suiteUrl + "/");
 	url.searchParams.set("module", testName);
 	url.searchParams.set("variant", JSON.stringify(variant));
-	url.searchParams.set("client_metadata_defaults", JSON.stringify((config["client_metadata_defaults"] as JsonObject | undefined) ?? {}));
+	url.searchParams.set(
+		"client_metadata_defaults",
+		JSON.stringify((config["client_metadata_defaults"] as JsonObject | undefined) ?? {}),
+	);
 	if (typeof config["alias"] === "string") {
 		url.searchParams.set("alias", config["alias"]);
 	}
@@ -183,7 +193,10 @@ async function driveClient(
 	for (const [k, v] of Object.entries(driver.params ?? {})) {
 		url.searchParams.set(k, v);
 	}
-	eventLog.log("TEST-RUNNER", args("msg", "Starting the relying party under test", "url", url.toString(), "result", ConditionResult.INFO));
+	eventLog.log(
+		"TEST-RUNNER",
+		args("msg", "Starting the relying party under test", "url", url.toString(), "result", ConditionResult.INFO),
+	);
 	try {
 		const res = await fetch(url, { signal: AbortSignal.timeout((driver.timeoutSeconds ?? 120) * 1000) });
 		const text = await res.text();
@@ -195,11 +208,28 @@ async function driveClient(
 		}
 		eventLog.log(
 			"TEST-RUNNER",
-			args("msg", "Relying party under test finished", "status", res.status, "response", body, "result", res.ok ? ConditionResult.INFO : ConditionResult.WARNING),
+			args(
+				"msg",
+				"Relying party under test finished",
+				"status",
+				res.status,
+				"response",
+				body,
+				"result",
+				res.ok ? ConditionResult.INFO : ConditionResult.WARNING,
+			),
 		);
 		return { status: res.status, body };
 	} catch (e) {
-		eventLog.log("TEST-RUNNER", args("msg", "Relying party under test could not be driven: " + (e as Error).message, "result", ConditionResult.WARNING));
+		eventLog.log(
+			"TEST-RUNNER",
+			args(
+				"msg",
+				"Relying party under test could not be driven: " + (e as Error).message,
+				"result",
+				ConditionResult.WARNING,
+			),
+		);
 		return { error: (e as Error).message };
 	}
 }

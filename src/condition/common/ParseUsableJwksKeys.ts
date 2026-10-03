@@ -1,4 +1,10 @@
-import { AbstractCondition, args, type Environment, type EnvironmentRequirements, type JsonObject } from "../../framework/index.ts";
+import {
+	AbstractCondition,
+	args,
+	type Environment,
+	type EnvironmentRequirements,
+	type JsonObject,
+} from "../../framework/index.ts";
 import { JWKUtil } from "../../util/JWKUtil.ts";
 
 /**
@@ -31,10 +37,7 @@ export class ParseUsableJwksKeys extends AbstractCondition {
 			);
 		}
 
-		this.logSuccess(
-			"All usable keys in the JWK set in " + label + " parse successfully",
-			args("jwks_source", label),
-		);
+		this.logSuccess("All usable keys in the JWK set in " + label + " parse successfully", args("jwks_source", label));
 		return env;
 	}
 }

@@ -42,7 +42,9 @@ export class Target {
 		this.child.stdout?.on("data", capture);
 		this.child.stderr?.on("data", capture);
 		const exited = new Promise<never>((_, reject) => {
-			this.child?.once("exit", (code) => reject(new Error(`target '${this.cfg.command}' exited with code ${code}\n${this.output.join("")}`)));
+			this.child?.once("exit", (code) =>
+				reject(new Error(`target '${this.cfg.command}' exited with code ${code}\n${this.output.join("")}`)),
+			);
 		});
 		const deadline = Date.now() + (this.cfg.timeoutSeconds ?? 60) * 1000;
 		while (Date.now() < deadline) {
@@ -52,7 +54,9 @@ export class Target {
 			await new Promise((r) => setTimeout(r, 250));
 		}
 		await this.stop();
-		throw new Error(`target '${this.cfg.command}' did not become ready at ${this.cfg.readyUrl}\n${this.output.join("")}`);
+		throw new Error(
+			`target '${this.cfg.command}' did not become ready at ${this.cfg.readyUrl}\n${this.output.join("")}`,
+		);
 	}
 
 	private async isReady(): Promise<boolean> {

@@ -76,9 +76,9 @@ function buildClientHello(host: string, cipherSuites: number[], fullVersion: num
 	ext(11, Buffer.from([1, 0]));
 	// signature_algorithms
 	const sigAlgs = Buffer.concat(
-		[
-			0x0601, 0x0501, 0x0401, 0x0201, 0x0603, 0x0503, 0x0403, 0x0203, 0x0804, 0x0805, 0x0806, 0x0807, 0x0808,
-		].map((a) => u16(a)),
+		[0x0601, 0x0501, 0x0401, 0x0201, 0x0603, 0x0503, 0x0403, 0x0203, 0x0804, 0x0805, 0x0806, 0x0807, 0x0808].map((a) =>
+			u16(a),
+		),
 	);
 	ext(13, Buffer.concat([u16(sigAlgs.length), sigAlgs]));
 	// extended_master_secret
@@ -104,7 +104,12 @@ function buildClientHello(host: string, cipherSuites: number[], fullVersion: num
 		u16(extensionBytes.length),
 		extensionBytes,
 	]);
-	const handshake = Buffer.concat([Buffer.from([1]), Buffer.from([(body.length >> 16) & 0xff]), u16(body.length & 0xffff), body]);
+	const handshake = Buffer.concat([
+		Buffer.from([1]),
+		Buffer.from([(body.length >> 16) & 0xff]),
+		u16(body.length & 0xffff),
+		body,
+	]);
 	return Buffer.concat([Buffer.from([0x16]), u16(0x0301), u16(handshake.length), handshake]);
 }
 
@@ -238,14 +243,7 @@ export abstract class AbstractCheckInsecureCiphers extends AbstractCondition {
 			// notifySelectedCipherSuite
 			throw this.error(
 				"Server accepted a cipher that is not on the list of permitted ciphers",
-				args(
-					"host",
-					tlsTestHost,
-					"port",
-					tlsTestPort,
-					"cipher_suite",
-					insecureCiphers.get(serverHello.cipherSuite),
-				),
+				args("host", tlsTestHost, "port", tlsTestPort, "cipher_suite", insecureCiphers.get(serverHello.cipherSuite)),
 			);
 		} catch (e) {
 			if (e instanceof ConditionError) {

@@ -90,11 +90,22 @@ if (!planName || !configPath) {
 					context: context as BrowserContext,
 					timeoutSeconds: Number(process.env["CONFORMANCE_MODULE_TIMEOUT"] ?? 150),
 					onLog: process.env["CONFORMANCE_VERBOSE"]
-						? (e) => process.stdout.write(`${e.src}: ${String(e["msg"] ?? "")} ${e["result"] ? `[${String(e["result"])}]` : ""}\n`)
+						? (e) =>
+								process.stdout.write(
+									`${e.src}: ${String(e["msg"] ?? "")} ${e["result"] ? `[${String(e["result"])}]` : ""}\n`,
+								)
 						: undefined,
 				});
 
-				const analysis = analyzeResultLogs(m.testName, run.variant, run.result, run.entries, loaded.expectedFailures, loaded.expectedSkips, loaded.filename);
+				const analysis = analyzeResultLogs(
+					m.testName,
+					run.variant,
+					run.result,
+					run.entries,
+					loaded.expectedFailures,
+					loaded.expectedSkips,
+					loaded.filename,
+				);
 				const report: ModuleReport = {
 					plan: planName,
 					testName: m.testName,
@@ -109,8 +120,14 @@ if (!planName || !configPath) {
 					title,
 				};
 
-				await testInfo.attach("log.json", { body: JSON.stringify(run.entries, null, 2), contentType: "application/json" });
-				await testInfo.attach("log.html", { body: renderLogHtml(title, run.entries, { result: run.result, status: run.status, variant: run.variant }), contentType: "text/html" });
+				await testInfo.attach("log.json", {
+					body: JSON.stringify(run.entries, null, 2),
+					contentType: "application/json",
+				});
+				await testInfo.attach("log.html", {
+					body: renderLogHtml(title, run.entries, { result: run.result, status: run.status, variant: run.variant }),
+					contentType: "text/html",
+				});
 				for (const s of run.screenshots) {
 					await testInfo.attach(s.name + ".png", { body: s.png, contentType: "image/png" });
 				}
@@ -150,10 +167,14 @@ if (!planName || !configPath) {
 					problems.push("module was expected to be skipped but completed");
 				}
 				if (run.status === "INTERRUPTED") {
-					const last = [...run.entries].reverse().find((e) => e["result"] === "INTERRUPTED" || e["result"] === "FAILURE");
+					const last = [...run.entries]
+						.reverse()
+						.find((e) => e["result"] === "INTERRUPTED" || e["result"] === "FAILURE");
 					problems.push(`module was INTERRUPTED: ${String(last?.["msg"] ?? "")}`);
 				}
-				expect.soft(problems, `${title} (result ${run.result}, status ${run.status}). See the log.html attachment.`).toEqual([]);
+				expect
+					.soft(problems, `${title} (result ${run.result}, status ${run.status}). See the log.html attachment.`)
+					.toEqual([]);
 				expect(report.ok, `module result ${run.result}`).toBe(true);
 			});
 		}

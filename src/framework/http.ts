@@ -1,4 +1,4 @@
-import { Agent, type Dispatcher } from "undici";
+import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { mapToJsonObject, type LogArgs } from "./DataUtils.ts";
 import type { TestInstanceEventLog } from "./EventLog.ts";
 import type { JsonObject } from "./json.ts";
@@ -49,7 +49,15 @@ export interface MutualTlsConfig {
 	ca?: string;
 }
 
+/** An interceptor around the real network call (used for the opt-in external endpoint cache) */
+export type HttpInterceptor = (
+	req: { method: string; url: string; headers: Headers },
+	exec: () => Promise<HttpResponse>,
+) => Promise<HttpResponse>;
+
 export interface HttpClientOptions {
+	/** Wraps the network call; may return a replayed response implementing getCacheAgeSeconds() */
+	interceptor?: HttpInterceptor | null;
 	/** The log source (normally the condition class name) */
 	source: string;
 	log: TestInstanceEventLog;
@@ -144,60 +152,73 @@ export class HttpClient {
 		this.opts.log.log(this.opts.source, reqLog);
 
 		const lockManager = this.opts.lockManager;
-		let response: Response;
-		let bodyBytes: Uint8Array;
-		let bodyException: Error | null = null;
-		if (lockManager) {
-			await lockManager.releaseLock();
-		}
-		try {
+		let bodyException = null as Error | null;
+		const doFetch = async (): Promise<HttpResponse> => {
+			let response: Response;
 			try {
-				response = await fetch(req.url, {
+				// undici's own fetch (not the global one) so the Agent and fetch come from the same undici version
+				response = (await undiciFetch(req.url, {
 					method,
-					headers,
+					headers: [...headers.entries()],
 					body: body as string | Uint8Array | undefined,
 					redirect: "manual",
 					dispatcher: this.dispatcher,
 					signal: AbortSignal.timeout((this.opts.timeoutSeconds ?? 60) * 1000),
-				} as RequestInit);
+				})) as unknown as Response;
 			} catch (e) {
 				const cause = (e as Error).cause;
 				const detail = cause instanceof Error ? cause.message : (e as Error).message;
 				throw new HttpClientException(`I/O error on ${method} request for "${req.url}": ${detail}`, { cause: e });
 			}
+			let bytes: Uint8Array;
 			try {
-				bodyBytes = new Uint8Array(await response.arrayBuffer());
+				bytes = new Uint8Array(await response.arrayBuffer());
 			} catch (e) {
-				bodyBytes = new Uint8Array();
+				bytes = new Uint8Array();
 				bodyException = e as Error;
 			}
+			return {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers,
+				body: decodeBody(bytes),
+				bodyBytes: bytes,
+				url: response.url || req.url,
+			};
+		};
+		if (lockManager) {
+			await lockManager.releaseLock();
+		}
+		let result: HttpResponse;
+		try {
+			const interceptor = this.opts.interceptor;
+			result = interceptor ? await interceptor({ method, url: req.url, headers }, doFetch) : await doFetch();
 		} finally {
 			if (lockManager) {
 				await lockManager.reacquireLock();
 			}
 		}
 
+		const cacheAge = (result as unknown as { getCacheAgeSeconds?: () => number }).getCacheAgeSeconds?.();
 		const resLog: LogArgs = {
-			response_status_code: String(response.status),
-			response_status_text: response.statusText,
-			response_headers: mapToJsonObject(response.headers, true),
+			response_status_code: String(result.status),
+			response_status_text: result.statusText,
+			response_headers: mapToJsonObject(result.headers, true),
 		};
-		addBodyProperty(resLog, "response_body", bodyBytes);
-		resLog["msg"] = "HTTP response";
+		addBodyProperty(resLog, "response_body", result.bodyBytes);
+		if (cacheAge !== undefined) {
+			resLog["msg"] = "Using cached HTTP response";
+			resLog["cache_age_seconds"] = cacheAge;
+		} else {
+			resLog["msg"] = "HTTP response";
+		}
 		resLog["http"] = "response";
 		if (bodyException) {
 			resLog["exception_reading_body"] = bodyException.message;
 		}
 		this.opts.log.log(this.opts.source, resLog);
 
-		return {
-			status: response.status,
-			statusText: response.statusText,
-			headers: response.headers,
-			body: decodeBody(bodyBytes),
-			bodyBytes,
-			url: response.url || req.url,
-		};
+		return result;
 	}
 
 	close(): Promise<void> {

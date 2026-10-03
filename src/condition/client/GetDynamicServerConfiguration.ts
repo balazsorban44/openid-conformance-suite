@@ -50,9 +50,7 @@ export class GetDynamicServerConfiguration extends AbstractCondition {
 
 			// fetch the value
 			let jsonString: string | null;
-			// UPSTREAM: Java uses createRestTemplateWithCache(env) (opt-in cache via options.cache_external_metadata);
-			// the TS framework has no cached HTTP client yet, so every fetch goes to the network.
-			const client = this.createHttpClient(env);
+			const client = await this.createRestTemplateWithCache(env);
 			try {
 				const response = await client.exchange({ url: discoveryUrl, method: "GET" });
 				if (response.status >= 400) {

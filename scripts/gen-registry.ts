@@ -29,7 +29,9 @@ const plans: { cls: string; file: string; planName: string }[] = [];
 
 for (const file of walk(srcDir)) {
 	const text = readFileSync(file, "utf8");
-	for (const m of text.matchAll(/export\s+class\s+(\w+)\s+extends[\s\S]*?static\s+(?:override\s+)?(?:readonly\s+)?meta\s*:\s*(PublishTestModule|PublishTestPlan)\s*=\s*\{([\s\S]*?)\n\t\};/g)) {
+	for (const m of text.matchAll(
+		/export\s+class\s+(\w+)\s+extends[\s\S]*?static\s+(?:override\s+)?(?:readonly\s+)?meta\s*:\s*(PublishTestModule|PublishTestPlan)\s*=\s*\{([\s\S]*?)\n\t\};/g,
+	)) {
 		const [, cls, kind, body] = m;
 		if (kind === "PublishTestModule") {
 			const name = /testName:\s*"([^"]+)"/.exec(body)?.[1];

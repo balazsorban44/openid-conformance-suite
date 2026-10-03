@@ -30,10 +30,7 @@ export interface ClientDriverConfig {
 	timeoutSeconds?: number;
 }
 
-export interface ConformanceConfig extends JsonObject {
-	alias?: string;
-	description?: string;
-}
+export type ConformanceConfig = JsonObject;
 
 export interface LoadedConfig {
 	/** The JSON handed to the test module (runner-only keys removed) */
