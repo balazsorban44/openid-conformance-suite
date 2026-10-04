@@ -559,8 +559,9 @@ export function checkIfAuthorizationEndpointError(response: AuthorizationRespons
 export function checkStateInAuthorizationResponse(
 	request: AuthorizationRequest,
 	response: AuthorizationResponse,
+	...requirements: string[]
 ): void {
-	const c: Condition = condition("CheckStateInAuthorizationResponse");
+	const c: Condition = condition("CheckStateInAuthorizationResponse", ...requirements);
 	const actual = str(response.params, "state");
 	const expected = request.state;
 	if (!expected) {
@@ -1420,5 +1421,288 @@ export function replaceRedirectUriQueryInAuthorizationRequest(params: Record<str
 export function authorizationEndpointRedirectedBackUnexpectedly(): never {
 	return condition("AuthorizationEndpointRedirectedBackUnexpectedly").failure(
 		"Authorization server redirected back in a case where it should not",
+	);
+}
+
+/**
+ * The suite's redirect_uri: `<base url>/callback`, plus the query suffix a module registered for its second client
+ * (AddRedirectUriQuerySuffix).
+ *
+ * upstream: condition/client/CreateRedirectUri.java
+ */
+export function createRedirectUri(baseUrl: string, suffix: string | null = null, ...requirements: string[]): string {
+	const c: Condition = condition("CreateRedirectUri", ...requirements);
+	if (baseUrl === "") {
+		c.failure("Base URL is empty");
+	}
+	if (suffix) {
+		c.log("Appending suffix to redirect URI", { suffix });
+	}
+	// calculate the redirect URI based on our given base URL
+	const redirectUri = baseUrl + "/callback" + (suffix ?? "");
+	c.success("Created redirect URI", { redirect_uri: redirectUri });
+	return redirectUri;
+}
+
+/** upstream: condition/client/AddRedirectUriQuerySuffix.java */
+export function addRedirectUriQuerySuffix(...requirements: string[]): string {
+	const redirectUriSuffix = "?dummy1=lorem&dummy2=ipsum";
+	condition("AddRedirectUriQuerySuffix", ...requirements).success(
+		"Created redirect URI query suffix to test that query sections in the registered redirect url are handled correctly. The redirect url, including this suffix, must be registered for the client as per http://openid.net/certification/fapi_op_testing/",
+		{ redirect_uri_suffix: redirectUriSuffix },
+	);
+	return redirectUriSuffix;
+}
+
+/** upstream: condition/client/RedirectQueryTestDisabled.java */
+export function redirectQueryTestDisabled(...requirements: string[]): never {
+	/* This condition only exists to log a failure */
+	return condition("RedirectQueryTestDisabled", ...requirements).failure(
+		"Tests that use a redirect uri with a query have been disabled by disableRedirectQueryTest in test configuration",
+	);
+}
+
+/** upstream: condition/client/SetAuthorizationEndpointRequestResponseTypeToCode.java */
+export function setAuthorizationEndpointRequestResponseTypeToCode(params: Record<string, unknown>): void {
+	params["response_type"] = "code";
+	condition("SetAuthorizationEndpointRequestResponseTypeToCode").success("Added response_type parameter to request", {
+		...params,
+	});
+}
+
+/** upstream: condition/client/SetAuthorizationEndpointRequestResponseModeToJWT.java */
+export function setAuthorizationEndpointRequestResponseModeToJWT(params: Record<string, unknown>): void {
+	params["response_mode"] = "jwt";
+	condition("SetAuthorizationEndpointRequestResponseModeToJWT").success("Added response_mode parameter to request", {
+		...params,
+	});
+}
+
+/** upstream: condition/client/RejectErrorInUrlFragment.java */
+export function rejectErrorInUrlFragment(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("RejectErrorInUrlFragment", ...requirements);
+	if (str(response.fragment, "error")) {
+		c.failure(
+			"'error' is present in URL fragment returned from authorization endpoint - it should be returned in the URL query only",
+		);
+	}
+	c.success("'error' is not present in URL fragment returned from authorization endpoint");
+}
+
+/** upstream: condition/client/RejectAuthCodeInUrlFragment.java */
+export function rejectAuthCodeInUrlFragment(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("RejectAuthCodeInUrlFragment", ...requirements);
+	if (str(response.fragment, "code")) {
+		c.failure("Authorization code is present in URL fragment returned from authorization endpoint");
+	}
+	c.success("Authorization code is not present in URL fragment returned from authorization endpoint");
+}
+
+/** upstream: condition/client/RejectStateInUrlFragmentForCodeFlow.java */
+export function rejectStateInUrlFragmentForCodeFlow(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("RejectStateInUrlFragmentForCodeFlow", ...requirements);
+	// UPSTREAM: looks at the code, not the state, in the fragment
+	if (str(response.fragment, "code")) {
+		c.failure(
+			"state is present in URL fragment/hash returned from authorization endpoint - authorization code flow requires it to be returned in the URL query only",
+		);
+	}
+	c.success(
+		"state is correctly not present in URL fragment/hash returned from authorization endpoint (as in the authorization code flow it must be returned in the URL query only)",
+	);
+}
+
+/** upstream: condition/client/AbstractValidateSuccessfulResponseFromAuthorizationEndpoint.java */
+function validateSuccessfulResponseFromAuthorizationEndpoint(
+	name: string,
+	response: AuthorizationResponse,
+	expectedParams: string[],
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	const unexpected = Object.fromEntries(Object.entries(response.params).filter(([k]) => !expectedParams.includes(k)));
+	if (Object.keys(unexpected).length === 0) {
+		c.success("authorization endpoint response does not include unexpected parameters", response.params);
+		return;
+	}
+	c.failure(
+		"authorization endpoint response includes unexpected parameters. This may indicate the authorization server has misunderstood the spec, or it may be using extensions the test suite is unaware of.",
+		unexpected,
+	);
+}
+
+/** upstream: condition/client/ValidateSuccessfulAuthCodeFlowResponseFromAuthorizationEndpoint.java */
+export function validateSuccessfulAuthCodeFlowResponseFromAuthorizationEndpoint(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	// dummy1/2 are returned in the url query for the second client as we require users to register a redirect url
+	// that contains an existing url query
+	validateSuccessfulResponseFromAuthorizationEndpoint(
+		"ValidateSuccessfulAuthCodeFlowResponseFromAuthorizationEndpoint",
+		response,
+		["code", "state", "id_token", "session_state", "iss", "dummy1", "dummy2"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ValidateSuccessfulJARMResponseFromAuthorizationEndpoint.java */
+export function validateSuccessfulJARMResponseFromAuthorizationEndpoint(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	validateSuccessfulResponseFromAuthorizationEndpoint(
+		"ValidateSuccessfulJARMResponseFromAuthorizationEndpoint",
+		response,
+		["code", "state", "session_state", "iss"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/RequireIssInAuthorizationResponse.java */
+export function requireIssInAuthorizationResponse(
+	op: Pick<Op, "metadata">,
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("RequireIssInAuthorizationResponse", ...requirements);
+	const issuer = op.metadata.issuer;
+	const authResponseIssuer = str(response.params, "iss");
+	if (authResponseIssuer == null) {
+		c.failure("No 'iss' value in authorization response.");
+	}
+	if (issuer !== authResponseIssuer) {
+		c.failure("'iss' parameter in authorization response does not match server's issuer value.", {
+			expected: issuer,
+			actual: authResponseIssuer,
+		});
+	}
+	c.success("'iss' parameter in authorization response matches server's issuer value.");
+}
+
+/** upstream: condition/client/VerifyNoStateInAuthorizationResponse.java */
+export function verifyNoStateInAuthorizationResponse(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("VerifyNoStateInAuthorizationResponse", ...requirements);
+	if (str(response.params, "state")) {
+		c.failure("state has been returned in authorization endpoint response, when it shouldn't have been");
+	}
+	c.success("Authorization endpoint response is correctly missing 'state'");
+}
+
+/** upstream: condition/client/EnsureInvalidRequestError.java */
+export function ensureInvalidRequestError(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureInvalidRequestError", ...requirements);
+	const error = str(response.params, "error");
+	const expected = "invalid_request";
+	if (!error) {
+		c.failure("Expected 'error' field not found");
+	}
+	if (error !== expected) {
+		c.failure("'error' field has unexpected value", { expected, actual: error });
+	}
+	c.success("Endpoint returned expected 'error' of '" + expected + "'", { error });
+}
+
+/**
+ * upstream: condition/client/EnsureInvalidRequestObjectError.java
+ * (AbstractEnsureSpecifiedErrorFromAuthorizationEndpointResponse)
+ */
+export function ensureInvalidRequestObjectError(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureInvalidRequestObjectError", ...requirements);
+	const error = str(response.params, "error");
+	const expected = "invalid_request_object";
+	if (!error) {
+		c.failure("Expected 'error' field not found");
+	}
+	if (error !== expected) {
+		c.failure("'error' field has unexpected value", { expected, actual: error });
+	}
+	c.success("Authorization endpoint returned expected 'error' of '" + expected + "'", { error });
+}
+
+/** The shared body of the EnsureInvalidRequest...OrAccessDeniedError conditions below */
+function ensurePermittedAuthorizationError(
+	name: string,
+	response: AuthorizationResponse,
+	permitted: string[],
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	const error = str(response.params, "error");
+	if (!error) {
+		c.failure("Expected 'error' field is missing from authorization endpoint response");
+	}
+	if (!permitted.includes(error)) {
+		c.failure("authorization endpoint response 'error' field has unexpected value", { permitted, actual: error });
+	}
+	c.success("Authorization endpoint returned an expected 'error'", { permitted, error });
+}
+
+/** upstream: condition/client/EnsureInvalidRequestInvalidRequestUriOrAccessDeniedError.java */
+export function ensureInvalidRequestInvalidRequestUriOrAccessDeniedError(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	ensurePermittedAuthorizationError(
+		"EnsureInvalidRequestInvalidRequestUriOrAccessDeniedError",
+		response,
+		["invalid_request", "invalid_request_uri", "access_denied"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/EnsureInvalidRequestInvalidRequestObjectInvalidRequestUriOrAccessDeniedError.java */
+export function ensureInvalidRequestInvalidRequestObjectInvalidRequestUriOrAccessDeniedError(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	ensurePermittedAuthorizationError(
+		"EnsureInvalidRequestInvalidRequestObjectInvalidRequestUriOrAccessDeniedError",
+		response,
+		["invalid_request", "invalid_request_object", "invalid_request_uri", "access_denied"],
+		requirements,
+	);
+}
+
+/** A REVIEW placeholder for a screenshot (upstream AbstractCondition.createBrowserInteractionPlaceholder) */
+function browserInteractionPlaceholder(name: string, msg: string, requirements: string[]): string {
+	const placeholder = randomAlphanumeric(10);
+	condition(name, ...requirements).review(msg, { upload: placeholder });
+	return placeholder;
+}
+
+/** upstream: condition/client/ExpectRequestObjectMissingStateErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectMissingStateErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectMissingStateErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is missing the 'state' claim - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectPkceMissingErrorPage.java; returns the placeholder to wait for */
+export function expectPkceMissingErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectPkceMissingErrorPage",
+		"Show an error page saying PKCE / code_challenge / code_challenge_method are missing from the request.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectMissingExpClaimErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectMissingExpClaimErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectMissingExpClaimErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is missing the 'exp' claim - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectExpiredRequestObjectClaimErrorPage.java; returns the placeholder to wait for */
+export function expectExpiredRequestObjectClaimErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectExpiredRequestObjectClaimErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is using the expired 'exp' value claim - upload a screenshot of the error page.",
+		requirements,
 	);
 }

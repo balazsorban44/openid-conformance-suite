@@ -38,9 +38,11 @@ export async function callProtectedResource(
 		body?: string | URLSearchParams;
 		/** the requirements the call site cites (upstream callAndStopOnFailure(CallProtectedResource, FAILURE, ...)) */
 		requirements?: string[];
+		/** the condition a subclass upstream logs under (CallProtectedResourceAllowingDpopNonceError) */
+		conditionName?: string;
 	} = {},
 ): Promise<EndpointResponse> {
-	const c: Condition = condition("CallProtectedResource", ...(opts.requirements ?? []));
+	const c: Condition = condition(opts.conditionName ?? "CallProtectedResource", ...(opts.requirements ?? []));
 	if (!accessToken.value) {
 		c.failure("Access token not found");
 	}

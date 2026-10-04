@@ -9,7 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import { condition, type Condition } from "../suite/conditions.ts";
-import { signJwt } from "../suite/jose.ts";
+import { getSigningKey, signJwt } from "../suite/jose.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { toUriString } from "../suite/uri.ts";
 import { jwtClaimsSetAsJsonObject } from "../suite/jose-jwt.ts";
@@ -159,7 +159,8 @@ export function createRandomRequestUriWithFragment(baseUrl: string, ...requireme
 /**
  * The URL to send the browser to: `paramName` (request / request_uri) plus the parameters that must also be sent
  * with OAuth 2.0 syntax even when they are in the request object (response_type, client_id, scope, redirect_uri;
- * OIDCC-6.1) or differ from it, sorted by name.
+ * OIDCC-6.1) or differ from it, sorted by name. Without `includeDuplicates` (JAR / PAR allow leaving them out) only
+ * client_id is added; `reverseParameterOrder` sorts the query in reverse to test that the OP handles other orders.
  *
  * upstream: condition/client/AbstractBuildRequestObjectRedirectToAuthorizationEndpoint.java
  */
@@ -170,6 +171,8 @@ function buildRedirect(
 	requestObjectClaims: Record<string, unknown>,
 	paramName: string,
 	paramValue: string,
+	includeDuplicates = true,
+	reverseParameterOrder = false,
 ): string {
 	const requiredDuplicates = ["response_type", "client_id", "scope", "redirect_uri"];
 	const authorizationEndpoint = op.metadata.authorization_endpoint;
@@ -187,15 +190,20 @@ function buildRedirect(
 		}
 		const requestObjectValue = inObject === undefined ? null : String(inObject);
 		const requestParameterValue = String(inRequest);
-		if (
-			requiredDuplicates.includes(key) ||
-			requestObjectValue == null ||
-			requestParameterValue !== requestObjectValue
-		) {
+		if (includeDuplicates) {
+			if (
+				requiredDuplicates.includes(key) ||
+				requestObjectValue == null ||
+				requestParameterValue !== requestObjectValue
+			) {
+				query.set(key, requestParameterValue);
+			}
+		} else if (key === "client_id") {
 			query.set(key, requestParameterValue);
 		}
 	}
-	const sorted = [...query.entries()].toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+	const order = reverseParameterOrder ? -1 : 1;
+	const sorted = [...query.entries()].toSorted(([a], [b]) => (a < b ? -order : a > b ? order : 0));
 	const redirectTo = toUriString(authorizationEndpoint, sorted);
 	c.success("Sending to authorization endpoint", { redirect_to_authorization_endpoint: redirectTo });
 	return redirectTo;
@@ -212,17 +220,143 @@ export function buildRequestObjectByValueRedirectToAuthorizationEndpoint(
 	return buildRedirect(c, op, params, requestObjectClaims, "request", requestObject);
 }
 
-/** upstream: condition/client/BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint.java */
+/**
+ * upstream: condition/client/BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint.java (`requestUri`: the
+ * suite's own request_uri, or the one a PAR endpoint returned)
+ */
 export function buildRequestObjectByReferenceRedirectToAuthorizationEndpoint(
 	op: Pick<Op, "metadata">,
 	params: Record<string, unknown>,
 	requestObjectClaims: Record<string, unknown>,
-	requestUri: RequestUri,
+	requestUri: RequestUri | string,
+	...requirements: string[]
 ): string {
-	const c: Condition = condition("BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint");
-	return buildRedirect(c, op, params, requestObjectClaims, "request_uri", requestUri.fullUrl);
+	const c: Condition = condition("BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint", ...requirements);
+	const value = typeof requestUri === "string" ? requestUri : requestUri.fullUrl;
+	return buildRedirect(c, op, params, requestObjectClaims, "request_uri", value);
+}
+
+/** upstream: condition/client/BuildRequestObjectByReferenceRedirectToAuthorizationEndpointReorderedParams.java */
+export function buildRequestObjectByReferenceRedirectToAuthorizationEndpointReorderedParams(
+	op: Pick<Op, "metadata">,
+	params: Record<string, unknown>,
+	requestObjectClaims: Record<string, unknown>,
+	requestUri: string,
+	...requirements: string[]
+): string {
+	const c: Condition = condition(
+		"BuildRequestObjectByReferenceRedirectToAuthorizationEndpointReorderedParams",
+		...requirements,
+	);
+	return buildRedirect(c, op, params, requestObjectClaims, "request_uri", requestUri, true, true);
+}
+
+/** upstream: condition/client/BuildRequestObjectByReferenceRedirectToAuthorizationEndpointWithoutDuplicates.java */
+export function buildRequestObjectByReferenceRedirectToAuthorizationEndpointWithoutDuplicates(
+	op: Pick<Op, "metadata">,
+	params: Record<string, unknown>,
+	requestObjectClaims: Record<string, unknown>,
+	requestUri: string,
+	...requirements: string[]
+): string {
+	const c: Condition = condition(
+		"BuildRequestObjectByReferenceRedirectToAuthorizationEndpointWithoutDuplicates",
+		...requirements,
+	);
+	return buildRedirect(c, op, params, requestObjectClaims, "request_uri", requestUri, false, false);
 }
 
 function isPrimitive(v: unknown): boolean {
 	return typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+}
+
+/** upstream: condition/client/AddIatToRequestObject.java */
+export function addIatToRequestObject(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["iat"] = Math.floor(Date.now() / 1000);
+	condition("AddIatToRequestObject", ...requirements).success("Added iat to request object claims", {
+		iat: claims["iat"],
+	});
+}
+
+/** upstream: condition/client/AddNbfToRequestObject.java */
+export function addNbfToRequestObject(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["nbf"] = Math.floor(Date.now() / 1000);
+	condition("AddNbfToRequestObject", ...requirements).success("Added nbf to request object claims", {
+		nbf: claims["nbf"],
+	});
+}
+
+/** upstream: condition/client/AddExpToRequestObject.java */
+export function addExpToRequestObject(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["exp"] = Math.floor(Date.now() / 1000) + 5 * 60;
+	condition("AddExpToRequestObject", ...requirements).success("Added exp to request object claims", {
+		exp: claims["exp"],
+	});
+}
+
+/** upstream: condition/client/AddExpiredExpToRequestObject.java */
+export function addExpiredExpToRequestObject(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["exp"] = Math.floor(Date.now() / 1000) - 3600;
+	condition("AddExpiredExpToRequestObject", ...requirements).success("Added expired exp to request object claims", {
+		exp: claims["exp"],
+	});
+}
+
+/** upstream: condition/client/AddClientIdToRequestObject.java */
+export function addClientIdToRequestObject(
+	claims: Record<string, unknown>,
+	client: Pick<Client, "client_id">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddClientIdToRequestObject", ...requirements);
+	const clientId = client.client_id;
+	if (clientId == null) {
+		c.failure("missing client_id in environment");
+	}
+	claims["client_id"] = clientId;
+	c.success("Added client_id to request object claims", { client_id: clientId });
+}
+
+/** upstream: condition/client/AddMultipleAudToRequestObject.java */
+export function addMultipleAudToRequestObject(
+	claims: Record<string, unknown>,
+	metadata: Pick<ServerMetadata, "issuer">,
+	...requirements: string[]
+): void {
+	delete claims["aud"];
+	const aud: string[] = [];
+	if (metadata.issuer != null) {
+		aud.push(metadata.issuer);
+	}
+	aud.push("https://other1.example.com", "invalid");
+	claims["aud"] = aud;
+	condition("AddMultipleAudToRequestObject", ...requirements).success("Added multiple aud to request object claims", {
+		aud,
+	});
+}
+
+/**
+ * SignRequestObject with a `typ` header of "oauth-authz-req+jwt" in randomised case (JAR-4: the media type is case
+ * insensitive).
+ *
+ * upstream: condition/client/SignRequestObjectIncludeMediaType.java (AbstractSignJWT)
+ */
+export async function signRequestObjectIncludeMediaType(
+	claims: Record<string, unknown>,
+	client: { keys: ClientKeys | null },
+	...requirements: string[]
+): Promise<string> {
+	const c: Condition = condition("SignRequestObjectIncludeMediaType", ...requirements);
+	if (client.keys == null) {
+		c.failure("Couldn't find jwks");
+	}
+	const { jws, verifiable } = await signJwt(c, claims, client.keys.jwks, { typ: "OautH-auThZ-REQ+jWt" });
+	const [header] = jws.split(".");
+	c.success("Signed the request object", {
+		request_object: verifiable,
+		header: JSON.parse(Buffer.from(header, "base64url").toString()),
+		claims,
+		key: getSigningKey(c, "signing", client.keys.jwks),
+	});
+	return jws;
 }

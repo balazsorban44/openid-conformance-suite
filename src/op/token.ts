@@ -6,13 +6,13 @@
  *   const tokens = await token.requestAuthorizationCode(op, client, tokenRequest);
  *   ... tokens.accessToken, tokens.idToken (parsed), tokens.response ...
  */
-import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
+import { condition, errorFields, skipped, soft, type Condition } from "../suite/conditions.ts";
 import { endpointResponse, HttpError, request, type EndpointResponse } from "../suite/http.ts";
 import { parseJwt, signJwt, type ParsedJwt } from "../suite/jose.ts";
 import { JWE_FAMILY_ASYMMETRIC, keyTypeForAlgorithm } from "../suite/jose-algorithms.ts";
 import { parseJWKSet } from "../suite/jose-jwk.ts";
 import { ParseException, JOSEException } from "../suite/errors.ts";
-import { parseJWT } from "../suite/jose-jwt.ts";
+import { parseClaimsSet, parseJWT, parseSignedJWT } from "../suite/jose-jwt.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import {
 	checkContentType,
@@ -83,8 +83,12 @@ export function addFormBasedClientSecretToRequest(req: TokenRequest, client: Reg
 }
 
 /** upstream: condition/client/AddClientIdToRequest.java */
-export function addClientIdToRequest(req: TokenRequest, client: RegisteredClient["client"]): void {
-	const c: Condition = condition("AddClientIdToRequest");
+export function addClientIdToRequest(
+	req: Pick<TokenRequest, "form">,
+	client: RegisteredClient["client"],
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddClientIdToRequest", ...requirements);
 	if (!client.client_id) {
 		c.failure("client_id is null or empty");
 	}
@@ -176,12 +180,46 @@ export async function createAuthorizationCodeRequest(
 }
 
 /**
+ * What a variant of CallTokenEndpointAndReturnFullResponse (a subclass upstream) adds: the condition it logs under,
+ * what it does with the full response before the "Parsed ... response" entry (upstream addFullResponse; a failure
+ * there ends the call) and the suffix of that entry's message (upstream parsedResponseLogSuffix).
+ */
+export interface CallTokenEndpointOptions {
+	conditionName?: string;
+	/** the requirements the call site cites (upstream callAndStopOnFailure(CallTokenEndpoint..., requirements)) */
+	requirements?: string[];
+	onResponse?: (c: Condition, res: TokenResponse) => void;
+	parsedResponseLogSuffix?: (res: TokenResponse) => string;
+	/** upstream handleClientException override: a network / TLS failure is a result (the call returns null) */
+	onHttpError?: (c: Condition, e: HttpError) => void;
+	/** upstream handleJsonParseException override: a body that is not JSON is a result (`json` stays null) */
+	onJsonParseError?: (c: Condition) => void;
+}
+
+/**
  * POSTs the request to the token endpoint; any HTTP status is a response (the checks look at it).
  *
  * upstream: condition/client/CallTokenEndpointAndReturnFullResponse.java (AbstractCallOAuthEndpoint)
  */
-export async function callTokenEndpoint(op: Pick<Op, "metadata">, req: TokenRequest): Promise<TokenResponse> {
-	const c: Condition = condition("CallTokenEndpointAndReturnFullResponse");
+export async function callTokenEndpoint(
+	op: Pick<Op, "metadata">,
+	req: TokenRequest,
+	opts: CallTokenEndpointOptions = {},
+): Promise<TokenResponse> {
+	// null only with onHttpError, whose callers use callTokenEndpointOrNull
+	return (await callTokenEndpointOrNull(op, req, opts)) as TokenResponse;
+}
+
+/** callTokenEndpoint for the variants that accept a failed connection as a result (null then) */
+export async function callTokenEndpointOrNull(
+	op: Pick<Op, "metadata">,
+	req: TokenRequest,
+	opts: CallTokenEndpointOptions = {},
+): Promise<TokenResponse | null> {
+	const c: Condition = condition(
+		opts.conditionName ?? "CallTokenEndpointAndReturnFullResponse",
+		...(opts.requirements ?? []),
+	);
 	const endpoint = op.metadata.token_endpoint as string;
 	const form = new URLSearchParams();
 	for (const [k, v] of Object.entries(req.form)) {
@@ -197,6 +235,10 @@ export async function callTokenEndpoint(op: Pick<Op, "metadata">, req: TokenRequ
 		});
 	} catch (e) {
 		if (e instanceof HttpError) {
+			if (opts.onHttpError) {
+				opts.onHttpError(c, e);
+				return null;
+			}
 			const cause = e.cause instanceof Error ? e.cause.message : null;
 			c.failureFrom("Call to " + endpoint + " failed" + (cause ? " - " + cause : ""), e);
 		}
@@ -204,6 +246,8 @@ export async function callTokenEndpoint(op: Pick<Op, "metadata">, req: TokenRequ
 	}
 	// upstream records the endpoint URI as the endpoint name of the full response
 	const response: TokenResponse = { ...endpointResponse(endpoint, res), json: null };
+	response.json = (response.body_json as Record<string, unknown> | undefined) ?? null;
+	opts.onResponse?.(c, response);
 	if (!res.body) {
 		c.failure("Missing or empty response from the token endpoint");
 	}
@@ -211,13 +255,16 @@ export async function callTokenEndpoint(op: Pick<Op, "metadata">, req: TokenRequ
 		try {
 			JSON.parse(res.body);
 		} catch (e) {
+			if (opts.onJsonParseError) {
+				opts.onJsonParseError(c);
+				return response;
+			}
 			c.failureFrom("Error parsing " + endpoint + " response body as JSON", e);
 		}
 		c.failure("token endpoint did not return a JSON object", { response: res.body });
 	}
-	response.json = response.body_json as Record<string, unknown>;
 	const { json: _json, ...full } = response;
-	c.success("Parsed token endpoint response", full);
+	c.success("Parsed token endpoint response" + (opts.parsedResponseLogSuffix?.(response) ?? ""), full);
 	return response;
 }
 
@@ -418,7 +465,7 @@ export function verifyJweEncryption(c: Condition, token: string, jwks: unknown, 
  */
 export async function extractIdTokenFromTokenResponse(
 	res: TokenResponse,
-	client: RegisteredClient,
+	client: Pick<RegisteredClient, "client" | "keys">,
 	...requirements: string[]
 ): Promise<ParsedJwt> {
 	const c: Condition = condition("ExtractIdTokenFromTokenResponse", ...requirements);
@@ -566,26 +613,57 @@ export function validateErrorFromTokenEndpointResponseError(res: TokenResponse, 
  * upstream: AbstractOIDCCAuthCodeReuse.checkResponse (with the expected error invalid_grant)
  */
 export function checkInvalidGrantErrorResponse(res: TokenResponse): void {
-	const name = "token_endpoint_response";
-	const json = res.json ?? {};
 	soft(() => checkTokenEndpointHttpStatus400(res, "OIDCC-3.1.3.4"));
 	soft(() => checkTokenEndpointReturnedJsonContentType(res, "OIDCC-3.1.3.4"));
 	soft(() => checkErrorFromTokenEndpointResponseErrorInvalidGrant(res, "RFC6749-5.2"));
 	soft(() => validateErrorFromTokenEndpointResponseError(res, "RFC6749-5.2"));
-	soft(
-		() =>
-			checkErrorDescriptionContainsCRLFTAB(
-				"CheckErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB",
-				name,
-				json,
-				"RFC6749-5.2",
-			),
-		"warning",
+	validateTokenEndpointErrorFields(res);
+}
+
+/**
+ * The optional error_description / error_uri checks of a token endpoint error response (the three conditions every
+ * module runs after ValidateErrorFromTokenEndpointResponseError, with upstream's severities and requirements)
+ */
+export function validateTokenEndpointErrorFields(res: TokenResponse): void {
+	soft(() => checkErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB(res, "RFC6749-5.2"), "warning");
+	soft(() => validateErrorDescriptionFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+	soft(() => validateErrorUriFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+}
+
+/** upstream: condition/client/CheckErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB.java */
+export function checkErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	checkErrorDescriptionContainsCRLFTAB(
+		"CheckErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB",
+		"token_endpoint_response",
+		res.json ?? {},
+		...requirements,
 	);
-	soft(() =>
-		validateErrorDescription("ValidateErrorDescriptionFromTokenEndpointResponseError", name, json, "RFC6749-5.2"),
+}
+
+/** upstream: condition/client/ValidateErrorDescriptionFromTokenEndpointResponseError.java */
+export function validateErrorDescriptionFromTokenEndpointResponseError(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	validateErrorDescription(
+		"ValidateErrorDescriptionFromTokenEndpointResponseError",
+		"token_endpoint_response",
+		res.json ?? {},
+		...requirements,
 	);
-	soft(() => validateErrorUri("ValidateErrorUriFromTokenEndpointResponseError", name, json, "RFC6749-5.2"));
+}
+
+/** upstream: condition/client/ValidateErrorUriFromTokenEndpointResponseError.java */
+export function validateErrorUriFromTokenEndpointResponseError(res: TokenResponse, ...requirements: string[]): void {
+	validateErrorUri(
+		"ValidateErrorUriFromTokenEndpointResponseError",
+		"token_endpoint_response",
+		res.json ?? {},
+		...requirements,
+	);
 }
 
 /**
@@ -602,8 +680,8 @@ export function checkAuthorizationCodeReuseResponse(res: TokenResponse): void {
 }
 
 /** upstream: condition/client/ServerAllowedReusingAuthorizationCode.java */
-export function serverAllowedReusingAuthorizationCode(): never {
-	return condition("ServerAllowedReusingAuthorizationCode").failure(
+export function serverAllowedReusingAuthorizationCode(...requirements: string[]): never {
+	return condition("ServerAllowedReusingAuthorizationCode", ...requirements).failure(
 		"Server has incorrectly allowed a second use of an authorization code; an authorization code is expected to be single use.",
 	);
 }
@@ -679,4 +757,532 @@ export function checkErrorFromTokenEndpointResponseErrorInvalidClient(
 		["invalid_client"],
 		...requirements,
 	);
+}
+
+/** upstream: condition/client/CheckErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidGrant.java */
+export function checkErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidGrant(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromTokenEndpointResponseError(
+		"CheckErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidGrant",
+		res,
+		["invalid_client", "invalid_grant"],
+		...requirements,
+	);
+}
+
+/** upstream: condition/client/CheckErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidRequest.java */
+export function checkErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidRequest(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromTokenEndpointResponseError(
+		"CheckErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidRequest",
+		res,
+		["invalid_request", "invalid_client"],
+		...requirements,
+	);
+}
+
+/** upstream: condition/client/CheckTokenEndpointHttpStatus400or401.java */
+export function checkTokenEndpointHttpStatus400or401(res: TokenResponse, ...requirements: string[]): void {
+	const c: Condition = condition("CheckTokenEndpointHttpStatus400or401", ...requirements);
+	if (res.status == null) {
+		c.failure("Http status can not be null.");
+	}
+	if (res.status !== 400 && res.status !== 401) {
+		c.failure("Invalid http status", { actual: res.status, expected: "400 or 401" });
+	}
+	c.success("Token endpoint http status code was " + res.status);
+}
+
+/** upstream: condition/client/AbstractCheckTokenEndpointReturnedExpectedErrorAndHttpStatus.java */
+function checkTokenEndpointReturnedExpectedErrorAndHttpStatus(
+	name: string,
+	res: TokenResponse,
+	errorStatusMap: Record<string, number[]>,
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	const httpStatus = res.status;
+	if (httpStatus == null) {
+		c.failure("Http status can not be null.");
+	}
+	const error = str(res.json, "error");
+	if (!error) {
+		c.failure("Couldn't find error field");
+	}
+	if (!Object.hasOwn(errorStatusMap, error)) {
+		c.failure("Unexpected error '" + error + "' received", { actual: error, expected: Object.keys(errorStatusMap) });
+	}
+	const expectedHttpStatusCodes = errorStatusMap[error];
+	if (!expectedHttpStatusCodes.includes(httpStatus)) {
+		c.failure("Invalid http status with error " + error, { actual: httpStatus, expected: expectedHttpStatusCodes });
+	}
+	c.success("Token endpoint returned error " + error + " and the http status code was " + httpStatus);
+}
+
+/** upstream: condition/client/CheckTokenEndpointReturnedInvalidRequestGrantOrDPopProofError.java */
+export function checkTokenEndpointReturnedInvalidRequestGrantOrDPopProofError(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	checkTokenEndpointReturnedExpectedErrorAndHttpStatus(
+		"CheckTokenEndpointReturnedInvalidRequestGrantOrDPopProofError",
+		res,
+		{ invalid_request: [400], invalid_grant: [400], invalid_dpop_proof: [400] },
+		requirements,
+	);
+}
+
+/** upstream: condition/client/CheckTokenEndpointReturnedInvalidClientGrantOrRequestError.java */
+export function checkTokenEndpointReturnedInvalidClientGrantOrRequestError(
+	res: TokenResponse,
+	...requirements: string[]
+): void {
+	checkTokenEndpointReturnedExpectedErrorAndHttpStatus(
+		"CheckTokenEndpointReturnedInvalidClientGrantOrRequestError",
+		res,
+		{ invalid_request: [400], invalid_grant: [400], invalid_client: [400, 401] },
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectNoIdTokenInTokenResponse.java */
+export function expectNoIdTokenInTokenResponse(res: TokenResponse): void {
+	const c: Condition = condition("ExpectNoIdTokenInTokenResponse");
+	if (res.json != null && Object.hasOwn(res.json, "id_token")) {
+		c.failure("Test is not targeting Open ID Connect but the token endpoint response contains an ID token.");
+	}
+	c.success("Test is not targeting Open ID Connect and the token endpoint response does not contain an ID token");
+}
+
+/** upstream: condition/client/EnsureMinimumAccessTokenLength.java */
+export function ensureMinimumAccessTokenLength(res: TokenResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureMinimumAccessTokenLength", ...requirements);
+	const requiredLength = 128;
+	const accessToken = str(res.json, "access_token");
+	if (!accessToken) {
+		c.failure("Can't find access token");
+	}
+	const bitLength = Buffer.byteLength(accessToken, "utf8") * 8;
+	if (bitLength >= requiredLength) {
+		c.success("Access token is of sufficient length", { required: requiredLength, actual: bitLength });
+		return;
+	}
+	c.failure("Access token is not of sufficient length", { required: requiredLength, actual: bitLength });
+}
+
+/**
+ * Inverts the case of every letter of the token type ("DPoP" -> "dpOp") for the next resource request, to test that
+ * the resource server treats the authentication scheme case-insensitively (RFC9110-11.1).
+ *
+ * upstream: condition/client/SetAccessTokenTypeToInvertedCase.java
+ */
+export function setAccessTokenTypeToInvertedCase(accessToken: AccessToken, ...requirements: string[]): void {
+	const c: Condition = condition("SetAccessTokenTypeToInvertedCase", ...requirements);
+	if (!accessToken.type) {
+		c.failure("token_type not available");
+	}
+	accessToken.type = Array.from(accessToken.type, (ch) =>
+		/\p{L}/u.test(ch) ? (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()) : ch,
+	).join("");
+	c.success("Set token endpoint request token type to inverted case letters", { type: accessToken.type });
+}
+
+/**
+ * Calls the token endpoint accepting a dropped TLS connection as a response (an OP may refuse a request without the
+ * client certificate at the TLS layer): `sslError` says whether that happened, `response` is null then.
+ *
+ * upstream: condition/client/CallTokenEndpointAllowingTLSFailure.java
+ */
+export async function callTokenEndpointAllowingTLSFailure(
+	op: Pick<Op, "metadata">,
+	req: TokenRequest,
+	...requirements: string[]
+): Promise<{ response: TokenResponse | null; sslError: boolean }> {
+	let sslError = false;
+	const response = await callTokenEndpointOrNull(op, req, {
+		conditionName: "CallTokenEndpointAllowingTLSFailure",
+		requirements,
+		// the ssl connection was dropped (Java: a ResourceAccessException caused by an SSLException / SocketException)
+		onHttpError: (c, e) => {
+			sslError = true;
+			c.success("Call to token_endpoint failed due to a TLS issue", errorFields(e));
+		},
+		onJsonParseError: (c) => c.log("token endpoint response parsed but not valid JSON"),
+	});
+	return { response, sslError };
+}
+
+/**
+ * The claims of a client assertion whose audience is the OP's issuer (FAPI 2.0 5.3.2.1-8), valid for 60 seconds.
+ *
+ * upstream: condition/client/CreateClientAuthenticationAssertionClaimsWithIssAudience.java
+ */
+export function createClientAuthenticationAssertionClaimsWithIssAudience(
+	op: Pick<Op, "metadata">,
+	client: Pick<RegisteredClient["client"], "client_id">,
+): Record<string, unknown> {
+	const c: Condition = condition("CreateClientAuthenticationAssertionClaimsWithIssAudience");
+	const clientId = client.client_id;
+	if (!clientId) {
+		c.failure("Couldn't find required configuration element", { client_id: clientId });
+	}
+	const audience = op.metadata.issuer;
+	if (!audience) {
+		c.failure("Couldn't find required configuration element", { issuer: audience });
+	}
+	const iat = Math.floor(Date.now() / 1000);
+	const claims = {
+		iss: clientId,
+		sub: clientId,
+		aud: audience,
+		jti: randomAlphanumeric(20),
+		nbf: iat,
+		iat,
+		exp: iat + 60,
+	};
+	c.success("Created client assertion claims", claims);
+	return claims;
+}
+
+/** upstream: condition/client/SignClientAuthenticationAssertion.java (AbstractSignJWT) */
+export async function signClientAuthenticationAssertion(
+	claims: Record<string, unknown>,
+	client: Pick<RegisteredClient, "keys">,
+): Promise<string> {
+	const c: Condition = condition("SignClientAuthenticationAssertion");
+	if (client.keys == null) {
+		c.failure("Couldn't find jwks");
+	}
+	const { jws, verifiable } = await signJwt(c, claims, client.keys.jwks);
+	c.success("Signed the client assertion", { client_assertion: verifiable });
+	return jws;
+}
+
+/** upstream: condition/client/AddClientAssertionToRequest.java (the client assertion into the request form) */
+export function addSignedClientAssertionToRequest(req: Pick<TokenRequest, "form">, clientAssertion: string): void {
+	req.form["client_assertion"] = clientAssertion;
+	req.form["client_assertion_type"] = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+	condition("AddClientAssertionToRequest").log("Added client assertion", { ...req.form });
+}
+
+/** upstream: condition/client/RemoveClientAssertionFromRequest.java */
+export function removeClientAssertionFromRequest(req: Pick<TokenRequest, "form">): void {
+	delete req.form["client_assertion"];
+	delete req.form["client_assertion_type"];
+	condition("RemoveClientAssertionFromRequest").log("Removed any client assertion from the request", { ...req.form });
+}
+
+/**
+ * What a module changes in the client assertion sequence (upstream: conditions inserted into / replacing the ones of
+ * CreateJWTClientAuthenticationAssertionWithIssAudAndAddToTokenEndpointRequest, e.g. the invalid assertions of
+ * fapi2-security-profile-final-ensure-invalid-client-assertions-fail)
+ */
+export interface ClientAssertionMutation {
+	/** inserted after CreateClientAuthenticationAssertionClaimsWithIssAudience */
+	afterClaims?: (claims: Record<string, unknown>) => void;
+	/** inserted before SignClientAuthenticationAssertion */
+	beforeSign?: () => void;
+	/** replaces SignClientAuthenticationAssertion */
+	sign?: (claims: Record<string, unknown>) => Promise<string>;
+	/** inserted after SignClientAuthenticationAssertion: returns the (altered) assertion */
+	afterSign?: (clientAssertion: string) => string;
+	/** inserted after AddClientAssertionToRequest */
+	afterAdd?: (req: Pick<TokenRequest, "form">) => void;
+}
+
+/**
+ * private_key_jwt client authentication with the issuer as audience: the assertion claims, signed with the client's
+ * key, added to the request form (a token or PAR request).
+ *
+ * upstream: sequence/client/CreateJWTClientAuthenticationAssertionWithIssAudAndAddToTokenEndpointRequest.java with
+ * condition/client/CreateClientAuthenticationAssertionClaimsWithIssAudience.java, SignClientAuthenticationAssertion.java,
+ * AddClientAssertionToRequest.java
+ */
+export async function createJWTClientAuthenticationAssertionWithIssAudAndAddToRequest(
+	op: Pick<Op, "metadata">,
+	req: Pick<TokenRequest, "form">,
+	client: Pick<RegisteredClient, "client" | "keys">,
+	mutation: ClientAssertionMutation = {},
+): Promise<void> {
+	const claims = createClientAuthenticationAssertionClaimsWithIssAudience(op, client.client);
+	mutation.afterClaims?.(claims);
+	mutation.beforeSign?.();
+	let clientAssertion = mutation.sign
+		? await mutation.sign(claims)
+		: await signClientAuthenticationAssertion(claims, client);
+	if (mutation.afterSign) {
+		clientAssertion = mutation.afterSign(clientAssertion);
+	}
+	addSignedClientAssertionToRequest(req, clientAssertion);
+	mutation.afterAdd?.(req);
+}
+
+/** upstream: condition/client/RemoveClientAssertionTypeFromRequest.java */
+export function removeClientAssertionTypeFromRequest(req: Pick<TokenRequest, "form">, ...requirements: string[]): void {
+	delete req.form["client_assertion_type"];
+	condition("RemoveClientAssertionTypeFromRequest", ...requirements).log(
+		"Removed 'client_assertion_type' from the request, making it invalid",
+		{ ...req.form },
+	);
+}
+
+/** upstream: condition/client/SetClientAssertionTypeToWrongValue.java */
+export function setClientAssertionTypeToWrongValue(req: Pick<TokenRequest, "form">, ...requirements: string[]): void {
+	req.form["client_assertion_type"] = "urn:ietf:params:oauth:client-assertion-type:invalid";
+	condition("SetClientAssertionTypeToWrongValue", ...requirements).log(
+		"Set 'client_assertion_type' to a value that is not a registered assertion type, making the request invalid",
+		{ ...req.form },
+	);
+}
+
+/** upstream: condition/client/RemoveSubFromClientAssertionClaims.java */
+export function removeSubFromClientAssertionClaims(claims: Record<string, unknown>, ...requirements: string[]): void {
+	delete claims["sub"];
+	condition("RemoveSubFromClientAssertionClaims", ...requirements).log(
+		"Removed 'sub' from client_assertion_claims, making it invalid",
+		{ ...claims },
+	);
+}
+
+/** upstream: condition/client/SetSubToWrongValueInClientAssertionClaims.java */
+export function setSubToWrongValueInClientAssertionClaims(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	claims["sub"] = "wrong-sub-value";
+	condition("SetSubToWrongValueInClientAssertionClaims", ...requirements).success(
+		"Set wrong sub in client_assertion_claims",
+		{ ...claims },
+	);
+}
+
+/** upstream: condition/client/RemoveIssFromClientAssertionClaims.java */
+export function removeIssFromClientAssertionClaims(claims: Record<string, unknown>, ...requirements: string[]): void {
+	delete claims["iss"];
+	condition("RemoveIssFromClientAssertionClaims", ...requirements).log(
+		"Removed 'iss' from client_assertion_claims, making it invalid",
+		{ ...claims },
+	);
+}
+
+/** upstream: condition/client/AddWrongIssToClientAssertionClaims.java */
+export function addWrongIssToClientAssertionClaims(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["iss"] = "wrong-issuer-value";
+	condition("AddWrongIssToClientAssertionClaims", ...requirements).success(
+		"Added wrong iss to client_assertion_claims",
+		{
+			...claims,
+		},
+	);
+}
+
+/** upstream: condition/client/RemoveAudFromClientAssertionClaims.java */
+export function removeAudFromClientAssertionClaims(claims: Record<string, unknown>, ...requirements: string[]): void {
+	delete claims["aud"];
+	condition("RemoveAudFromClientAssertionClaims", ...requirements).log(
+		"Removed 'aud' from client_assertion_claims, making it invalid",
+		{ ...claims },
+	);
+}
+
+/** upstream: condition/client/AddWrongAudToClientAssertionClaims.java */
+export function addWrongAudToClientAssertionClaims(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["aud"] = "https://fapidev-rs.authlete.net/api/userinfo";
+	condition("AddWrongAudToClientAssertionClaims", ...requirements).success(
+		"Added wrong aud to client_assertion_claims",
+		{
+			...claims,
+		},
+	);
+}
+
+/** upstream: condition/client/AddPAREndpointAsAudToClientAuthenticationAssertionClaims.java */
+export function addPAREndpointAsAudToClientAuthenticationAssertionClaims(
+	claims: Record<string, unknown>,
+	op: Pick<Op, "metadata">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddPAREndpointAsAudToClientAuthenticationAssertionClaims", ...requirements);
+	const audience = op.metadata["pushed_authorization_request_endpoint"];
+	if (typeof audience !== "string" || !audience) {
+		c.failure("Couldn't find required configuration element", { audience: audience ?? null });
+	}
+	claims["aud"] = audience;
+	c.success("add audience in client assertion claims", { ...claims });
+}
+
+/** upstream: condition/client/AddTokenEndpointAsAudToClientAuthenticationAssertionClaims.java */
+export function addTokenEndpointAsAudToClientAuthenticationAssertionClaims(
+	claims: Record<string, unknown>,
+	op: Pick<Op, "metadata">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddTokenEndpointAsAudToClientAuthenticationAssertionClaims", ...requirements);
+	const audience = op.metadata.token_endpoint;
+	if (!audience) {
+		c.failure("Couldn't find required configuration element", { audience: audience ?? null });
+	}
+	claims["aud"] = audience;
+	c.success("add audience in client assertion claims", { ...claims });
+}
+
+/** upstream: condition/client/AddArrayContainingIssuerAndAnotherValueAsAudToClientAuthenticationAssertionClaims.java */
+export function addArrayContainingIssuerAndAnotherValueAsAudToClientAuthenticationAssertionClaims(
+	claims: Record<string, unknown>,
+	op: Pick<Op, "metadata">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition(
+		"AddArrayContainingIssuerAndAnotherValueAsAudToClientAuthenticationAssertionClaims",
+		...requirements,
+	);
+	const aud: unknown[] = [op.metadata.issuer ?? null];
+	const audience = op.metadata.token_endpoint;
+	if (!audience) {
+		c.failure("Couldn't find required configuration element", { audience: audience ?? null });
+	}
+	aud.push(audience);
+	claims["aud"] = aud;
+	c.success("Set audience in client assertion claims to be an array containing the issuer and another value", {
+		...claims,
+	});
+}
+
+/** upstream: condition/client/AddExpIs5MinutesInPastToClientAssertionClaims.java */
+export function addExpIs5MinutesInPastToClientAssertionClaims(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	claims["exp"] = Math.floor(Date.now() / 1000) - 5 * 60;
+	condition("AddExpIs5MinutesInPastToClientAssertionClaims", ...requirements).success(
+		"Added 'exp' is 5 minutes in the past to client_assertion_claims",
+		{ ...claims },
+	);
+}
+
+/** java.time.Instant.toString() of a second count */
+function instantString(seconds: number): string {
+	return new Date(seconds * 1000).toISOString().replace(".000Z", "Z");
+}
+
+/** upstream: condition/client/AddIatNbfExpOver60SecondsInTheFutureToClientAuthenticationAssertionClaims.java */
+export function addIatNbfExpOver60SecondsInTheFutureToClientAuthenticationAssertionClaims(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition(
+		"AddIatNbfExpOver60SecondsInTheFutureToClientAuthenticationAssertionClaims",
+		...requirements,
+	);
+	const offsetSeconds = 62;
+	const adjust = (name: string): string | null => {
+		if (!Object.hasOwn(claims, name)) {
+			return null;
+		}
+		const time = Math.trunc(Number(claims[name])) + offsetSeconds;
+		claims[name] = time;
+		return instantString(time);
+	};
+	const iatTime = adjust("iat");
+	const nbfTime = adjust("nbf");
+	const expTime = adjust("exp");
+	c.success("Added iat/nbf/exp values to client assertion claims which are 62 seconds in the future", {
+		client_assertion_claims: claims,
+		nbf_is_62_seconds_in_the_future: nbfTime,
+		iat_is_62_seconds_in_the_future: iatTime,
+		exp_is_62_seconds_in_the_future: expTime,
+	});
+}
+
+/** upstream: condition/client/AddIatNbf8SecondsInTheFutureToClientAuthenticationAssertionClaims.java */
+export function addIatNbf8SecondsInTheFutureToClientAuthenticationAssertionClaims(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const time = Math.floor(Date.now() / 1000) + 8;
+	claims["iat"] = time;
+	claims["nbf"] = time;
+	condition("AddIatNbf8SecondsInTheFutureToClientAuthenticationAssertionClaims", ...requirements).success(
+		"Added iat/nbf values to client assertion claims which are 8 seconds in the future",
+		{
+			client_assertion_claims: claims,
+			nbf_is_8_seconds_in_the_future: instantString(time),
+			iat_is_8_seconds_in_the_future: instantString(time),
+		},
+	);
+}
+
+/**
+ * Sets `alg` of every key of the client's JWKS to RS256 (in place: the caller restores the keys afterwards).
+ *
+ * upstream: condition/client/ChangeClientJwksAlgToRS256.java
+ */
+export function changeClientJwksAlgToRS256(client: Pick<RegisteredClient, "keys">, ...requirements: string[]): void {
+	const c: Condition = condition("ChangeClientJwksAlgToRS256", ...requirements);
+	const jwks = client.keys?.jwks;
+	if (jwks == null) {
+		c.failure("Couldn't find jwks");
+	}
+	for (const key of jwks.keys as Record<string, unknown>[]) {
+		key["alg"] = "RS256";
+	}
+	c.success("Added RS256 as algorithm", { client_jwks: jwks });
+}
+
+/**
+ * The client assertion claims as an unsecured JWT ("alg": "none", empty signature).
+ *
+ * upstream: condition/client/CreateUnsecuredClientAuthenticationAssertion.java
+ */
+export function createUnsecuredClientAuthenticationAssertion(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): string {
+	const c: Condition = condition("CreateUnsecuredClientAuthenticationAssertion", ...requirements);
+	try {
+		// new PlainJWT(JWTClaimsSet.parse(claims)).serialize()
+		const claimSet = parseClaimsSet(claims as never);
+		const jwt =
+			Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url") +
+			"." +
+			Buffer.from(JSON.stringify(claimSet)).toString("base64url") +
+			".";
+		c.log("Created an unsecured client assertion using the 'none' algorithm", { client_assertion: jwt });
+		return jwt;
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse client assertion claims", e, { client_assertion_claims: claims });
+		}
+		throw e;
+	}
+}
+
+/**
+ * Flips bits of the assertion's signature so it no longer verifies.
+ *
+ * upstream: condition/client/InvalidateClientAssertionSignature.java (AbstractInvalidateJwsSignature)
+ */
+export function invalidateClientAssertionSignature(clientAssertion: string, ...requirements: string[]): string {
+	const c: Condition = condition("InvalidateClientAssertionSignature", ...requirements);
+	let parsed;
+	try {
+		parsed = parseSignedJWT(clientAssertion);
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse JWT", e, { client_assertion: clientAssertion });
+		}
+		throw e;
+	}
+	const bytes = Buffer.from(parsed.signature ?? "", "base64url");
+	// Flip some of the bits in the signature to make it invalid
+	for (let i = 0; i < bytes.length; i++) {
+		bytes[i] ^= 0x5a;
+	}
+	const invalid = parsed.parts[0] + "." + parsed.parts[1] + "." + bytes.toString("base64url");
+	c.log("Made the client_assertion signature invalid", { client_assertion: invalid });
+	return invalid;
 }

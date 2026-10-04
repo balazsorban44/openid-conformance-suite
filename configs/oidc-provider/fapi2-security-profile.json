@@ -1,0 +1,98 @@
+{
+	"description": "oidc-provider FAPI 2.0 Security Profile (OIDC_PROVIDER_PROFILE=fapi2: PAR, DPoP, PKCE, private_key_jwt static clients from targets/oidc-provider/clients-fapi2.json)",
+	"alias": "oidc-provider",
+	"plan": "fapi2-security-profile-final-test-plan",
+	"server": {
+		"discoveryUrl": "${TARGET_URL}/.well-known/openid-configuration"
+	},
+	"client": {
+		"client_id": "fapi2-client",
+		"scope": "openid offline_access",
+		"dpop_signing_alg": "PS256",
+		"jwks": {
+			"keys": [
+				{
+					"kty": "RSA",
+					"use": "sig",
+					"alg": "PS256",
+					"kid": "fapi2-client-lQOjXRqu",
+					"n": "4qEPgVDjBScBMOeGgp-6SzUGWfrUMoYVBMszG6ISKopnoTEVAehvgGjIdVUbp1iMPFkfKv2Es05Ycim-DCgYFpf5MZlIFnadpCGlAHoKHU1B9seNICTpabKLpFcaQnr-wG6esH2pbZdME9QdnSslKVwMB0W-DA2Eyq1dzU15QrjZOiNBJwxVYxWxWkxnfIxCuVuI5Adm8ZpNl9C9mpOcb_k0FZpb4I2VApLqvYQCRlOE-iyja1R9KBtb9icoBp1OtcyNJrIKiOm0U2IpMxqS0DeATPIa8NP3AJSRx5HZa4M5DAmIHJ69bFdKYKqyRBQhk_xfPcp1wmwjkmLL6lX95w",
+					"e": "AQAB",
+					"d": "KV81sWnOx9YDBaZ-i8IVBD291xdPPZn0pFdkERtZLaLuoCKRrzN7h3mZfrH2xmoHz8yFQBff7cvToaO1Kgr3usgrmb5dxpwI0znBIYEl74t3C1IKlV-nrMAHdgzgolpJv19yYM3P7E2-ebAzZ8nEkvRWzc0RkKm3IDjd8ui9xkwYh7VfOMqLbi5zsx6B3qAvin2by5UAWidUdQmq3bHbX6mUb88BZuMXMJXmCuaSAhjF7KxAglzqKQQEXVjcqUCD2wH9EPSfnBg9BO6EsKx4Xa3rlTx3P4kGSpM9H1kFt5gw0rq1DVeUmEPdRoKpkexgW50BWoMpmKjqx8h62EDKIQ",
+					"p": "9I6zpWFlp0hgINxCoDCDgrs5_utSwPRuI3KGPCUDvVMzZXVybh7HE4aQOoIF7RvUhGpoRem4sw4wXx8t7tIRCVLRoOWA2hqhQHqZ9eh5cwlcso0EAtYXLtZviM0ODcnv0U2mjhe-0WGJSWuwYbNadGfIloAKO-w_ccobOPOZYlM",
+					"q": "7TudViQa0jUzrxmYAhK6_OAmXmFzbh3f7v664zd-Y2b1eoviD7IaFThJEqTXP4TR2luCsT43-u6QD7nYvekIRHSSgFkfCDAl2ayKtkL8ruxLU-MxL7ovms941ZG05sABS0Pq0BQuibPV2FYft0LL8aUcp3T8_hk5M91D1mSka50",
+					"dp": "jvfxy-gRjmcAU5WQmadi6oVb1UxrN4Rt8ukb0oNtGTxPmqu7duclSKPtI1cp8cDIT5UJWn3VTVApNSK8Lpa-AO5awK4K0vaoeFJ0OU9r2LWLbJKF2sagDPCtiZMe-S6ptXmouf7lvfBAWxzKo4M_iTe3C0zVLszhFjuqCHRYoiM",
+					"dq": "7LYsUxSpkpA1ZwVhsMfhvosmncwdMoYquL2B21C3ExZb4RCM2955uiy0dR74DFBKWNgwuwx7LS43nwlw5GYOsseimuDSXwgz7FQHAMAsg5oRu72Ziab88zsLtgayfACgCerV9RP-L7a6rSeac_D5sL9wrQLFogGnG0Iv-0_m490",
+					"qi": "VzVoEoj7jevy1QHFeQDF-PIIn980sm8T-7-xn4BQn_Q0dorT4kY6cmUyFxngmOSB4nNSr18VL0HXzXSIrqjvJmYLPpm9nBA0lXTw_lMiHPrUVXyEg56_sX1LQUoL9WZhyT-LX6LwZUFw40qawO9c2VIVAtO2TJYiZWw-Gi9EqiY"
+				}
+			]
+		}
+	},
+	"client2": {
+		"client_id": "fapi2-client2",
+		"scope": "openid offline_access",
+		"dpop_signing_alg": "PS256",
+		"jwks": {
+			"keys": [
+				{
+					"kty": "RSA",
+					"use": "sig",
+					"alg": "PS256",
+					"kid": "fapi2-client2-e0Wz8I8Q",
+					"n": "5YmBIZZnU0gvhHWWVQM23RMcCGzilyk0mnRpInHih3KKXVDYrPWxsG8KXPajmo1yrwt8T9jTi1QKdLV1R0Bjp8OT2hu8rHWMj9MG3xn6uUbbb006q8JORqdSV6SZgWveH1N10u_n9-_WWh0t_LSfw75Lr02jiU_pxhnCDODb49PjxLixuKw9Pw7wEM6SreVvhI0esu4wXkb_1dSEDLwtMBc1DN5Yxc2H6WqCiqCBZk-yxe0zSeJoDe1Ww-sq-MlONEf-QXBBZKPfZ-N7awnJ8XUi8-At8vB_tNBy-mHHqj7p0JjFsEkXR-blbf8GkiQj-cW4qHS4qSAlsLVGUnIknw",
+					"e": "AQAB",
+					"d": "DX0EPhWJB9n_lNXrb3PLZw1cQdsoK5WBIQHDOyzHEN-NuvMTxdeASWu_slEksbcrLJciXHd-ODtINq3XxkfwiJITylGD8lHMC0Ltg0cTC-KFOuf7u856Fr52tm4Wk9uOB3g6PcWESPZqjwwU65CFAkCDUQ9hE0zDYjVESR5zktKAbfMAjFG-ENTaZXZ9TRi7XMomk6X5DvMXQOqprNv6DPNVdBQSN4fCE2In78dEJ2Olt3zrVB7QgVkrdc1X6Oa_2ZWNl5TBdKWF-Hr4Xm450RIT_Ne_sJ4N4QREaeYbtxjlvuKSspVK4olgWFusFQ272qJ_Q8ieJscoRXi5ynqDQQ",
+					"p": "-f77Aq-wZXj5OmYU1MUtUFg2MWDsivlCA1m0RGFy7M8vdgbCQVWqjAjooFIm2LM2tu5sraSKi5nyc_oyNY3EFOrm5Ai0TQD872EjxKrnSBv5Wuux4WK9KKY0HirUjSoE5V-j3TMm9u0PvlzhlNRk2hUdTDNEvSVOvaDVGY5m8ME",
+					"q": "6wy9MkmcG1Eehj1DOXSFhvV3BThEUPICuUeg714n5h-lrZSYABw3N83seX8F8cbXoiYvtrYvSCmNLFqMOuv9hLCHvrZNKcvItZiVlGxzGcti9fWQTQEW3hfOuQT2KQQMAY2TDcrJMr7_mTJ2GgDlxZNcG5uEYsQcRj2cC1xFDV8",
+					"dp": "6goloAwuTbEFUgDDO7Ykh_UtNukQScK0ZEKUmvfICZ6lRg9pyJSUh2jHr195cqHEdVmccKt78Nl8u8rdOnmvug13fsAPW4-zO79rJvEAeOeHd_DzpJc1k1qVrDBYsJdH4hy5YZpDviOM-6Akp5p3mBrwRKgykAjfQHPTTIueH4E",
+					"dq": "UAeUW4zok_x4siglvWhJFnx5O9O-nvjnqIIU76tVVmssE__mCROSUXPRskRnl7ymKtVppYI-cwmCwblKyb0UIpugfHTBrRtviTUcqN6MChpP5YLo0O8wBAqDHkfsMGbqV5UGnsmO27JggJ7Hy27GzRCxacz3tFEld1z-xndyI20",
+					"qi": "Kmaazmhj9auTVyXWi9Xq-WixIsjEKYvLz-OEixoCilKVxcyV4HQegmmpO595f6byr-yBH3Ovn-MuYDLqQFbDKzzXEoBlR6oDkXmOXCpXshOwVht755rQsEwitA699zYG81h00vdii6AuhZYfKs2k8xUIYWWb5KH6byQh11heWH8"
+				}
+			]
+		}
+	},
+	"resource": {
+		"resourceUrl": "${TARGET_URL}/me"
+	},
+	"browser": [
+		{
+			"match": "${TARGET_URL}/auth*",
+			"tasks": [
+				{
+					"task": "Login",
+					"optional": true,
+					"match": "${TARGET_URL}/interaction*",
+					"commands": [
+						["text", "name", "login", "foo", "optional"],
+						["text", "name", "password", "bar", "optional"],
+						["click", "class", "login-submit"]
+					]
+				},
+				{
+					"task": "Consent",
+					"optional": true,
+					"match": "${TARGET_URL}/interaction*",
+					"commands": [["click", "class", "login-submit"]]
+				},
+				{
+					"task": "Verify Complete",
+					"match": "*/test/*/callback*",
+					"commands": [["wait", "id", "submission_complete", 10]]
+				}
+			]
+		}
+	],
+	"target": {
+		"command": "node targets/oidc-provider/server.ts",
+		"url": "https://localhost:${PORT}",
+		"readyUrl": "${TARGET_URL}/.well-known/openid-configuration",
+		"env": {
+			"OIDC_PROVIDER_PROFILE": "fapi2",
+			"OIDC_PROVIDER_TLS_CERT": "configs/certs/localhost.crt",
+			"OIDC_PROVIDER_TLS_KEY": "configs/certs/localhost.key",
+			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt"
+		}
+	},
+	"expectedFailures": "../expected-failures/oidc-provider-fapi2.json",
+	"expectedSkips": "../expected-skips/oidc-provider-fapi2.json"
+}

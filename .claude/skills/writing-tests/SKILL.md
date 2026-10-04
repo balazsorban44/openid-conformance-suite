@@ -51,6 +51,16 @@ src/op/               helpers for testing an OpenID Provider, one file per conce
   endpoint.ts         checks shared by every endpoint response (status, content type, error fields)
   refresh-token.ts    the refresh_token grant (RefreshTokenRequestSteps, RefreshTokenRequestExpectingErrorSteps)
   request-object.ts   request objects by value / by reference (request, request_uri), unsigned or signed
+  discovery-endpoint.ts the discovery-endpoint-verification checks (OIDCC performEndpointVerification, FAPI 2
+                      performFapi2EndpointVerification)
+  fapi2.ts            FAPI 2.0 (AbstractFAPI2SPFinalServerTestModule, plain_fapi): the static clients and their key
+                      checks, the resource endpoint, the authorization request (PKCE, the signed request object),
+                      the PAR / token / resource calls with client authentication and DPoP (nonce retries), the
+                      token response checks, the resource request headers (x-fapi-*) and response checks
+  par.ts              the PAR endpoint (RFC 9126): the request, the call, the response and error checks
+  dpop.ts             DPoP (RFC 9449): the key, the proofs for the token / PAR / resource endpoints, the nonces and
+                      the use_dpop_nonce retries, dpop_jkt
+  jarm.ts             JARM: extracting and validating the `response` JWT of the authorization response
   logout.ts           RP-initiated / back-channel / front-channel logout: end_session request, post logout redirect,
                       logout token and front-channel request checks, the first login of the logout modules
   session.ts          session management: session_state, the suite's session check pages (check_session_iframe)
@@ -70,13 +80,17 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
                       the post_logout_redirect_uri redirect (AbstractOIDCCClientLogoutTest)
   session.ts          session_state, sid, the check_session_iframe and get_session_state (Session Management)
   webfinger.ts        WebFinger issuer discovery (/.well-known/webfinger on the test's server)
-tests/fixtures.ts     the `test` with the `op`, `registrationOp`, `client`, `client2`, `configureClient`, `rp`, `variant`,
-                      `plan` fixtures, and `skipTest(reason)`
+tests/fixtures.ts     the `test` with the `op`, `registrationOp`, `client`, `client2`, `configureClient`, `fapi`, `rp`,
+                      `variant`, `plan` fixtures, and `skipTest(reason)`
 tests/suite-target.ts suite-vs-suite: the emulated OP the `suiteTarget` fixture starts for an OP test (`suite_target`)
 tests/op/*.spec.ts    one file per OP plan (basic, config, dynamic, rp-initiated-logout, backchannel-logout,
                       frontchannel-logout, session-management, 3rdparty-init-login); tests/op/shared.ts: the
                       bodies of modules that are in several plans (oidcc-server, oidcc-refresh-token, ...) and the
                       code flow pieces of AbstractOIDCCServerTest (completeCodeFlow, userinfoEndpointTests)
+tests/fapi2/*.spec.ts one file per FAPI 2.0 OP plan (security-profile, message-signing); tests/fapi2/shared.ts: the
+                      bodies of the modules (both plans share them) and the PAR / DPoP flow pieces of
+                      AbstractFAPI2SPFinalServerTestModule (performAuthorizationFlow, verifyAuthorizationResponse,
+                      callTokenEndpoint, verifyTokenEndpointResponse, requestProtectedResource, performCompleteFlow)
 tests/rp/*.spec.ts    one file per RP plan (basic, dynamic, rp-initiated-logout, backchannel-logout,
                       frontchannel-logout, session-management, 3rdparty-init-login); tests/rp/shared.ts: the bodies
                       of modules that are in several plans (each spec registers them with its title and upstream
@@ -284,6 +298,21 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   policy_uri, tos_uri, sector_identifier_uri, the registrations expected to fail). `op` builds on it
   (ExtractTLSTestValuesFromServerConfiguration, the keys) and `configureClient` registers with it, so a test that
   asks for `registrationOp` and `configureClient` never fetches the OP's keys.
+- `fapi: Fapi2Op` (src/op/op.ts, `Op<Fapi2Variant>` with nullable `jwks`): the OP of a FAPI 2.0 module as upstream's
+  `AbstractFAPI2SPFinalServerTestModule.configure` sets it up (CreateRedirectUri, the OpenID Connect or OAuth 2.0
+  discovery document, CheckServerConfiguration, and with openid_connect or JARM the keys with the FAPI 2.0 key
+  checks). The test configures what upstream's configure() does next, in its order: `fapi2.configureClient(fapi)`
+  (the static `client` with ValidateClientJWKsPrivatePart and the kid / alg / key length checks),
+  `fapi2.configureSecondClient(fapi, client)` (block "Verify configuration of second client") and
+  `fapi2.setupResourceEndpoint(fapi)` (`resource.resourceUrl`). A `Fapi2Client` carries its keys and DPoP state
+  (key and the nonces the AS / RS supplied); the second client has `second: true` and the block prefix
+  "Second client: ". The FAPI 2 variant (`Fapi2Variant`): client_auth_type, sender_constrain, fapi_profile,
+  openid, fapi_request_method, fapi_response_mode, authorization_request_type, grant_management; the port covers
+  private_key_jwt + dpop + plain_fapi + simple + disabled (openid_connect and plain_oauth, unsigned and
+  signed_non_repudiation, plain_response and jarm). mTLS (client authentication or sender constraining), client
+  attestation, RAR, grant management and the ecosystem profiles (Brazil, CDR, ConnectID, KSA, CBUAE, Chile, VCI)
+  are out of scope: their modules are left out at collection time with `variantNotApplicable`, and the mTLS-only
+  conditions are not ported.
 - `conformance` (testName, log, config, server, browser) without discovery or keys, for modules whose own flow
   fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`;
   oidcc-discovery-endpoint-verification then runs `performEndpointVerification()` from src/op/discovery-endpoint.ts).
@@ -499,6 +528,10 @@ code site):
 - Modules upstream marks `@VariantNotApplicable` are left out of the spec at collection time
   (`variantNotApplicable` / `selectedVariant` in tests/fixtures.ts) rather than skipped, as upstream's plan does not
   list them for that variant.
+- The FAPI 2 flow (tests/fapi2/shared.ts) runs each of upstream's `startBlock` sections as a `block()`, which ends
+  it: the block upstream leaves open until the next `startBlock` ends with its section here, so a few entries
+  carry no block id (the redirect and callback of the modules that leave the duplicate parameters out, and the
+  token request after the "Swapping to Client2" block of ensure-client-id-in-token-endpoint).
 
 ### Review checklist
 
@@ -567,6 +600,10 @@ HTML/JS that every engine runs. A new project where the browser matters gets `br
 - A new plan: a spec file with its `test.describe` and `test.use({ plan })`, an entry in `plans`, a test
   configuration under `configs/` for the bundled target (and expected failures / skips if the target deviates), and
   a project in `projects`.
+- A plan ported in steps lists all of upstream's modules in `plans` (so `list --modules` and the UI show the whole
+  plan) and the ones not yet written as `// TODO(port): <Module>.java` comments at the end of the spec (the FAPI 2
+  specs; the TLS checks of the happy flow and ensure-holder-of-key-required are `TODO(port)` comments in
+  tests/fapi2/shared.ts).
 
 ## Sync with upstream
 

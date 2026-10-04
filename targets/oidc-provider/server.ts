@@ -15,9 +15,13 @@
  *   OIDC_PROVIDER_TLS_CERT / _KEY     PEM file paths: serve https (the suite requires https for registration_client_uri,
  *                                     initiate_login_uri, sector_identifier_uri ...); the default ISSUER is then https
  *   OIDC_PROVIDER_AUTO_APPROVE=1      self-test mode for the RP target: no login/consent/logout user interaction
+ *   OIDC_PROVIDER_PROFILE=fapi2       FAPI 2.0 Security Profile mode (the fapi2-* plans): oidc-provider's FAPI 2.0
+ *                                     profile, PAR required, DPoP with server nonces, JARM, signed request objects,
+ *                                     PKCE S256, private_key_jwt clients (clients-fapi2.json), x-fapi-interaction-id
+ *                                     on userinfo responses. Without it the target behaves as for the OIDCC plans.
  *   DEBUG_OIDC_PROVIDER=1             log every request and provider error
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -40,6 +44,11 @@ const DEBUG = env["DEBUG_OIDC_PROVIDER"] === "1";
  * confirmation complete without user interaction. Never used for the OP plans.
  */
 const AUTO_APPROVE = env["OIDC_PROVIDER_AUTO_APPROVE"] === "1";
+/**
+ * FAPI 2.0 mode (OIDC_PROVIDER_PROFILE=fapi2): what the fapi2-security-profile-final / fapi2-message-signing-final
+ * plans need from the OP under test. Everything else stays as for the OIDCC plans.
+ */
+const FAPI2 = env["OIDC_PROVIDER_PROFILE"] === "fapi2";
 const TLS =
 	env["OIDC_PROVIDER_TLS_CERT"] && env["OIDC_PROVIDER_TLS_KEY"]
 		? {
@@ -85,11 +94,15 @@ const ACR = "urn:mace:incommon:iap:bronze";
 /** cookie holding the OP browser state for OpenID Connect Session Management (readable by check_session_iframe JS) */
 const OPBS_COOKIE = "op_browser_state";
 
-/** static clients may use any suite redirect URI on the loopback host (the suite port is dynamic) */
-const suiteUri = (endpoint: string) =>
-	new RegExp(String.raw`^https?://(localhost|127\.0\.0\.1)(:\d+)?/test/(a/[^/?#]+|[^/?#]+)/${endpoint}$`);
+/**
+ * static clients may use any suite redirect URI on the loopback host (the suite port is dynamic); the FAPI plans'
+ * second client registers the redirect URI with the query suffix of upstream's instructions
+ * (AddRedirectUriQuerySuffix), which is accepted as such in FAPI 2.0 mode
+ */
+const suiteUri = (endpoint: string, suffix = "") =>
+	new RegExp(String.raw`^https?://(localhost|127\.0\.0\.1)(:\d+)?/test/(a/[^/?#]+|[^/?#]+)/${endpoint}${suffix}$`);
 const STATIC_CLIENT_URIS = {
-	redirectUriAllowed: suiteUri("callback"),
+	redirectUriAllowed: suiteUri("callback", FAPI2 ? String.raw`(\?dummy1=lorem&dummy2=ipsum)?` : ""),
 	postLogoutRedirectUriAllowed: suiteUri("post_logout_redirect"),
 };
 
@@ -192,7 +205,10 @@ ${frames.map((src) => `<iframe src="${htmlSafe(src)}" onload="loaded()" hidden><
 export async function start(): Promise<{ issuer: string; close(): Promise<void> }> {
 	const staticClients: Record<string, unknown>[] = JSON.parse(
 		env["OIDC_PROVIDER_CLIENTS"] ||
-			readFileSync(env["OIDC_PROVIDER_CLIENTS_FILE"] ?? new URL("clients.json", import.meta.url), "utf8"),
+			readFileSync(
+				env["OIDC_PROVIDER_CLIENTS_FILE"] ?? new URL(FAPI2 ? "clients-fapi2.json" : "clients.json", import.meta.url),
+				"utf8",
+			),
 	);
 	const staticClientIds = new Set(staticClients.map((c) => String(c["client_id"])));
 
@@ -207,6 +223,11 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 				(jwa as unknown as Record<string, string[]>)[key].filter((alg) => !alg.startsWith("ML-DSA")),
 			]),
 	);
+	if (FAPI2) {
+		// FAPI 2.0 5.4: PS256 / ES256 / EdDSA; the suite's DPoP key follows the client's dpop_signing_alg when the
+		// OP lists it, else the first algorithm listed (GenerateDpopKey)
+		enabledJWA["dPoPSigningAlgValues"] = ["ES256", "PS256", "Ed25519", "EdDSA"];
+	}
 
 	// front-channel logout iframes pending per logout confirmation (keyed by the end_session xsrf secret)
 	const pendingFrontchannel = new Map<string, { clientId?: string; frames: { clientId: string; url: string }[] }>();
@@ -232,8 +253,20 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 			// oidcc-dynamic-certification-test-plan, all dynamic_client variants: open registration without IAT
 			registration: { enabled: true, initialAccessToken: false },
 			registrationManagement: { enabled: true, rotateRegistrationAccessToken: true },
-			// oidcc-request-*, oidcc-unsigned-request-object-*, oidcc-ensure-request-object-*: request parameter
+			// oidcc-request-*, oidcc-unsigned-request-object-*, oidcc-ensure-request-object-*: request parameter;
+			// fapi2-message-signing-final-* (signed_non_repudiation): the request object pushed to the PAR endpoint
 			requestObjects: { enabled: true, requireSignedRequestObject: false },
+			// FAPI 2.0 mode: oidc-provider's FAPI 2.0 profile (PKCE S256 required, request objects need exp/nbf/aud,
+			// no access tokens in the query), PAR required, DPoP with server-provided nonces (RFC9449-8.2: the suite's
+			// nonce retry at the PAR, token and resource endpoints is exercised on every call), JARM
+			...(FAPI2
+				? {
+						fapi: { enabled: true, profile: "2.0" },
+						dPoP: { enabled: true, nonceSecret: randomBytes(32), requireNonce: () => true },
+						pushedAuthorizationRequests: { enabled: true, requirePushedAuthorizationRequests: true },
+						jwtResponseModes: { enabled: true },
+					}
+				: {}),
 			// oidcc-idtoken-*-encrypted, oidcc-userinfo-*: id_token / userinfo encryption when the client registers it
 			encryption: { enabled: true },
 			// userinfo_signed_response_alg support
@@ -324,8 +357,8 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 		},
 		clientAuthMethods: ["none", "client_secret_basic", "client_secret_jwt", "client_secret_post", "private_key_jwt"],
 		enabledJWA,
-		// PKCE is optional (the OIDC plans only send it in some modules)
-		pkce: { required: () => false },
+		// PKCE is optional (the OIDC plans only send it in some modules); FAPI 2.0 requires S256
+		pkce: { required: () => FAPI2 },
 		// oidcc-ensure-redirect-uri-in-authorization-request: redirect_uri is REQUIRED in OIDC, even with one registered
 		allowOmittingSingleRegisteredRedirectUri: false,
 		// oidcc-refresh-token / oidcc-refresh-token-rp-key-rotation: refresh tokens for offline_access (same rule as
@@ -425,6 +458,13 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 		}
 
 		await next();
+
+		// FAPI 2.0 mode: the resource server echoes (or creates) the x-fapi-interaction-id of a userinfo request
+		// (FAPI 2.0 Implementation Advice 2.1.1, CheckForFAPIInteractionIdInResourceResponse)
+		if (FAPI2 && ctx.path === "/me") {
+			const interactionId = ctx.get("x-fapi-interaction-id");
+			ctx.set("x-fapi-interaction-id", interactionId || randomUUID());
+		}
 
 		// discovery additions for the features implemented in this file
 		if (ctx.path === "/.well-known/openid-configuration" && ctx.status === 200 && ctx.body) {

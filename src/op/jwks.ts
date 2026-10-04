@@ -5,7 +5,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { block, condition, soft, type Condition } from "../suite/conditions.ts";
 import { HttpError, request } from "../suite/http.ts";
-import { parseJwksLenientlyLoggingSkips, ParseException, type Jwks } from "../suite/jose.ts";
+import { parseJwksLenientlyLoggingSkips, ParseException, type Jwks, type JWK } from "../suite/jose.ts";
 import {
 	findStructurallyInvalidKeys,
 	issuesToJson,
@@ -94,6 +94,137 @@ function checkForKeyIdInJWKs(c: Condition, jwks: Jwks): void {
 /** upstream: condition/common/CheckForKeyIdInServerJWKs.java */
 export function checkForKeyIdInServerJWKs(jwks: Jwks, ...requirements: string[]): void {
 	checkForKeyIdInJWKs(condition("CheckForKeyIdInServerJWKs", ...requirements), jwks);
+}
+
+/** upstream: condition/common/CheckForKeyIdInClientJWKs.java */
+export function checkForKeyIdInClientJWKs(jwks: Jwks, ...requirements: string[]): void {
+	checkForKeyIdInJWKs(condition("CheckForKeyIdInClientJWKs", ...requirements), jwks);
+}
+
+/**
+ * Every signing key of the client's JWKS has a FAPI 2.0 `alg` (PS256, ES256, EdDSA, Ed25519; an EdDSA key on the
+ * Ed25519 curve).
+ *
+ * upstream: condition/common/FAPI2CheckKeyAlgInClientJWKs.java (AbstractFAPI2CheckKeyAlgInClientJWKs)
+ */
+export function fapi2CheckKeyAlgInClientJWKs(jwks: Jwks, ...requirements: string[]): void {
+	const c: Condition = condition("FAPI2CheckKeyAlgInClientJWKs", ...requirements);
+	const permitted = ["PS256", "ES256", "EdDSA", "Ed25519"];
+	const keys = jwks.keys as unknown;
+	if (!Array.isArray(keys)) {
+		c.failure("keys array not found in client JWKs");
+	}
+	for (const key of keys) {
+		if (typeof key !== "object" || key === null || Array.isArray(key)) {
+			c.failure("invalid key in client JWKs", { key });
+		}
+		const keyObj = key as Record<string, unknown>;
+		if (!Object.hasOwn(keyObj, "alg")) {
+			c.failure(
+				"'alg' not found in client JWKS provided in the test configuration - this is required to set the request object signing algorithm the conformance suite will use, and should be set to a permitted alg",
+				{ key, permitted },
+			);
+		}
+		const use = Object.hasOwn(keyObj, "use") ? String(keyObj["use"]) : null;
+		if (use == null || use === "sig") {
+			const alg = String(keyObj["alg"]);
+			if (!permitted.includes(alg)) {
+				c.failure("client jwks contains a signing key with a non-permitted alg", { key: keyObj, permitted });
+			}
+			if (alg === "EdDSA" || alg === "Ed25519") {
+				if (!Object.hasOwn(keyObj, "crv")) {
+					c.failure("client jwks contains " + alg + " alg with a missing crv parameter", { key: keyObj });
+				}
+				if (keyObj["crv"] !== "Ed25519") {
+					c.failure("client jwks contains " + alg + " alg with an unsupported curve", { key: keyObj });
+				}
+			}
+		}
+	}
+	c.success("Keys in client JWKS all have permitted 'alg'", { permitted });
+}
+
+/** Nimbus JWK.size(): the modulus bit length of an RSA key, the curve size of an EC key */
+function keySize(jwk: JWK): number {
+	if (jwk["kty"] === "RSA") {
+		const n = Buffer.from(String(jwk["n"]), "base64url");
+		let i = 0;
+		while (i < n.length && n[i] === 0) {
+			i++;
+		}
+		return i === n.length ? 0 : (n.length - i - 1) * 8 + (32 - Math.clz32(n[i]));
+	}
+	const curves: Record<string, number> = { "P-256": 256, secp256k1: 256, "P-384": 384, "P-521": 521 };
+	return curves[String(jwk["crv"])] ?? 0;
+}
+
+/**
+ * upstream: condition/as/AbstractEnsureMinimumKeyLength.java (RSA keys at least `minimumKeyLengthRsa` bits, EC keys
+ * at least `minimumKeyLengthEc`; keys the JOSE library cannot parse are logged and skipped)
+ */
+function ensureMinimumKeyLength(
+	c: Condition,
+	jwks: Jwks | null | undefined,
+	jwksKey: string,
+	minimumKeyLengthRsa: number,
+	minimumKeyLengthEc: number,
+): void {
+	if (jwks == null) {
+		c.failure("Couldn't find " + jwksKey + " in environment");
+	}
+	let jwkset;
+	try {
+		// keys the JOSE library cannot parse have no key-length requirement: a recipient ignores keys it cannot use
+		// (RFC 7517 section 5), so they are logged and skipped here
+		jwkset = parseJwksLenientlyLoggingSkips(c, jwks, jwksKey);
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Failure parsing " + jwksKey, e);
+		}
+		throw e;
+	}
+	for (const jwk of jwkset.keys) {
+		let minimumLength: number;
+		if (jwk["kty"] === "RSA") {
+			minimumLength = minimumKeyLengthRsa;
+		} else if (jwk["kty"] === "EC") {
+			minimumLength = minimumKeyLengthEc;
+		} else {
+			// No requirement for other key types
+			continue;
+		}
+		const keyLength = keySize(jwk);
+		if (keyLength < minimumLength) {
+			c.failure("Key found in " + jwksKey + " has fewer bits (is shorter) than required", {
+				minimum: minimumLength,
+				actual: keyLength,
+				key: JSON.stringify(jwk),
+			});
+		}
+	}
+	c.success("Validated minimum key lengths for " + jwksKey, { [jwksKey]: jwks });
+}
+
+/** upstream: condition/as/FAPI2FinalEnsureMinimumServerKeyLength.java */
+export function fapi2FinalEnsureMinimumServerKeyLength(jwks: Jwks | null | undefined, ...requirements: string[]): void {
+	ensureMinimumKeyLength(
+		condition("FAPI2FinalEnsureMinimumServerKeyLength", ...requirements),
+		jwks,
+		"server_jwks",
+		2048,
+		224,
+	);
+}
+
+/** upstream: condition/as/FAPI2FinalEnsureMinimumClientKeyLength.java */
+export function fapi2FinalEnsureMinimumClientKeyLength(jwks: Jwks | null | undefined, ...requirements: string[]): void {
+	ensureMinimumKeyLength(
+		condition("FAPI2FinalEnsureMinimumClientKeyLength", ...requirements),
+		jwks,
+		"client_jwks",
+		2048,
+		224,
+	);
 }
 
 /** upstream: condition/common/AbstractCheckDistinctKeyIdValueInJWKs.java */

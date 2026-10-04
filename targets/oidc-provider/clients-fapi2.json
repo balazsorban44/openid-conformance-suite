@@ -1,0 +1,52 @@
+[
+	{
+		"client_id": "fapi2-client",
+		"client_name": "first FAPI 2 static client",
+		"redirect_uris": ["http://localhost/test/a/oidc-provider/callback"],
+		"response_types": ["code"],
+		"grant_types": ["authorization_code", "refresh_token"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "PS256",
+		"id_token_signed_response_alg": "PS256",
+		"authorization_signed_response_alg": "PS256",
+		"require_pushed_authorization_requests": true,
+		"dpop_bound_access_tokens": true,
+		"jwks": {
+			"keys": [
+				{
+					"kty": "RSA",
+					"use": "sig",
+					"alg": "PS256",
+					"kid": "fapi2-client-lQOjXRqu",
+					"n": "4qEPgVDjBScBMOeGgp-6SzUGWfrUMoYVBMszG6ISKopnoTEVAehvgGjIdVUbp1iMPFkfKv2Es05Ycim-DCgYFpf5MZlIFnadpCGlAHoKHU1B9seNICTpabKLpFcaQnr-wG6esH2pbZdME9QdnSslKVwMB0W-DA2Eyq1dzU15QrjZOiNBJwxVYxWxWkxnfIxCuVuI5Adm8ZpNl9C9mpOcb_k0FZpb4I2VApLqvYQCRlOE-iyja1R9KBtb9icoBp1OtcyNJrIKiOm0U2IpMxqS0DeATPIa8NP3AJSRx5HZa4M5DAmIHJ69bFdKYKqyRBQhk_xfPcp1wmwjkmLL6lX95w",
+					"e": "AQAB"
+				}
+			]
+		}
+	},
+	{
+		"client_id": "fapi2-client2",
+		"client_name": "second FAPI 2 static client",
+		"redirect_uris": ["http://localhost/test/a/oidc-provider/callback?dummy1=lorem&dummy2=ipsum"],
+		"response_types": ["code"],
+		"grant_types": ["authorization_code", "refresh_token"],
+		"token_endpoint_auth_method": "private_key_jwt",
+		"token_endpoint_auth_signing_alg": "PS256",
+		"id_token_signed_response_alg": "PS256",
+		"authorization_signed_response_alg": "PS256",
+		"require_pushed_authorization_requests": true,
+		"dpop_bound_access_tokens": true,
+		"jwks": {
+			"keys": [
+				{
+					"kty": "RSA",
+					"use": "sig",
+					"alg": "PS256",
+					"kid": "fapi2-client2-e0Wz8I8Q",
+					"n": "5YmBIZZnU0gvhHWWVQM23RMcCGzilyk0mnRpInHih3KKXVDYrPWxsG8KXPajmo1yrwt8T9jTi1QKdLV1R0Bjp8OT2hu8rHWMj9MG3xn6uUbbb006q8JORqdSV6SZgWveH1N10u_n9-_WWh0t_LSfw75Lr02jiU_pxhnCDODb49PjxLixuKw9Pw7wEM6SreVvhI0esu4wXkb_1dSEDLwtMBc1DN5Yxc2H6WqCiqCBZk-yxe0zSeJoDe1Ww-sq-MlONEf-QXBBZKPfZ-N7awnJ8XUi8-At8vB_tNBy-mHHqj7p0JjFsEkXR-blbf8GkiQj-cW4qHS4qSAlsLVGUnIknw",
+					"e": "AQAB"
+				}
+			]
+		}
+	}
+]
