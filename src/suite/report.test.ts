@@ -90,20 +90,18 @@ test("counts name the expected failure and never call it failed", () => {
 	expect(countOutcomes([failed, ...all])).toBe("1 failed, 2 passed, 1 expected failure, 1 review, 1 skipped");
 });
 
-test("summary of a run without unexpected failures", () => {
+test("summary of a run without unexpected failures: one line, the rest collapsed", () => {
 	const md = renderSummaryMarkdown([passed, skipped, review, expectedFailure], {
 		title: "op-dynamic",
 		durationMs: 72_000,
 	});
 	expect(md).toBe(
 		[
-			"## ✅ op-dynamic",
+			"### ✅ op-dynamic · 1 passed · 1 expected failure · 1 review · 1 skipped · 1m12s",
 			"",
-			"**OK** · 1 passed · 1 expected failure · 1 review · 1 skipped · 1m12s",
+			"<details><summary>4 modules (3 skipped, review or expected)</summary>",
 			"",
-			"### oidcc-dynamic-certification-test-plan",
-			"",
-			"`[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_type=code][server_metadata=discovery]`",
+			"**oidcc-dynamic-certification-test-plan** `[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_type=code][server_metadata=discovery]`",
 			"",
 			"| Module | Result | Variant differs | Note |",
 			"|---|---|---|---|",
@@ -111,9 +109,7 @@ test("summary of a run without unexpected failures", () => {
 			"| `oidcc-ensure-redirect-uri-in-authorization-request` | 👀 review |  | manual review |",
 			"| `oidcc-server-rotate-keys` | 🟡 expected failure | client_auth_type=client_secret_basic | `VerifyNewJwksHasNewSigningKey` |",
 			"",
-			"<details><summary>✅ 1 passed</summary>",
-			"",
-			"`oidcc-idtoken-rs256`",
+			"✅ `oidcc-idtoken-rs256`",
 			"",
 			"</details>",
 			"",
@@ -148,11 +144,11 @@ test("an unexpected failure is first, with condition, block, message and the log
 		reportUrl: "https://github.com/o/r/actions/runs/1#artifacts",
 	});
 	const lines = md.split("\n");
-	expect(lines[0]).toBe("## ❌ op-dynamic");
-	expect(lines[2]).toBe("**1 failed** · 1 passed · 1 expected failure · 4.8s");
-	expect(lines[2]).not.toContain("OK");
-	expect(lines.indexOf("### ❌ Unexpected failures")).toBeLessThan(
-		lines.indexOf("### oidcc-dynamic-certification-test-plan"),
+	expect(lines[0]).toBe("### ❌ op-dynamic · **1 failed** · 1 passed · 1 expected failure · 4.8s");
+	expect(lines[0]).not.toContain("OK");
+	// the failure comes before the collapsed module list
+	expect(lines.findIndex((l) => l.startsWith("- **`oidcc-idtoken-kid`**"))).toBeLessThan(
+		lines.findIndex((l) => l.startsWith("<details>")),
 	);
 	expect(md).toContain(
 		'- **`oidcc-idtoken-kid`** — `EnsureIdTokenContainsKid` in "Check the id_token": id_token header | has no kid second line',

@@ -42,7 +42,26 @@ export async function freePort(): Promise<number> {
 	return port;
 }
 
-export async function startTarget(cfg: TargetConfig, root = process.cwd()): Promise<RunningTarget> {
+/** The target process ended before its readyUrl answered (a port taken by a parallel worker, a crash) */
+export class TargetExitedError extends Error {}
+
+/**
+ * Starts the target; when it exits before it is ready and its ports were picked by the suite, tries again with
+ * new ones (up to `attempts`): workers starting at the same moment can pick the same free port.
+ */
+export async function startTarget(cfg: TargetConfig, root = process.cwd(), attempts = 3): Promise<RunningTarget> {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return await startOnce(cfg, root);
+		} catch (e) {
+			if (!(e instanceof TargetExitedError) || attempt >= attempts || !JSON.stringify(cfg).includes("${PORT")) {
+				throw e;
+			}
+		}
+	}
+}
+
+async function startOnce(cfg: TargetConfig, root: string): Promise<RunningTarget> {
 	const json = JSON.stringify(cfg);
 	const port = json.includes("${PORT}") ? await freePort() : null;
 	const vars: Record<string, string> = port == null ? {} : { PORT: String(port) };
@@ -82,7 +101,7 @@ export async function startTarget(cfg: TargetConfig, root = process.cwd()): Prom
 
 	const exited = new Promise<never>((_, reject) => {
 		child.once("exit", (code) =>
-			reject(new Error(`target '${target.command}' exited with code ${code}\n${output.join("")}`)),
+			reject(new TargetExitedError(`target '${target.command}' exited with code ${code}\n${output.join("")}`)),
 		);
 	});
 	exited.catch(() => {});

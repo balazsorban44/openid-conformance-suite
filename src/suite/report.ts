@@ -210,65 +210,62 @@ export function renderSummaryMarkdown(
 	const failed = reports.filter((r) => r.outcome === "failed");
 	const duration = opts.durationMs ?? reports.reduce((sum, r) => sum + r.durationMs, 0);
 	const counts = countOutcomes(reports, " · ").replace(/^(\d+ failed)/, "**$1**");
+	const title = opts.title ?? "OpenID conformance results";
 	const lines = [
-		`## ${failed.length > 0 ? ICON.failed : ICON.passed} ${opts.title ?? "OpenID conformance results"}`,
-		"",
-		reports.length === 0
-			? "No modules ran."
-			: `${failed.length > 0 ? "" : "**OK** · "}${counts} · ${formatDuration(duration)}`,
+		`### ${failed.length > 0 ? ICON.failed : ICON.passed} ${title} · ${reports.length === 0 ? "no modules ran" : `${counts} · ${formatDuration(duration)}`}`,
 		"",
 	];
 
-	if (failed.length > 0) {
-		lines.push("### ❌ Unexpected failures", "");
-		for (const r of failed) {
-			const reasons = failureReasons(r, "`");
-			lines.push(`- **\`${r.testName}\`**${reasons.length === 1 ? ` — ${reasons[0]}` : ""}`);
-			if (reasons.length > 1) {
-				lines.push(...reasons.slice(0, 5).map((t) => `  - ${t}`));
-				if (reasons.length > 5) {
-					lines.push(`  - … and ${reasons.length - 5} more`);
-				}
-			}
-			const log = r.attachments?.["log.html"];
-			if (log) {
-				lines.push(`  - log: \`${log}\`${artifactNote(opts)}`);
+	for (const r of failed) {
+		const reasons = failureReasons(r, "`");
+		lines.push(`- **\`${r.testName}\`**${reasons.length === 1 ? ` — ${reasons[0]}` : ""}`);
+		if (reasons.length > 1) {
+			lines.push(...reasons.slice(0, 5).map((t) => `  - ${t}`));
+			if (reasons.length > 5) {
+				lines.push(`  - … and ${reasons.length - 5} more`);
 			}
 		}
+		const files = ["log.html", "video", "trace"]
+			.filter((name) => r.attachments?.[name])
+			.map((name) => `${name === "log.html" ? "log" : name}: \`${r.attachments?.[name]}\``);
+		if (files.length > 0) {
+			lines.push(`  - ${files.join(", ")}${artifactNote(opts)}`);
+		}
+	}
+	if (failed.length > 0) {
 		lines.push("");
 	}
 
-	for (const [plan, rs] of Map.groupBy(reports, (r) => r.plan)) {
-		const { shared, deviations } = planVariant(rs);
-		lines.push(`### ${plan}`, "");
-		if (shared) {
-			lines.push(`\`${shared}\``, "");
-		}
-		const noted = rs.filter((r) => r.outcome !== "passed" && r.outcome !== "failed");
-		if (noted.length > 0) {
-			const variantColumn = noted.some((r) => deviations(r) !== "");
-			lines.push(
-				`| Module | Result |${variantColumn ? " Variant differs |" : ""} Note |`,
-				`|---|---|${variantColumn ? "---|" : ""}---|`,
-			);
-			for (const r of noted) {
+	// everything else stays out of the way: one collapsed block per run
+	const noted = reports.filter((r) => r.outcome !== "passed" && r.outcome !== "failed");
+	if (reports.length > 0) {
+		lines.push(
+			`<details><summary>${reports.length} modules${noted.length > 0 ? ` (${noted.length} skipped, review or expected)` : ""}</summary>`,
+			"",
+		);
+		for (const [plan, rs] of Map.groupBy(reports, (r) => r.plan)) {
+			const { shared, deviations } = planVariant(rs);
+			lines.push(`**${plan}**${shared ? ` \`${shared}\`` : ""}`, "");
+			const notedHere = rs.filter((r) => r.outcome !== "passed" && r.outcome !== "failed");
+			if (notedHere.length > 0) {
+				const variantColumn = notedHere.some((r) => deviations(r) !== "");
 				lines.push(
-					`| \`${r.testName}\` | ${ICON[r.outcome]} ${r.outcome} |${variantColumn ? ` ${cell(deviations(r))} |` : ""} ${cell(noteOf(r, "`"))} |`,
+					`| Module | Result |${variantColumn ? " Variant differs |" : ""} Note |`,
+					`|---|---|${variantColumn ? "---|" : ""}---|`,
 				);
+				for (const r of notedHere) {
+					lines.push(
+						`| \`${r.testName}\` | ${ICON[r.outcome]} ${r.outcome} |${variantColumn ? ` ${cell(deviations(r))} |` : ""} ${cell(noteOf(r, "`"))} |`,
+					);
+				}
+				lines.push("");
 			}
-			lines.push("");
+			const passed = rs.filter((r) => r.outcome === "passed");
+			if (passed.length > 0) {
+				lines.push(`${ICON.passed} ${passed.map((r) => `\`${r.testName}\``).join(", ")}`, "");
+			}
 		}
-		const passed = rs.filter((r) => r.outcome === "passed");
-		if (passed.length > 0) {
-			lines.push(
-				`<details><summary>${ICON.passed} ${passed.length} passed</summary>`,
-				"",
-				passed.map((r) => `\`${r.testName}\``).join(", "),
-				"",
-				"</details>",
-				"",
-			);
-		}
+		lines.push("</details>", "");
 	}
 	return lines.join("\n");
 }
