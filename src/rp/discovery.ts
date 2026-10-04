@@ -90,6 +90,13 @@ export function oidccGenerateServerConfiguration(baseUrl: string): ServerMetadat
 	return generateServerConfiguration("OIDCCGenerateServerConfiguration", baseUrl, {});
 }
 
+/** upstream: condition/as/OIDCCGenerateServerConfigurationWithRefreshTokenGrantType.java */
+export function oidccGenerateServerConfigurationWithRefreshTokenGrantType(baseUrl: string): ServerMetadata {
+	return generateServerConfiguration("OIDCCGenerateServerConfigurationWithRefreshTokenGrantType", baseUrl, {
+		grantTypes: ["authorization_code", "implicit", "refresh_token"],
+	});
+}
+
 /** upstream: condition/as/OIDCCGenerateServerConfigurationIdTokenSigningAlgRS256Only.java */
 export function oidccGenerateServerConfigurationIdTokenSigningAlgRS256Only(baseUrl: string): ServerMetadata {
 	return generateServerConfiguration("OIDCCGenerateServerConfigurationIdTokenSigningAlgRS256Only", baseUrl, {

@@ -16,7 +16,7 @@ import * as token from "../../src/op/token.ts";
 import * as userinfo from "../../src/op/userinfo.ts";
 import { block, soft } from "../../src/suite/conditions.ts";
 import { waitFor2Seconds, waitFor30Seconds, waitForOneSecond } from "../../src/suite/wait.ts";
-import { skipTest, test } from "../fixtures.ts";
+import { skipTest, test, variantNotApplicable } from "../fixtures.ts";
 import {
 	completeCodeFlow,
 	oidccEnsureRequestObjectWithRedirectUri,
@@ -27,12 +27,11 @@ import {
 } from "./shared.ts";
 
 test.describe("oidcc-basic-certification-test-plan", () => {
-	test.use({
-		plan: {
-			name: "oidcc-basic-certification-test-plan",
-			variant: { response_type: "code", client_auth_type: "client_secret_basic", response_mode: "default" },
-		},
-	});
+	const plan = {
+		name: "oidcc-basic-certification-test-plan",
+		variant: { response_type: "code", client_auth_type: "client_secret_basic", response_mode: "default" },
+	};
+	test.use({ plan });
 
 	// upstream: openid/OIDCCServerTest.java (OP-Response-code)
 	test(
@@ -70,10 +69,9 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 		});
 	});
 
-	test.describe(() => {
-		// upstream @VariantNotApplicable: the module registers a client without an id_token signing alg
-		test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients");
-
+	// upstream @VariantNotApplicable(parameter = ClientRegistration.class, values = { "static_client" }): the module
+	// registers a client without an id_token signing alg, so the plan does not have it for static clients
+	if (!variantNotApplicable(plan, { client_registration: ["static_client"] })) {
 		// upstream: openid/OIDCCIdTokenSignature.java (OP-IDToken-Signature, OP-IDToken-kid)
 		test("oidcc-idtoken-signature: without a requested algorithm the id_token is signed with RS256 and names its key", async ({
 			op,
@@ -105,7 +103,7 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 				soft(() => ensureHttpStatusCodeIs200(res));
 			});
 		});
-	});
+	}
 
 	// upstream: openid/OIDCCAuthCodeReuse.java (OP-OAuth-2nd)
 	test("oidcc-codereuse: a second token request with the same code is rejected with invalid_grant", async ({
@@ -1080,10 +1078,9 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 		});
 	});
 
-	test.describe(() => {
-		// upstream @VariantNotApplicable: the module registers a client with id_token_signed_response_alg=none
-		test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients");
-
+	// upstream @VariantNotApplicable(parameter = ClientRegistration.class, values = { "static_client" }): the modules
+	// register a client with id_token_signed_response_alg=none, so the plan does not have them for static clients
+	if (!variantNotApplicable(plan, { client_registration: ["static_client"] })) {
 		// upstream: openid/OIDCCIdTokenUnsigned.java (OP-IDToken-none)
 		test(
 			"oidcc-idtoken-unsigned: an id_token requested without a signature (alg=none) is returned with alg none",
@@ -1141,7 +1138,7 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 				},
 			});
 		});
-	});
+	}
 
 	// upstream: openid/OIDCCUnsignedRequestObjectSupportedCorrectlyOrRejectedAsUnsupported.java (OP-request-Unsigned)
 	test("oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported: an unsigned request object by value is processed or rejected with request_not_supported", async ({

@@ -329,9 +329,14 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `suite_target.config`, and sets the module's `server.discoveryUrl` to it. The emulated OP's checks log into its
   own log (startEmulatedOp keeps the context it was started in for every request it serves), attached as
   `emulated-op-log.json` / `emulated-op-log.html`, and are not part of the module's expected-failures analysis. It
-  serves any number of flows until the test ends; what it cannot serve is in the project's `skipModules`, what it does
-  differently in configs/expected-failures/suite-vs-suite.json. Modules that only use `conformance` (no `op`) do not
-  get it.
+  serves any number of flows until the test ends and runs with `opUnderTest` (EmulatedOpOptions): a failed check
+  on a request becomes the OAuth error response an OP gives (error redirect, error page, 400 / 401 JSON) instead of
+  ending the test, several registered clients each keep their authorization / tokens / refresh token (`selectClient`),
+  request objects by value or by reference are taken whatever the variant says, the user's auth_time is kept between
+  flows (prompt=login and an exceeded max_age authenticate afresh, prompt=none without a session is login_required),
+  an authorization code is exchanged once, and token responses carry expires_in and cache headers. The RP tests never
+  set it, so their OP stays upstream's. What the emulated OP still does differently is in
+  configs/expected-failures/suite-vs-suite.json. Modules that only use `conformance` (no `op`) do not get it.
 
 ## Checks (upstream conditions)
 
@@ -489,6 +494,11 @@ code site):
   which the nginx/apache proxy adds upstream.
 - `oidcc-server-rotate-keys` (tests/op/dynamic.spec.ts) does not wait for the user to press 'Start' and logs a
   `TEST-RUNNER` INFO entry saying so (upstream's CI script `run-test-plan.py` starts it the same way).
+- The emulated OP parses a `claims` query parameter as JSON (src/rp/authorization.ts `claimsParameter`). Upstream
+  reads it as a JSON object without parsing the string, so an RP that sends one (OIDCC 5.5) gets a 500.
+- Modules upstream marks `@VariantNotApplicable` are left out of the spec at collection time
+  (`variantNotApplicable` / `selectedVariant` in tests/fixtures.ts) rather than skipped, as upstream's plan does not
+  list them for that variant.
 
 ### Review checklist
 

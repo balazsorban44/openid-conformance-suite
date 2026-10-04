@@ -15,7 +15,7 @@ import {
 	dontAllowHttpIfNativeAndNotLocalhost,
 } from "../suite/uri.ts";
 import { calculateCHash, createIdToken } from "./id-token.ts";
-import type { EmulatedOp } from "./op.ts";
+import { OAuthError, type EmulatedOp, type RpVariant } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 import {
 	checkForUnexpectedClaimsInRequestObject,
@@ -340,6 +340,36 @@ export function ensureOpenIDInScopeRequest(scope: string, ...requirements: strin
 	c.success("Found 'openid' scope in request", { expected: "openid", actual: scopes });
 }
 
+/** The request type an OP under test handles: what the request carries (opUnderTest) */
+function requestTypeOf(params: AuthorizationParams): RpVariant["request_type"] {
+	if (params["request"] != null) {
+		return "request_object";
+	}
+	if (params["request_uri"] != null) {
+		return "request_uri";
+	}
+	return "plain_http_request";
+}
+
+/** The prompt values of the request (upstream reads prompt as one string) */
+function promptValues(params: AuthorizationParams): string[] {
+	return (param(params, "prompt") ?? "").split(" ").filter(Boolean);
+}
+
+/**
+ * opUnderTest: the user's auth_time for this authorization: the session's, unless there is none, the request has
+ * prompt=login, or the session is older than the requested max_age (then the user authenticates afresh)
+ */
+function sessionAuthTime(op: EmulatedOp, params: AuthorizationParams): number {
+	const now = Math.floor(Date.now() / 1000);
+	const previous = op.sessionAuthTime;
+	const maxAge = typeof params["max_age"] === "number" ? params["max_age"] : null;
+	const fresh =
+		previous == null || promptValues(params).includes("login") || (maxAge != null && now - previous > maxAge);
+	op.sessionAuthTime = fresh ? now : previous;
+	return op.sessionAuthTime as number;
+}
+
 /** upstream: condition/as/DisallowMaxAgeEqualsZeroAndPromptNone.java */
 export function disallowMaxAgeEqualsZeroAndPromptNone(params: AuthorizationParams, ...requirements: string[]): void {
 	const c: Condition = condition("DisallowMaxAgeEqualsZeroAndPromptNone", ...requirements);
@@ -371,8 +401,19 @@ function claimsParameter(params: AuthorizationParams): Record<string, unknown> |
 	if (claims == null) {
 		return null;
 	}
+	if (typeof claims === "string") {
+		// DEVIATION: upstream reads the claims query parameter as a JSON object without parsing it (getAsJsonObject
+		// throws on the string), so any RP sending one gets a 500; OIDCC 5.5 sends it as a JSON string, so it is parsed
+		try {
+			const parsed: unknown = JSON.parse(claims);
+			if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+				return parsed as Record<string, unknown>;
+			}
+		} catch {
+			// not JSON: the error below
+		}
+	}
 	if (typeof claims !== "object" || Array.isArray(claims)) {
-		// UPSTREAM: the claims query parameter is not parsed as JSON before these checks (getAsJsonObject throws)
 		throw new Error("Not a JSON Object: " + JSON.stringify(claims));
 	}
 	return claims as Record<string, unknown>;
@@ -709,12 +750,17 @@ export async function handleAuthorizationRequest(
 			throw new Error("Got unexpected HTTP method to authorization endpoint");
 		}
 
+		if (op.options.opUnderTest) {
+			op.selectClient({ clientId: typeof httpParams["client_id"] === "string" ? httpParams["client_id"] : null });
+		}
 		// extractAuthorizationEndpointRequestParameters
 		let requestObject: ParsedJwt | null = null;
-		if (op.variant.request_type === "plain_http_request") {
+		// an OP under test takes whatever the request carries; the RP test's OP expects the variant's request type
+		const requestType = op.options.opUnderTest ? requestTypeOf(httpParams) : op.variant.request_type;
+		if (requestType === "plain_http_request") {
 			ensureRequestDoesNotContainRequestObject(httpParams, "OIDCC-6.1");
 		} else {
-			requestObject = await extractRequestObjectFromAuthorizationRequest(op, httpParams);
+			requestObject = await extractRequestObjectFromAuthorizationRequest(op, httpParams, requestType);
 		}
 		ensureAuthorizationHttpRequestContainsOpenIDScope(httpParams, "OIDCC-6.1", "OIDCC-6.2");
 		if (requestObject != null) {
@@ -807,6 +853,9 @@ export async function handleAuthorizationRequest(
 			}
 		}
 
+		if (op.options.opUnderTest && op.sessionAuthTime == null && promptValues(params).includes("none")) {
+			throw new OAuthError("login_required", "The user is not logged in and the request has prompt=none");
+		}
 		const authorization: AuthorizationState = {
 			params,
 			scope,
@@ -815,7 +864,8 @@ export async function handleAuthorizationRequest(
 			code: null,
 			cHash: null,
 			codeChallenge,
-			authTime: null,
+			// an OP under test has a session; upstream sets auth_time once the response is sent (below)
+			authTime: op.options.opUnderTest ? sessionAuthTime(op, params) : null,
 		};
 		op.authorization = authorization;
 		if (op.responseType.includesCode) {
@@ -857,7 +907,7 @@ export async function handleAuthorizationRequest(
 					: sendAuthorizationResponseWithResponseModeQuery(responseParams, "OIDCC-3.3.2.5");
 			response = new Response(null, { status: 302, headers: { location: redirectTo } });
 		}
-		authorization.authTime = Math.floor(Date.now() / 1000);
+		authorization.authTime ??= Math.floor(Date.now() / 1000);
 		return { response, authorization, responseParams };
 	});
 }

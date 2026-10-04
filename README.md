@@ -11,8 +11,9 @@ The [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-
   - [ ] implicit and hybrid flows, form_post response mode
 - [x] OpenID Connect Core, Relying Party
   - [x] basic, dynamic client registration
-  - [x] RP-initiated, back-channel and front-channel logout, session management, 3rd-party-initiated login
-  - [ ] implicit and hybrid flows, form_post response mode, config, refresh token
+  - [x] RP-initiated, back-channel and front-channel logout, session management, 3rd-party-initiated login,
+        refresh token
+  - [ ] implicit and hybrid flows, form_post response mode, config
 - [ ] FAPI 1 Advanced, FAPI 2 Security Profile and Message Signing, FAPI-CIBA
 - [ ] OpenID Federation, Shared Signals Framework, OpenID4VC issuer / wallet / verifier, eKYC, AuthZEN
 

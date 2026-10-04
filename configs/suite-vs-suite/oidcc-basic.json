@@ -23,6 +23,23 @@
 			]
 		}
 	],
+	"override": {
+		"oidcc-ensure-registered-redirect-uri": {
+			"browser": [
+				{
+					"comment": "the emulated OP shows its error page for an unregistered redirect_uri",
+					"match": "*/test/a/emulated-op/authorize*",
+					"tasks": [
+						{
+							"task": "Expect error page",
+							"match": "*/test/a/emulated-op/authorize*",
+							"commands": [["wait", "xpath", "//*", 10, "Authorization request error", "update-image-placeholder"]]
+						}
+					]
+				}
+			]
+		}
+	},
 	"suite_target": {
 		"module": "oidcc-client-test",
 		"alias": "emulated-op",

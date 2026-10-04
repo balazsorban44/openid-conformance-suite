@@ -6,9 +6,9 @@ import { block, condition, soft, type Condition } from "../suite/conditions.ts";
 import { currentLog } from "../suite/log.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import type { IncomingRequest } from "../suite/server.ts";
-import { calculateAtHash, createIdToken } from "./id-token.ts";
-import { failTest, type EmulatedOp } from "./op.ts";
-import type { RpClient } from "./registration.ts";
+import { calculateAtHash, createIdToken, createIdTokenForRefreshRequest } from "./id-token.ts";
+import { failTest, OAuthError, type EmulatedOp, type RefreshOptions } from "./op.ts";
+import { generateVSChar, type RpClient } from "./registration.ts";
 
 /** The access token the OP issued (upstream env "access_token", "token_type", "at_hash") */
 export interface IssuedTokens {
@@ -160,6 +160,20 @@ export function validateClientAuthentication(req: IncomingRequest, client: RpCli
 	}
 }
 
+/** The client a token request names: in its Basic authorization header, else its client_id parameter (opUnderTest) */
+function clientIdOfTokenRequest(req: IncomingRequest): string | null {
+	const auth = req.headers["authorization"];
+	if (typeof auth === "string" && auth.toLowerCase().startsWith("basic ")) {
+		const user = Buffer.from(auth.substring("Basic ".length), "base64").toString("utf8").split(":")[0];
+		try {
+			return decodeURIComponent(user);
+		} catch {
+			return user;
+		}
+	}
+	return formParam(req, "client_id");
+}
+
 /** upstream: condition/as/ValidateAuthorizationCode.java */
 export function validateAuthorizationCode(
 	req: IncomingRequest,
@@ -220,14 +234,22 @@ export function createTokenEndpointResponse(
 	tokens: IssuedTokens,
 	idToken: string | null,
 	scope: string | null,
+	refreshToken: string | null = null,
+	expiresIn: number | null = null,
 	...requirements: string[]
 ): Record<string, unknown> {
 	const response: Record<string, unknown> = { access_token: tokens.accessToken, token_type: tokens.tokenType };
 	if (idToken) {
 		response["id_token"] = idToken;
 	}
+	if (refreshToken) {
+		response["refresh_token"] = refreshToken;
+	}
 	if (scope) {
 		response["scope"] = scope;
+	}
+	if (expiresIn != null) {
+		response["expires_in"] = expiresIn;
 	}
 	// upstream logs the response without a message (logSuccess(args(...)))
 	currentLog().log("CreateTokenEndpointResponse", {
@@ -255,6 +277,9 @@ export async function handleTokenRequest(
 		failTest("Token endpoint body does not contain the mandatory 'grant_type' parameter");
 	}
 	return block(grantType === "refresh_token" ? "Token endpoint - Refresh Request" : "Token endpoint", async () => {
+		if (op.options.opUnderTest) {
+			op.selectClient({ clientId: clientIdOfTokenRequest(req) });
+		}
 		const client = op.client;
 		if (client == null) {
 			throw new Error("The RP sent a token request before it registered a client");
@@ -262,19 +287,155 @@ export async function handleTokenRequest(
 		soft(() => checkClientIdMatchesOnTokenRequestIfPresent(req, client, "RFC6749-3.2.1"));
 		validateClientAuthentication(req, client, op.clientAuthType);
 		if (grantType === "refresh_token") {
-			failTest("refresh_token grant type is not implemented for this test");
+			if (!op.options.refresh) {
+				failTest("refresh_token grant type is not implemented for this test");
+			}
+			return refreshTokenGrant(op, req, op.options.refresh);
 		}
 		if (grantType !== "authorization_code") {
 			failTest("Got a grant type on the token endpoint we didn't understand: " + grantType);
 		}
 		op.options.onCodeExchange?.();
+		const code = formParam(req, "code");
+		if (op.options.opUnderTest && code != null && op.usedCodes.has(code)) {
+			// an authorization code is exchanged once; reusing it revokes what it was exchanged for (RFC 6749 4.1.2)
+			op.tokens = null;
+			op.refreshToken = null;
+			throw new OAuthError("invalid_grant", "The authorization code was already used");
+		}
 		validateAuthorizationCode(req, op.authorization?.code ?? null, "OIDCC-3.1.3.2");
+		if (op.options.opUnderTest && code != null) {
+			op.usedCodes.add(code);
+		}
 		soft(() => validateRedirectUriForTokenEndpointRequest(req, op.authorization?.redirectUri, "OIDCC-3.1.3.2"));
 		// UPSTREAM: CheckPkceCodeVerifier runs only when the environment has an object "code_challenge", which it never
 		// has (EnsureAuthorizationRequestContainsPkceCodeChallenge stores a string): the code_verifier is not checked
 		const tokens = generateAccessToken(op);
 		const idToken = await createIdToken(op, true);
-		const response = createTokenEndpointResponse(tokens, idToken, op.authorization?.scope ?? null, "OIDCC-3.1.3.3");
-		return { response: Response.json(response), tokens: response };
+		if (op.options.refresh) {
+			createRefreshToken(op, "RFC6749-1.5");
+		}
+		const response = createTokenEndpointResponse(
+			tokens,
+			idToken,
+			op.authorization?.scope ?? null,
+			op.refreshToken,
+			accessTokenExpiration(op),
+			"OIDCC-3.1.3.3",
+		);
+		return { response: tokenResponse(op, response), tokens: response };
 	});
+}
+
+/** upstream "access_token_expiration": never set by the RP tests; an OP under test says expires_in */
+function accessTokenExpiration(op: EmulatedOp): number | null {
+	return op.options.opUnderTest ? 3600 : null;
+}
+
+/** The token response; an OP under test adds the cache headers OIDCC-3.1.3.3 requires (upstream sends none) */
+function tokenResponse(op: EmulatedOp, body: Record<string, unknown>): Response {
+	return Response.json(
+		body,
+		op.options.opUnderTest ? { headers: { "cache-control": "no-store", pragma: "no-cache" } } : undefined,
+	);
+}
+
+/**
+ * The refresh_token grant (inside the "Token endpoint - Refresh Request" block, client authenticated): the
+ * refresh token and scope are checked, a new access token (and id_token, refresh token as the module says) issued.
+ * Userinfo requests the RP made before do not count (upstream receivedUserinfoRequest = false: discarded here).
+ *
+ * upstream: AbstractOIDCCClientTestRefreshToken.refreshTokenGrantType
+ */
+async function refreshTokenGrant(
+	op: EmulatedOp,
+	req: IncomingRequest,
+	refresh: RefreshOptions,
+): Promise<{ response: Response; tokens: Record<string, unknown> }> {
+	op.receivedRefreshRequest = true;
+	op.discardEvents("userinfo");
+	// validateRefreshRequest: the scope check must run before ExtractScopeFromTokenEndpointRequest
+	ensureScopeInRefreshRequestContainsNoMoreThanOriginallyGranted(req, op.authorization?.scope ?? null, "RFC6749-6");
+	validateRefreshToken(req, op.refreshToken, "RFC6749-6");
+	const scope = extractScopeFromTokenEndpointRequest(req);
+	if (scope != null && op.authorization != null) {
+		op.authorization.scope = scope;
+	}
+	const tokens = generateAccessToken(op);
+	const idToken = refresh.idToken === false ? null : await createIdTokenForRefreshRequest(op, refresh);
+	if (refresh.newRefreshToken !== false) {
+		createRefreshToken(op, "RFC6749-1.5");
+	}
+	const response = createTokenEndpointResponse(
+		tokens,
+		idToken,
+		op.authorization?.scope ?? null,
+		op.refreshToken,
+		accessTokenExpiration(op),
+	);
+	return { response: tokenResponse(op, response), tokens: response };
+}
+
+/** upstream: condition/as/CreateRefreshToken.java */
+export function createRefreshToken(op: EmulatedOp, ...requirements: string[]): string {
+	const refreshToken = generateVSChar(50, 10, 5);
+	op.refreshToken = refreshToken;
+	condition("CreateRefreshToken", ...requirements).log("Created refresh token", { refresh_token: refreshToken });
+	return refreshToken;
+}
+
+/** upstream: condition/as/ValidateRefreshToken.java */
+export function validateRefreshToken(req: IncomingRequest, expected: string | null, ...requirements: string[]): void {
+	const c: Condition = condition("ValidateRefreshToken", ...requirements);
+	const actual = formParam(req, "refresh_token");
+	if (actual == null) {
+		c.failure("Request does not contain a refresh_token parameter", { form_parameters: req.body_form_params });
+	}
+	if (actual !== expected) {
+		c.failure("Invalid refresh_token parameter.", { expected, actual });
+	}
+	c.success("refresh_token parameter matches the expected value.", { refresh_token: actual });
+}
+
+/** upstream: condition/as/EnsureScopeInRefreshRequestContainsNoMoreThanOriginallyGranted.java */
+export function ensureScopeInRefreshRequestContainsNoMoreThanOriginallyGranted(
+	req: IncomingRequest,
+	grantedScope: string | null,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureScopeInRefreshRequestContainsNoMoreThanOriginallyGranted", ...requirements);
+	const requestedScope = formParam(req, "scope");
+	if (requestedScope == null) {
+		c.success("Refresh request does not contain scope parameter and is assumed to be the same as originally granted.");
+		return;
+	}
+	const granted = new Set((grantedScope ?? "").split(" "));
+	for (const scope of new Set(requestedScope.split(" "))) {
+		if (!granted.has(scope)) {
+			c.failure("Scope value in refresh request contains a scope that was not originally granted.", {
+				originally_granted: grantedScope,
+				requested_scopes: requestedScope,
+				scope,
+			});
+		}
+	}
+	c.success("Scope value in refresh request matches the originally granted scope.", {
+		originally_granted: grantedScope,
+		requested: requestedScope,
+	});
+}
+
+/**
+ * The scope of a refresh request, which replaces the granted one; null (the granted scope stays) when absent.
+ * upstream: condition/as/ExtractScopeFromTokenEndpointRequest.java
+ */
+export function extractScopeFromTokenEndpointRequest(req: IncomingRequest): string | null {
+	const c: Condition = condition("ExtractScopeFromTokenEndpointRequest");
+	const scope = formParam(req, "scope");
+	if (!scope) {
+		c.log("Token endpoint request does not contain a scope parameter");
+		return null;
+	}
+	c.log("Scopes requested in refresh request", { scope });
+	return scope;
 }

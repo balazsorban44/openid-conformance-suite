@@ -16,6 +16,7 @@
  */
 import type { TestInfo } from "@playwright/test";
 import { writeFileSync } from "node:fs";
+import { oidccGenerateServerConfigurationWithRefreshTokenGrantType } from "../src/rp/discovery.ts";
 import { startEmulatedOp, type EmulatedOp, type RpVariant } from "../src/rp/op.ts";
 import type { SuiteTargetConfig, TestConfig } from "../src/suite/config.ts";
 import { createLog, renderLogHtml, resultOf, withContext, type EventLog } from "../src/suite/log.ts";
@@ -46,7 +47,9 @@ export interface SuiteTarget {
 /**
  * Starts the emulated OP named by `target` for one OP test: `target.variant` wins, the parameters it leaves out
  * (client_auth_type, response_type, response_mode) follow the variant of the module under test, so both sides agree.
- * Its setup checks and the checks on every request it serves are logged into its own log.
+ * Its setup checks and the checks on every request it serves are logged into its own log. It answers as an OP under
+ * test (EmulatedOpOptions.opUnderTest): OAuth error responses instead of failed RP checks, several clients, request
+ * objects by value or by reference, a session with an auth_time, single-use codes.
  */
 export async function startSuiteTarget(args: {
 	target: SuiteTargetConfig;
@@ -89,7 +92,16 @@ export async function startSuiteTarget(args: {
 	try {
 		// its own log and name; the requests it serves keep this context (startEmulatedOp), outside the test's steps
 		const op = await withContext({ log, testName, severity: "failure", step: (_name, fn) => fn() }, () =>
-			startEmulatedOp(server, { testName, variant: variant as RpVariant, config }, options()),
+			startEmulatedOp(
+				server,
+				{ testName, variant: variant as RpVariant, config },
+				{
+					serverConfiguration: oidccGenerateServerConfigurationWithRefreshTokenGrantType,
+					refresh: {},
+					...options(),
+					opUnderTest: true,
+				},
+			),
 		);
 		const discoveryUrl = server.baseUrl + "/.well-known/openid-configuration";
 		return { testName, op, log, server, discoveryUrl, close };

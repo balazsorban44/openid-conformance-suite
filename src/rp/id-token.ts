@@ -18,7 +18,7 @@ import { parseJWKSet, parseJWK, selectAsymmetricJWSKey, toPublicJWK, type JWK } 
 import { parseJWT, parseClaimsSet } from "../suite/jose-jwt.ts";
 import { isJOSEException, ParseException } from "../suite/errors.ts";
 import { rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
-import type { EmulatedOp } from "./op.ts";
+import type { EmulatedOp, RefreshOptions } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 import type { UserInfo } from "./userinfo.ts";
 
@@ -274,6 +274,16 @@ export function addInvalidIssValueToIdToken(claims: IdTokenClaims, ...requiremen
 	});
 }
 
+/** upstream: condition/as/AddInvalidSubValueToIdToken.java */
+export function addInvalidSubValueToIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	const sub = `${String(claims["sub"])}1`;
+	claims["sub"] = sub;
+	condition("AddInvalidSubValueToIdToken", ...requirements).log("Added invalid sub to ID token claims", {
+		id_token_claims: claims,
+		sub,
+	});
+}
+
 /** upstream: condition/as/AddInvalidNonceValueToIdToken.java */
 export function addInvalidNonceValueToIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
 	// UPSTREAM: a missing nonce becomes "null1"
@@ -479,6 +489,34 @@ export async function createIdToken(op: EmulatedOp, codeGrant: boolean): Promise
 	}
 	if (op.options.idTokenSignature) {
 		idToken = op.options.idTokenSignature(idToken);
+	}
+	if (client["id_token_encrypted_response_alg"] == null) {
+		skipped("EncryptIdToken", { element: ["client", "id_token_encrypted_response_alg"] }, "OIDCC-10.2");
+	} else {
+		throw new Error("TODO(port): encrypted id_tokens (EncryptIdToken)");
+	}
+	return idToken;
+}
+
+/**
+ * The id_token of a refresh response: the claims (no auth_time), at_hash, the module's changes
+ * (`customIdTokenClaims`), signed with OIDCCSignIdToken and changed by `idTokenSignature`.
+ *
+ * upstream: AbstractOIDCCClientTestRefreshToken.createIdTokenForRefreshRequest
+ */
+export async function createIdTokenForRefreshRequest(op: EmulatedOp, refresh: RefreshOptions): Promise<string> {
+	const client = op.client as RpClient;
+	const claims = generateIdTokenClaims(op.userInfo, op.issuer, client.client_id, op.authorization?.nonce ?? null);
+	if (op.tokens?.atHash == null) {
+		skipped("AddAtHashToIdTokenClaims", { string: "at_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		addAtHashToIdTokenClaims(claims, op.tokens.atHash, "OIDCC-3.3.2.11");
+	}
+	refresh.customIdTokenClaims?.(claims, op);
+	let idToken = await oidccSignIdToken(claims, op.keys.jwks, client, op.signingAlg as string, "OIDCC-2");
+	op.issuedIdTokens.push(idToken);
+	if (refresh.idTokenSignature) {
+		idToken = refresh.idTokenSignature(idToken);
 	}
 	if (client["id_token_encrypted_response_alg"] == null) {
 		skipped("EncryptIdToken", { element: ["client", "id_token_encrypted_response_alg"] }, "OIDCC-10.2");

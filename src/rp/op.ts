@@ -19,9 +19,14 @@ import { extractClientNameFromStoredConfig, storeOriginalClientConfiguration } f
 import { block, ConditionFailed, logModule, soft } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
 import type { Jwks, ParsedJwt } from "../suite/jose.ts";
-import { currentContext, withContext } from "../suite/log.ts";
-import type { IncomingRequest, TestServer } from "../suite/server.ts";
-import { handleAuthorizationRequest, type AuthorizationParams, type AuthorizationState } from "./authorization.ts";
+import { currentContext, escapeHtml, withContext } from "../suite/log.ts";
+import { htmlResponse, type IncomingRequest, type TestServer } from "../suite/server.ts";
+import {
+	formPostResponsePage,
+	handleAuthorizationRequest,
+	type AuthorizationParams,
+	type AuthorizationState,
+} from "./authorization.ts";
 import {
 	discoveryResponse,
 	ensureServerConfigurationHasRequiredOidcMetadata,
@@ -148,6 +153,52 @@ export interface EmulatedOpOptions {
 	 * module's behaviour (upstream AbstractOIDCCClientLogoutTest); built by logoutTestOptions() in src/rp/logout.ts
 	 */
 	logout?: LogoutOptions;
+	/**
+	 * suite-vs-suite (tests/suite-target.ts): the OP is the implementation under test of an OP test, not the OP of an
+	 * RP test. A failed check on a request ends nothing: the endpoint answers with the OAuth error response an OP
+	 * gives (an error redirect, an error page when the client or redirect_uri is unknown, a 400 / 401 JSON error);
+	 * the OP serves several registered clients (each with its authorization, tokens and refresh token), accepts
+	 * request objects by value or by reference whatever the variant says, keeps the user's auth_time between flows
+	 * (a session: prompt=login and an exceeded max_age authenticate afresh, prompt=none without a session is
+	 * login_required), and exchanges an authorization code once.
+	 */
+	opUnderTest?: boolean;
+	/**
+	 * The refresh token modules (upstream AbstractOIDCCClientTestRefreshToken): the OP issues a refresh token with
+	 * the code grant and serves the refresh_token grant (announce it with
+	 * discovery.oidccGenerateServerConfigurationWithRefreshTokenGrantType)
+	 */
+	refresh?: RefreshOptions;
+}
+
+/** What a refresh token module's OP does with a refresh request (upstream AbstractOIDCCClientTestRefreshToken) */
+export interface RefreshOptions {
+	/** An id_token in the refresh response (upstream generateIdTokenOnRefreshRequest); default true */
+	idToken?: boolean;
+	/** A new refresh token in the refresh response (upstream generateRefreshTokenOnRefreshRequest); default true */
+	newRefreshToken?: boolean;
+	/** Changes to the refresh response's id_token claims (upstream addCustomValuesToIdTokenForRefreshResponse) */
+	customIdTokenClaims?: (claims: IdTokenClaims, op: EmulatedOp) => void;
+	/** Changes to the refresh response's signed id_token (upstream customizeIdTokenSignatureForRefreshResponse) */
+	idTokenSignature?: (idToken: string) => string;
+	/**
+	 * Fails the test with this message when the RP calls userinfo after the refresh response (the negative modules,
+	 * upstream AbstractOIDCCClientTestExpectingNothingAfterRefreshResponse); a userinfo request before it is fine
+	 */
+	userinfoAfterRefreshFails?: string;
+}
+
+/** opUnderTest: an OAuth error the OP under test answers a request with (where an RP test fails a check) */
+export class OAuthError extends Error {
+	readonly error: string;
+	readonly description: string;
+
+	constructor(error: string, description: string) {
+		super(`${error}: ${description}`);
+		this.name = "OAuthError";
+		this.error = error;
+		this.description = description;
+	}
 }
 
 export type Endpoint =
@@ -211,8 +262,24 @@ export interface EmulatedOp {
 	signingAlg: string | null;
 	authorization: AuthorizationState | null;
 	tokens: IssuedTokens | null;
+	/** upstream "refresh_token": the refresh token issued to the client (the refresh token modules) */
+	refreshToken: string | null;
+	/** upstream receivedRefreshRequest: the RP sent a refresh_token grant */
+	receivedRefreshRequest: boolean;
 	/** upstream "all_issued_id_tokens": the id_tokens OIDCCSignIdToken signed */
 	issuedIdTokens: string[];
+	/** opUnderTest: when the user authenticated (the auth_time of the next id_token, unless prompt or max_age say otherwise) */
+	sessionAuthTime: number | null;
+	/** opUnderTest: the authorization codes already exchanged */
+	usedCodes: Set<string>;
+	/**
+	 * opUnderTest: makes the registered client with `clientId` (or the one `accessToken` was issued to) the current
+	 * one, with its authorization, tokens and refresh token; false when there is no such client. Upstream's OP knows
+	 * one client, so the other endpoints keep reading `client`.
+	 */
+	selectClient(by: { clientId: string | null } | { accessToken: string | null }): boolean;
+	/** Forgets the requests to `endpoint` not yet taken by expect / waitFor (upstream: receivedUserinfoRequest = false) */
+	discardEvents(endpoint: Endpoint): void;
 	/** The id_token signing algorithm for `client` (the signingAlg option or OIDCCExtractServerSigningAlg) */
 	chooseSigningAlg(client: RpClient): string;
 	/**
@@ -245,6 +312,103 @@ export function failTest(msg: string): never {
 	throw new ConditionFailed(currentContext().testName, msg, "FAILURE");
 }
 
+/** opUnderTest: what `op` holds for one registered client */
+interface ClientState {
+	client: RpClient;
+	clientPublicJwks: Jwks | null;
+	signingAlg: string | null;
+	authorization: AuthorizationState | null;
+	tokens: IssuedTokens | null;
+	refreshToken: string | null;
+}
+
+/**
+ * opUnderTest: the OAuth error response for a request whose handling failed a check (or threw an OAuthError): an
+ * error redirect to a registered redirect_uri of the named client (query, fragment or form_post as the request asks),
+ * else an error page; a 400 / 401 JSON error at the other endpoints.
+ */
+function opUnderTestErrorResponse(op: EmulatedOp, endpoint: Endpoint, req: IncomingRequest, e: unknown): Response {
+	const { error, description, status, noRedirect } = oauthError(endpoint, e);
+	if (endpoint === "authorization") {
+		const params = req.method === "POST" ? (req.body_form_params ?? {}) : req.query_string_params;
+		const str = (name: string) => (typeof params[name] === "string" ? params[name] : null);
+		const redirectUri = str("redirect_uri");
+		const client = op.client;
+		const redirectUris = Array.isArray(client?.["redirect_uris"]) ? client["redirect_uris"] : [];
+		const registered =
+			client?.client_id === str("client_id") && redirectUri != null && redirectUris.includes(redirectUri);
+		if (registered && !noRedirect) {
+			const response: Record<string, string> = { error, error_description: description };
+			const state = str("state");
+			if (state != null) {
+				response["state"] = state;
+			}
+			if (str("response_mode") === "form_post") {
+				return formPostResponsePage({ redirect_uri: redirectUri, ...response });
+			}
+			const url = new URL(redirectUri);
+			const query = new URLSearchParams(response).toString();
+			if (str("response_mode") === "fragment" || /\b(id_token|token)\b/.test(str("response_type") ?? "")) {
+				url.hash = query;
+			} else {
+				url.search = (url.search ? url.search + "&" : "?") + query;
+			}
+			return new Response(null, { status: 302, headers: { location: url.toString() } });
+		}
+		const html = `<!DOCTYPE html><html><head><title>Authorization request error</title></head><body><h1>Authorization request error</h1><p>${escapeHtml(error)}: ${escapeHtml(description)}</p></body></html>`;
+		return htmlResponse(html, 400);
+	}
+	const headers =
+		endpoint === "userinfo"
+			? { "www-authenticate": `Bearer error="${error}", error_description="${description.replaceAll('"', "'")}"` }
+			: undefined;
+	return Response.json({ error, error_description: description }, { status, headers });
+}
+
+/** The OAuth error (RFC 6749 4.1.2.1 / 5.2, RFC 6750 3.1) a failed check of `endpoint` stands for */
+function oauthError(
+	endpoint: Endpoint,
+	e: unknown,
+): { error: string; description: string; status: number; noRedirect: boolean } {
+	if (e instanceof OAuthError) {
+		return {
+			error: e.error,
+			description: e.description,
+			status: e.error === "invalid_client" ? 401 : 400,
+			noRedirect: false,
+		};
+	}
+	const name = e instanceof ConditionFailed ? e.condition : "";
+	const description = e instanceof Error ? e.message : String(e);
+	const result = (error: string, status = 400, noRedirect = false) => ({ error, description, status, noRedirect });
+	switch (endpoint) {
+		case "authorization":
+			if (/ResponseType/.test(name)) {
+				return result("unsupported_response_type");
+			}
+			if (/Scope/.test(name)) {
+				return result("invalid_scope");
+			}
+			// an unknown client or redirect_uri must not be redirected to
+			return result("invalid_request", 400, /EnsureMatchingClientId|RedirectUri/.test(name));
+		case "token":
+			if (/ClientCredentials|ClientIdAndSecret|ClientAuthentication/.test(name)) {
+				return result("invalid_client", 401);
+			}
+			if (/AuthorizationCode|RefreshToken|RedirectUriForTokenEndpoint/.test(name)) {
+				return result("invalid_grant");
+			}
+			if (/Scope/.test(name)) {
+				return result("invalid_scope");
+			}
+			return result("invalid_request");
+		case "userinfo":
+			return result("invalid_token", 401);
+		default:
+			return result("invalid_request");
+	}
+}
+
 interface Waiter {
 	endpoint: Endpoint;
 	resolve: (event: unknown) => void;
@@ -271,7 +435,13 @@ export async function startEmulatedOp(
 
 	const metadata = (options.serverConfiguration ?? oidccGenerateServerConfiguration)(server.baseUrl);
 	setTokenEndpointAuthMethodsSupportedOnly(metadata, clientAuthType);
-	configureRequestObjectSupport(metadata, variant.request_type);
+	if (options.opUnderTest) {
+		// an OP under test takes request objects by value and by reference
+		configureRequestObjectSupport(metadata, "request_object");
+		configureRequestObjectSupport(metadata, "request_uri");
+	} else {
+		configureRequestObjectSupport(metadata, variant.request_type);
+	}
 	ensureServerConfigurationHasRequiredOidcMetadata(metadata, "OIDCD-3");
 	const keys = await (options.serverJwks ?? configureServerJwks)();
 	const userInfo = oidccLoadUserInfo();
@@ -299,7 +469,15 @@ export async function startEmulatedOp(
 		signingAlg: null,
 		authorization: null,
 		tokens: null,
+		refreshToken: null,
+		receivedRefreshRequest: false,
 		issuedIdTokens: [],
+		sessionAuthTime: null,
+		usedCodes: new Set(),
+		selectClient,
+		discardEvents(endpoint) {
+			events.delete(endpoint);
+		},
 		chooseSigningAlg: (client) =>
 			options.signingAlg ? options.signingAlg(client, op) : oidccExtractServerSigningAlg(client, op.keys.jwks),
 		expect(endpoint, opts = {}) {
@@ -330,6 +508,29 @@ export async function startEmulatedOp(
 		},
 		received: (endpoint) => counts.get(endpoint) ?? 0,
 	};
+
+	// opUnderTest: the state of every registered client; the current client's is on `op` (upstream knows one client)
+	const clientStates = new Map<string, ClientState>();
+	function saveClientState(): void {
+		if (op.client != null) {
+			const { client, clientPublicJwks, signingAlg, authorization, tokens, refreshToken } = op;
+			clientStates.set(client.client_id, { client, clientPublicJwks, signingAlg, authorization, tokens, refreshToken });
+		}
+	}
+	function selectClient(by: { clientId: string | null } | { accessToken: string | null }): boolean {
+		saveClientState();
+		const state =
+			"clientId" in by
+				? by.clientId == null
+					? undefined
+					: clientStates.get(by.clientId)
+				: [...clientStates.values()].find((s) => by.accessToken != null && s.tokens?.accessToken === by.accessToken);
+		if (state == null) {
+			return false;
+		}
+		Object.assign(op, state);
+		return true;
+	}
 
 	function next(endpoint: Endpoint, seconds: number, optional: boolean): Promise<unknown> {
 		if (failure) {
@@ -402,6 +603,10 @@ export async function startEmulatedOp(
 					record(endpoint, event);
 					return response;
 				} catch (e) {
+					if (options.opUnderTest) {
+						// the OP under test answers as an OP does; the failed check stays in its log
+						return opUnderTestErrorResponse(op, endpoint, req, e);
+					}
 					if (!failure) {
 						failure = { error: e };
 						for (const w of waiters.splice(0)) {
@@ -455,6 +660,13 @@ export async function startEmulatedOp(
 	});
 	if (variant.client_registration === "dynamic_client") {
 		serve("registration", "register", async (request) => {
+			if (options.opUnderTest) {
+				// another client: the current one's state is kept, the new one starts without flows
+				saveClientState();
+				op.authorization = null;
+				op.tokens = null;
+				op.refreshToken = null;
+			}
 			const { response, client } = await handleRegistrationRequest(op, request);
 			return { response, event: { request, client } };
 		});

@@ -77,6 +77,12 @@
 			"ts": "src/rp/id-token.ts",
 			"symbol": "addInvalidNonceValueToIdToken"
 		},
+		"src/main/java/net/openid/conformance/condition/as/AddInvalidSubValueToIdToken.java": {
+			"blob": "1cbfda7b31107148518a2fc39e34b63cdd9fdbc9",
+			"loc": 33,
+			"ts": "src/rp/id-token.ts",
+			"symbol": "addInvalidSubValueToIdToken"
+		},
 		"src/main/java/net/openid/conformance/condition/as/AddIssAndAudToUserInfoResponse.java": {
 			"blob": "af2bf3f845237422c554194c63cc7756d825d015",
 			"loc": 29,
@@ -202,6 +208,12 @@
 			"loc": 111,
 			"ts": "src/rp/authorization.ts",
 			"symbol": "createEffectiveAuthorizationRequestParameters"
+		},
+		"src/main/java/net/openid/conformance/condition/as/CreateRefreshToken.java": {
+			"blob": "368ae9209f5fd50443251cf28bf9b32c53e83336",
+			"loc": 31,
+			"ts": "src/rp/token.ts",
+			"symbol": "createRefreshToken"
 		},
 		"src/main/java/net/openid/conformance/condition/as/CreateTokenEndpointResponse.java": {
 			"blob": "4a293b4ddd7947077ec82bfb7af6bb848b36150c",
@@ -593,6 +605,12 @@
 			"ts": "src/rp/authorization.ts",
 			"symbol": "ensureScopeContainsAtLeastOneOfProfileEmailPhoneAddress"
 		},
+		"src/main/java/net/openid/conformance/condition/as/EnsureScopeInRefreshRequestContainsNoMoreThanOriginallyGranted.java": {
+			"blob": "3df56ea0eb575194acc07bc296d6acad006760b0",
+			"loc": 45,
+			"ts": "src/rp/token.ts",
+			"symbol": "ensureScopeInRefreshRequestContainsNoMoreThanOriginallyGranted"
+		},
 		"src/main/java/net/openid/conformance/condition/as/EnsureServerConfigurationHasRequiredOidcMetadata.java": {
 			"blob": "e27361565258c599441a21c58a9e65100dd7d7b8",
 			"loc": 64,
@@ -634,6 +652,12 @@
 			"loc": 18,
 			"ts": "src/rp/request-object.ts",
 			"symbol": "extractRequestObject"
+		},
+		"src/main/java/net/openid/conformance/condition/as/ExtractScopeFromTokenEndpointRequest.java": {
+			"blob": "a2c5277280955ac26c93c557e8d9c518158dbc6a",
+			"loc": 35,
+			"ts": "src/rp/token.ts",
+			"symbol": "extractScopeFromTokenEndpointRequest"
 		},
 		"src/main/java/net/openid/conformance/condition/as/FetchClientKeys.java": {
 			"blob": "9d28300b57bda59e3d9c0516275d0a3533c3d71d",
@@ -881,6 +905,12 @@
 			"ts": "src/rp/discovery.ts",
 			"symbol": "oidccGenerateServerConfigurationIdTokenSigningAlgRS256Only"
 		},
+		"src/main/java/net/openid/conformance/condition/as/OIDCCGenerateServerConfigurationWithRefreshTokenGrantType.java": {
+			"blob": "fe40f9dffe8b2643deb3678ac124a86094679184",
+			"loc": 15,
+			"ts": "src/rp/discovery.ts",
+			"symbol": "oidccGenerateServerConfigurationWithRefreshTokenGrantType"
+		},
 		"src/main/java/net/openid/conformance/condition/as/OIDCCGenerateServerConfigurationWithSessionManagement.java": {
 			"blob": "f5320780b7573a0e64542ed241545c2c89b1c627",
 			"loc": 17,
@@ -1048,6 +1078,12 @@
 			"loc": 39,
 			"ts": "src/rp/token.ts",
 			"symbol": "validateRedirectUriForTokenEndpointRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/as/ValidateRefreshToken.java": {
+			"blob": "132ef8baa41bc3b5c7c825322fe484faedec6ce4",
+			"loc": 36,
+			"ts": "src/rp/token.ts",
+			"symbol": "validateRefreshToken"
 		},
 		"src/main/java/net/openid/conformance/condition/as/ValidateRequestObjectAud.java": {
 			"blob": "b456be69d815b224445e65119e04d580388b9bd5",
@@ -3412,6 +3448,24 @@
 			"loc": 34,
 			"ts": "tests/rp/basic.spec.ts",
 			"symbol": "oidcc-client-test-nonce-invalid"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestRefreshToken.java": {
+			"blob": "be4e027aa974086597b616574fa915a72c47ffb1",
+			"loc": 24,
+			"ts": "tests/rp/refresh-token.spec.ts",
+			"symbol": "oidcc-client-test-refresh-token"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestRefreshTokenInvalidIssuer.java": {
+			"blob": "2d97b3e3ae39f131bb0d262f0e45d35a05155da6",
+			"loc": 37,
+			"ts": "tests/rp/refresh-token.spec.ts",
+			"symbol": "oidcc-client-test-refresh-token-invalid-issuer"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestRefreshTokenInvalidSub.java": {
+			"blob": "ad144b9dbe96505606a9ae74bea2d4c9510a99f5",
+			"loc": 37,
+			"ts": "tests/rp/refresh-token.spec.ts",
+			"symbol": "oidcc-client-test-refresh-token-invalid-sub"
 		},
 		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestRequestUriSignedWithNone.java": {
 			"blob": "cbe87957ed08c156170d576068ce09fd0f12506e",

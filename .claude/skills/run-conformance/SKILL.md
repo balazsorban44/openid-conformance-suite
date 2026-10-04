@@ -91,8 +91,10 @@ by the port:
   OP test, on a server and log of its own, and points `server.discoveryUrl` at it. Variant parameters left out of
   `suite_target.variant` are taken from the module under test (so `client_auth_type` follows e.g.
   `oidcc-server-client-secret-post`). The emulated OP answers any number of requests until the test ends (OP
-  modules call userinfo twice, authorize twice, etc.); what it cannot serve is in the project's `skipModules`, what
-  it does differently (single-use codes, the unusable keys it publishes on purpose) is listed in
+  modules call userinfo twice, authorize twice, etc.) and answers as an OP under test (`opUnderTest` in
+  src/rp/op.ts: OAuth error responses instead of failed RP checks, several clients, request objects by value or
+  reference, a session with an auth_time, single-use codes, refresh tokens); what it does differently (the
+  unusable keys it publishes on purpose, the claims its test user lacks) is listed in
   `configs/expected-failures/suite-vs-suite.json`.
 
 Modules that upstream starts manually from the UI (`oidcc-server-rotate-keys`) run right away, as upstream's

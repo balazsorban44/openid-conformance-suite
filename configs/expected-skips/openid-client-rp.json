@@ -3,6 +3,6 @@
 		"test-name": "oidcc-client-test-idtoken-sig-none",
 		"variant": "*",
 		"configuration-filename": "*",
-		"comment": "openid-client rejects unsigned (alg=none) id_tokens; the module skips itself when the client does not continue to userinfo"
+		"comment": "openid-client (oauth4webapi) rejects an unsigned (alg none) id_token as an unsupported JWS algorithm; upstream's module skips itself when the client does not continue to userinfo, as clients need not support alg none"
 	}
 ]

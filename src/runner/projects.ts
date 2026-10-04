@@ -286,6 +286,23 @@ export const plans: Record<string, Plan> = {
 			request_type: REQUEST_TYPE,
 		},
 	},
+	"oidcc-client-refreshtoken-test-plan": {
+		title:
+			"OpenID Connect Core Client Refresh Token Profile Tests: Relying party refresh token tests (not currently part of certification program)",
+		spec: "tests/rp/refresh-token.spec.ts",
+		modules: [
+			"oidcc-client-test-refresh-token",
+			"oidcc-client-test-refresh-token-invalid-issuer",
+			"oidcc-client-test-refresh-token-invalid-sub",
+		],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_type: RESPONSE_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
+	},
 	"oidcc-client-test-3rd-party-init-login-test-plan": {
 		title: "OpenID Connect Core Client Login Tests: Relying party 3rd party initiated login tests",
 		spec: "tests/rp/3rdparty-init-login.spec.ts",
@@ -333,11 +350,6 @@ const OP_CODE_BASIC =
 /** the variant the RP dynamic / logout / session management / 3rd-party-initiated login plans run with */
 const RP_CODE_BASIC =
 	"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]";
-
-const INVALID_REQUEST_500 =
-	"the emulated OP fails an invalid authorization request (as an RP test would) and answers with a 500 server_error";
-const REQUEST_OBJECT_500 =
-	"the emulated OP (request_type=plain_http_request) fails a request object (EnsureRequestDoesNotContainRequestObject) and answers with a 500 server_error";
 
 export const projects: ConformanceProject[] = [
 	// ---- OP plans against panva oidc-provider ----
@@ -452,6 +464,12 @@ export const projects: ConformanceProject[] = [
 		browsers,
 	},
 	{
+		name: "rp-refresh-token",
+		plan: "oidcc-client-refreshtoken-test-plan",
+		variant: RP_CODE_BASIC,
+		config: "configs/openid-client-rp/oidcc-client-refreshtoken.json",
+	},
+	{
 		name: "rp-3rdparty-init-login",
 		plan: "oidcc-client-test-3rd-party-init-login-test-plan",
 		variant: RP_CODE_BASIC,
@@ -466,19 +484,8 @@ export const projects: ConformanceProject[] = [
 		config: "configs/suite-vs-suite/oidcc-basic.json",
 		browsers,
 		workers: 3,
-		// the emulated OP is the RP tests' OP with oidcc-client-test's options (tests/suite-target.ts); what it cannot
-		// do is skipped here, what it does differently is in configs/expected-failures/suite-vs-suite.json
-		skipModules: {
-			"oidcc-refresh-token": "the emulated OP knows one registered client; this module registers a second one",
-			"oidcc-max-age-10000":
-				"the emulated OP has no session: every authorization sets auth_time to the current time, so two logins a second apart get different auth_time values",
-			"oidcc-response-type-missing": INVALID_REQUEST_500 + " instead of an error redirect",
-			"oidcc-ensure-registered-redirect-uri": INVALID_REQUEST_500 + " instead of an error page",
-			"oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported": REQUEST_OBJECT_500,
-			"oidcc-ensure-request-object-with-redirect-uri": REQUEST_OBJECT_500,
-			"oidcc-claims-essential":
-				"the emulated OP fails an authorization request with a claims parameter in the query (UPSTREAM: its claims checks read the parameter as a JSON object without parsing it) and answers with a 500 server_error",
-		},
+		// the emulated OP is the RP tests' OP with oidcc-client-test's options, answering as an OP under test
+		// (tests/suite-target.ts); what it does differently is in configs/expected-failures/suite-vs-suite.json
 	},
 ];
 

@@ -342,105 +342,6 @@
 		"comment": "the emulated OP (oidcc-client-test) deliberately publishes unusable keys in its JWKS (AddUnusableKeysToServerPublicJwks) to check that RPs ignore them"
 	},
 	{
-		"test-name": "oidcc-prompt-none-not-logged-in",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "EnsureErrorFromAuthorizationEndpointResponse",
-		"expected-result": "failure",
-		"comment": "the emulated OP ignores prompt=none and logs the user in"
-	},
-	{
-		"test-name": "oidcc-prompt-none-not-logged-in",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "RejectAuthCodeInAuthorizationEndpointResponse",
-		"expected-result": "failure",
-		"comment": "the emulated OP ignores prompt=none and logs the user in"
-	},
-	{
-		"test-name": "oidcc-prompt-none-not-logged-in",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "CheckErrorFromAuthorizationEndpointIsOneThatRequiredAUserInterface",
-		"expected-result": "failure",
-		"comment": "the emulated OP ignores prompt=none and logs the user in"
-	},
-	{
-		"test-name": "oidcc-prompt-none-not-logged-in",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "CheckForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint",
-		"expected-result": "warning",
-		"comment": "the emulated OP ignores prompt=none and logs the user in"
-	},
-	{
-		"test-name": "oidcc-codereuse",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "ServerAllowedReusingAuthorizationCode",
-		"expected-result": "warning",
-		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
-	},
-	{
-		"test-name": "oidcc-codereuse-30seconds",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "CheckTokenEndpointHttpStatus400",
-		"expected-result": "failure",
-		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
-	},
-	{
-		"test-name": "oidcc-codereuse-30seconds",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "CheckErrorFromTokenEndpointResponseErrorInvalidGrant",
-		"expected-result": "failure",
-		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
-	},
-	{
-		"test-name": "oidcc-codereuse-30seconds",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "ValidateErrorFromTokenEndpointResponseError",
-		"expected-result": "failure",
-		"comment": "the emulated OP does not implement single-use authorization codes: the second token request succeeds"
-	},
-	{
-		"test-name": "oidcc-codereuse-30seconds",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "EnsureHttpStatusCodeIs4xx",
-		"expected-result": "warning",
-		"comment": "the second token request replaced the access token; the emulated OP answers the first one with a 500 server_error (RequireBearerAccessToken fails, as an RP test would)"
-	},
-	{
-		"test-name": "oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "CheckStateInAuthorizationResponse",
-		"expected-result": "failure",
-		"comment": "the emulated OP (request_type=plain_http_request) ignores the request_uri contents and uses the query parameters"
-	},
-	{
-		"test-name": "oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "ValidateIdTokenNonce",
-		"expected-result": "failure",
-		"comment": "the emulated OP (request_type=plain_http_request) ignores the request_uri contents and uses the query parameters"
-	},
-	{
 		"test-name": "oidcc-ensure-request-with-acr-values-succeeds",
 		"variant": "*",
 		"configuration-filename": "*",
@@ -448,15 +349,6 @@
 		"condition": "ValidateIdTokenACRClaimAgainstAcrValuesRequest",
 		"expected-result": "warning",
 		"comment": "the emulated OP does not return an acr claim"
-	},
-	{
-		"test-name": "oidcc-server",
-		"variant": "*",
-		"configuration-filename": "*",
-		"current-block": "*",
-		"condition": "ExtractExpiresInFromTokenEndpointResponse",
-		"expected-result": "warning",
-		"comment": "the emulated OP's token response has no expires_in"
 	},
 	{
 		"test-name": "oidcc-scope-profile",

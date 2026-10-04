@@ -19,16 +19,15 @@ import * as jwks from "../../src/rp/jwks.ts";
 import { failTest } from "../../src/rp/op.ts";
 import * as registration from "../../src/rp/registration.ts";
 import * as userinfo from "../../src/rp/userinfo.ts";
-import { test } from "../fixtures.ts";
+import { selectedVariant, test, variantNotApplicable } from "../fixtures.ts";
 import * as shared from "./shared.ts";
 
 test.describe("oidcc-client-basic-certification-test-plan", () => {
-	test.use({
-		plan: {
-			name: "oidcc-client-basic-certification-test-plan",
-			variant: { response_type: "code", response_mode: "default", client_auth_type: "client_secret_basic" },
-		},
-	});
+	const plan = {
+		name: "oidcc-client-basic-certification-test-plan",
+		variant: { response_type: "code", response_mode: "default", client_auth_type: "client_secret_basic" },
+	};
+	test.use({ plan });
 
 	// upstream: openid/client/OIDCCClientTest.java (rp-response_type-code)
 	test("oidcc-client-test: the RP logs in with the code flow and calls the userinfo endpoint", async ({ rp }) => {
@@ -170,15 +169,14 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 		await client;
 	});
 
-	test.describe("code flow only", () => {
-		test.skip(({ variant }) => variant.response_type !== "code", "not applicable unless response_type=code");
-
+	// the plan has this module for the code flow only
+	if (selectedVariant(plan).response_type === "code") {
 		// upstream: openid/client/OIDCCClientTestIdTokenSigAlgNone.java (rp-id_token-sig-none)
 		test(
 			"oidcc-client-test-idtoken-sig-none: the RP accepts an unsigned id_token from the token endpoint, or stops",
 			shared.idTokenSigNone,
 		);
-	});
+	}
 
 	// upstream: openid/client/OIDCCClientTestInvalidIdTokenSignatureWithRS256.java (rp-id_token-bad-sig-rs256)
 	test("oidcc-client-test-invalid-sig-rs256: the RP rejects an id_token with an invalid RS256 signature", async ({
@@ -204,9 +202,8 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 		await client;
 	});
 
-	test.describe("with an access token", () => {
-		test.skip(({ variant }) => variant.response_type === "id_token", "not applicable to response_type=id_token");
-
+	// upstream @VariantNotApplicable(parameter = ResponseType.class, values = { "id_token" }): no access token, no userinfo
+	if (!variantNotApplicable(plan, { response_type: ["id_token"] })) {
 		// upstream: openid/client/OIDCCClientTestInvalidSubInUserinfoResponse.java (rp-userinfo-bad-sub-claim)
 		test("oidcc-client-test-userinfo-invalid-sub: the RP gets a userinfo response whose sub is not the id_token's (it must reject it)", async ({
 			rp,
@@ -222,7 +219,7 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 			await op.expect("userinfo");
 			await client;
 		});
-	});
+	}
 
 	// upstream: openid/client/OIDCCClientTestNonceInvalid.java (rp-nonce-invalid)
 	test("oidcc-client-test-nonce-invalid: the RP rejects an id_token whose nonce is not the one it sent", async ({
@@ -267,12 +264,8 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 		await client;
 	});
 
-	test.describe("with a token endpoint", () => {
-		test.skip(
-			({ variant }) => variant.response_type === "id_token" || variant.response_type === "id_token token",
-			"not applicable to response types without code",
-		);
-
+	// the plan has this module for the response types with a token endpoint request only
+	if (!variantNotApplicable(plan, { response_type: ["id_token", "id_token token"] })) {
 		// upstream: openid/client/OIDCCClientTestClientSecretBasic.java (rp-token_endpoint-client_secret_basic)
 		test("oidcc-client-test-client-secret-basic: the RP authenticates at the token endpoint with client_secret_basic", async ({
 			rp,
@@ -286,5 +279,5 @@ test.describe("oidcc-client-basic-certification-test-plan", () => {
 			await op.expect("userinfo");
 			await client;
 		});
-	});
+	}
 });

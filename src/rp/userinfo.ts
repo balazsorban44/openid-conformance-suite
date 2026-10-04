@@ -10,7 +10,7 @@ import { JWS_FAMILY_HMAC_SHA } from "../suite/jose-algorithms.ts";
 import { isJOSEException, ParseException } from "../suite/errors.ts";
 import { rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
 import { parseClaimsSet } from "../suite/jose-jwt.ts";
-import type { EmulatedOp } from "./op.ts";
+import { failTest, type EmulatedOp } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 
 /** The claims the emulated user has (upstream OIDCCLoadUserInfo.SUPPORTED_CLAIMS) */
@@ -213,8 +213,16 @@ export async function handleUserinfoRequest(
 	req: IncomingRequest,
 	customize?: (response: UserInfo) => void,
 ): Promise<{ response: Response; userinfo: UserInfo }> {
+	const afterRefresh = op.options.refresh?.userinfoAfterRefreshFails;
+	if (afterRefresh != null && op.receivedRefreshRequest) {
+		// the refresh response was invalid: the RP must not have continued to userinfo
+		failTest(afterRefresh);
+	}
 	return block("Userinfo endpoint", async () => {
 		const token = oidccExtractBearerAccessTokenFromRequest(req, "RFC6750-2", "OIDCC-5.3.1");
+		if (op.options.opUnderTest) {
+			op.selectClient({ accessToken: token });
+		}
 		requireBearerAccessToken(token, op.tokens?.accessToken ?? null, "OIDCC-5.3.1");
 		const userinfo = filterUserInfoForScopes(op.userInfo, op.authorization?.scope ?? "", "OIDCC-5.4");
 		customize?.(userinfo);

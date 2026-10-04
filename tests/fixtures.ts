@@ -125,6 +125,23 @@ export function variantString(v: Record<string, string>): string {
 		.join("");
 }
 
+/**
+ * The variant the spec runs with at collection time: the CI project's or CONFORMANCE_VARIANT, and the plan's fixed
+ * parameters (the `variant` fixture has the same values)
+ */
+export function selectedVariant(plan: PlanOption): Record<string, string> {
+	return { ...parseVariant(selection().variant), ...plan.variant };
+}
+
+/**
+ * Upstream's @VariantNotApplicable(parameter, values): true when the selected variant has one of `values` for a
+ * parameter. The spec leaves such modules out, as upstream's plan does not list them for that variant.
+ */
+export function variantNotApplicable(plan: PlanOption, exclusions: Record<string, string[]>): boolean {
+	const variant = selectedVariant(plan);
+	return Object.entries(exclusions).some(([parameter, values]) => values.includes(variant[parameter] ?? ""));
+}
+
 function selection(): { config: string | undefined; variant: string; skipModules: Record<string, string> } {
 	const project = projects.find((p) => p.name === process.env["CONFORMANCE_PROJECT"]);
 	return {

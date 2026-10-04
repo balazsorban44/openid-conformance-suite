@@ -266,15 +266,19 @@ export function ensureRequestUriIsHttpsOrRequestObjectIsSigned(
 export async function extractRequestObjectFromAuthorizationRequest(
 	op: EmulatedOp,
 	params: AuthorizationParams,
+	requestType: RpVariant["request_type"] = op.variant.request_type,
 ): Promise<ParsedJwt> {
-	if (op.variant.request_type === "request_uri") {
+	if (requestType === "request_uri") {
 		const requestObject = await fetchRequestUriAndExtractRequestObject(
 			params,
 			op.client,
 			op.keys.encryptionKeys,
 			"OIDCC-6.2",
 		);
-		ensureRequestUriIsHttpsOrRequestObjectIsSigned(params, requestObject, "OIDCC-6.2");
+		// the OP under test (suite-vs-suite) fetches the suite's own request_uris, which are http in CI
+		if (!op.options.opUnderTest) {
+			ensureRequestUriIsHttpsOrRequestObjectIsSigned(params, requestObject, "OIDCC-6.2");
+		}
 		return requestObject;
 	}
 	return extractRequestObject(params, op.client, op.keys.encryptionKeys, "OIDCC-6.1");

@@ -3,30 +3,30 @@
 		"test-name": "oidcc-idtoken-unsigned",
 		"variant": "*",
 		"configuration-filename": "*",
-		"comment": "oidc-provider does not support id_token_signed_response_alg=none"
+		"comment": "oidc-provider 9 has no alg none for id_tokens (its JWA list has no 'none'); upstream's module skips itself when the discovery document does not list it"
 	},
 	{
 		"test-name": "oidcc-request-uri-unsigned-supported-correctly-or-rejected-as-unsupported",
 		"variant": "*",
 		"configuration-filename": "*",
-		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+		"comment": "oidc-provider 9 has no alg none for request objects (its JWA list has no 'none'); upstream's module skips itself when request_object_signing_alg_values_supported does not list it"
 	},
 	{
 		"test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
 		"variant": "*",
 		"configuration-filename": "*",
-		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+		"comment": "oidc-provider 9 has no alg none for request objects (its JWA list has no 'none'); upstream's module skips itself when request_object_signing_alg_values_supported does not list it"
 	},
 	{
 		"test-name": "oidcc-ensure-request-object-with-redirect-uri",
 		"variant": "*",
 		"configuration-filename": "*",
-		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+		"comment": "oidc-provider 9 has no alg none for request objects (its JWA list has no 'none'); upstream's module skips itself when request_object_signing_alg_values_supported does not list it"
 	},
 	{
 		"test-name": "oidcc-request-uri-unsigned",
 		"variant": "*",
 		"configuration-filename": "*",
-		"comment": "oidc-provider v9 does not support unsigned (alg=none) request objects, so the module skips itself"
+		"comment": "oidc-provider 9 has no alg none for request objects (its JWA list has no 'none'); upstream's module skips itself when request_object_signing_alg_values_supported does not list it"
 	}
 ]
