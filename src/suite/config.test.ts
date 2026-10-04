@@ -5,8 +5,9 @@ import { expect, test } from "vitest";
 import { simpleMatch } from "./browser.ts";
 import { globBody, loadConfig, moduleConfig, substitute } from "./config.ts";
 
+const hook = async () => {};
+
 test("substitute replaces ${NAME} in every string and keeps functions", () => {
-	const hook = async () => {};
 	expect(
 		substitute(
 			{ a: "${TARGET_URL}/x", b: ["${PORT}", 1, null], c: { d: "${UNKNOWN}" }, browser: hook },

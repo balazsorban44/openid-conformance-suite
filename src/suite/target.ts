@@ -118,17 +118,17 @@ async function startOnce(cfg: TargetConfig, root: string): Promise<RunningTarget
 
 /** True when the URL answers with a status below 500 (any certificate accepted) */
 function isReady(url: string): Promise<boolean> {
-	return new Promise((resolve) => {
+	return new Promise((done) => {
 		const u = new URL(url);
 		const req = (u.protocol === "https:" ? httpsRequest : httpRequest)(
 			u,
 			{ rejectUnauthorized: false, agent: false, timeout: 2000 },
 			(res) => {
 				res.resume();
-				resolve((res.statusCode ?? 500) < 500);
+				done((res.statusCode ?? 500) < 500);
 			},
 		);
-		req.on("error", () => resolve(false));
+		req.on("error", () => done(false));
 		req.on("timeout", () => req.destroy());
 		req.end();
 	});
@@ -138,8 +138,8 @@ async function stop(child: ChildProcess): Promise<void> {
 	if (child.exitCode !== null || child.signalCode !== null) {
 		return;
 	}
-	await new Promise<void>((resolve) => {
-		child.once("exit", () => resolve());
+	await new Promise<void>((done) => {
+		child.once("exit", () => done());
 		child.kill("SIGTERM");
 		setTimeout(() => {
 			if (child.exitCode === null) {

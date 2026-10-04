@@ -10,12 +10,14 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach } from "vitest";
 import { createLog, useLog, type EventLog, type LogEntry } from "./log.ts";
 
+const noop = (): void => {};
+
 export function useTestLog(testName = "unit-test"): {
 	readonly log: EventLog;
 	entries(): Omit<LogEntry, "_id" | "testId" | "time" | "seq">[];
 } {
 	let log = createLog("t1");
-	let uninstall = () => {};
+	let uninstall: () => void = noop;
 	beforeEach(() => {
 		log = createLog("t1");
 		uninstall = useLog(log, { testName });

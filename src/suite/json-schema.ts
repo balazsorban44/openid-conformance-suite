@@ -379,6 +379,10 @@ export class JsonSchemaValidationResult {
 }
 
 /** upstream: util/validation/JsonSchemaValidationException.java */
+function isValidationResult(v: unknown): v is JsonSchemaValidationResult {
+	return v != null && typeof v === "object" && "getValidationMessages" in v;
+}
+
 export class JsonSchemaValidationException extends NamedError {
 	private readonly validationResult: JsonSchemaValidationResult | null;
 
@@ -389,11 +393,9 @@ export class JsonSchemaValidationException extends NamedError {
 	constructor(message: string, validationResult?: JsonSchemaValidationResult | null);
 	constructor(message: string, cause: unknown, validationResult?: JsonSchemaValidationResult | null);
 	constructor(message: string, causeOrResult?: unknown, validationResult?: JsonSchemaValidationResult | null) {
-		const isResult = (v: unknown): v is JsonSchemaValidationResult =>
-			v != null && typeof v === "object" && "getValidationMessages" in v;
 		if (
 			validationResult !== undefined ||
-			(causeOrResult !== undefined && !isResult(causeOrResult) && causeOrResult !== null)
+			(causeOrResult !== undefined && !isValidationResult(causeOrResult) && causeOrResult !== null)
 		) {
 			super(message, { cause: causeOrResult });
 			this.validationResult = validationResult ?? null;
@@ -500,8 +502,7 @@ const FORMATS: Record<string, { check: (s: string) => boolean; message: string }
 	regex: {
 		check: (s) => {
 			try {
-				new RegExp(s, "u");
-				return true;
+				return new RegExp(s, "u").flags.length >= 0;
 			} catch {
 				return false;
 			}

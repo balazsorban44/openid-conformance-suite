@@ -160,11 +160,11 @@ async function run(opts: BrowserOptions, job: Job, visited: string[]): Promise<v
 	} catch (e) {
 		const err = e as Error;
 		let pageSource: string | null = null;
-		let currentUrl: string | null = null;
+		let urlAtError: string | null = null;
 		let screenshot: Buffer | undefined;
 		try {
 			if (state.page && !state.page.isClosed()) {
-				currentUrl = state.page.url();
+				urlAtError = state.page.url();
 				pageSource = await state.page.content();
 				screenshot = await state.page.screenshot({ fullPage: true });
 				opts.onScreenshot?.("webrunner-failure", screenshot);
@@ -176,7 +176,7 @@ async function run(opts: BrowserOptions, job: Job, visited: string[]): Promise<v
 			...errorFields(e),
 			msg: err.message,
 			page_source: pageSource,
-			url: currentUrl,
+			url: urlAtError,
 			content_type: state.lastContentType,
 			result: "FAILURE",
 			img: screenshot ? "data:image/png;base64," + screenshot.toString("base64") : undefined,

@@ -27,10 +27,10 @@ export class ConditionFailed extends Error {
 	/** The result the failure was recorded with */
 	readonly result: "FAILURE" | "WARNING" | "INFO";
 
-	constructor(condition: string, msg: string, result: "FAILURE" | "WARNING" | "INFO", cause?: unknown) {
-		super(`${condition}: ${msg}`, cause === undefined ? undefined : { cause });
+	constructor(name: string, msg: string, result: "FAILURE" | "WARNING" | "INFO", cause?: unknown) {
+		super(`${name}: ${msg}`, cause === undefined ? undefined : { cause });
 		this.name = "ConditionFailed";
-		this.condition = condition;
+		this.condition = name;
 		this.result = result;
 	}
 }
@@ -112,18 +112,20 @@ export function errorFields(e: unknown): LogFields {
  * Runs a check and continues on failure (upstream callAndContinueOnFailure). The failure is recorded with
  * `severity` ("failure" by default, "warning" or "info" to downgrade it) and the check returns undefined.
  */
+/** A failed check's error is swallowed (soft check); anything else is rethrown */
+function swallow(e: unknown): undefined {
+	if (e instanceof ConditionFailed) {
+		return undefined;
+	}
+	throw e;
+}
+
 export function soft<T>(fn: () => Promise<T>, severity?: Severity): Promise<T | undefined>;
 export function soft<T>(fn: () => T, severity?: Severity): T | undefined;
 export function soft<T>(
 	fn: () => T | Promise<T>,
 	severity: Severity = "failure",
 ): T | undefined | Promise<T | undefined> {
-	const swallow = (e: unknown): undefined => {
-		if (e instanceof ConditionFailed) {
-			return undefined;
-		}
-		throw e;
-	};
 	try {
 		const result = withContext({ severity }, fn);
 		if (result instanceof Promise) {

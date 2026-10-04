@@ -70,16 +70,18 @@ export function parseCurve(s: string | null): string {
 	return s;
 }
 
+/** The hex of a big-endian buffer without its leading zero bytes */
+function stripLeadingZeros(buf: Buffer): string {
+	let i = 0;
+	while (i < buf.length - 1 && buf[i] === 0) {
+		i++;
+	}
+	return buf.subarray(i).toString("hex");
+}
+
 /** Big-endian unsigned integer comparison of two base64url values (Base64URL.decodeToBigInteger().equals) */
 function sameBigInteger(a: string, b: string): boolean {
-	const strip = (buf: Buffer) => {
-		let i = 0;
-		while (i < buf.length - 1 && buf[i] === 0) {
-			i++;
-		}
-		return buf.subarray(i).toString("hex");
-	};
-	return strip(Buffer.from(a, "base64url")) === strip(Buffer.from(b, "base64url"));
+	return stripLeadingZeros(Buffer.from(a, "base64url")) === stripLeadingZeros(Buffer.from(b, "base64url"));
 }
 
 /**

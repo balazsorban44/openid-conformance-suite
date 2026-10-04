@@ -55,14 +55,14 @@ describe("front-channel logout request url", () => {
 	});
 });
 
-describe("back-channel logout response cache headers", () => {
-	const response = (cacheControl?: string | string[]): EndpointResponse => ({
-		status: 200,
-		endpoint_name: "backchannel logout",
-		headers: cacheControl === undefined ? {} : { "cache-control": cacheControl },
-		body: null,
-	});
+const response = (cacheControl?: string | string[]): EndpointResponse => ({
+	status: 200,
+	endpoint_name: "backchannel logout",
+	headers: cacheControl === undefined ? {} : { "cache-control": cacheControl },
+	body: null,
+});
 
+describe("back-channel logout response cache headers", () => {
 	test("no-store must be one of the cache-control directives, in any of the headers", () => {
 		ensureBackChannelLogoutEndpointResponseContainsCacheHeaders(response(["no-cache", "private, no-store"]));
 		expect(lastEntry()).toMatchObject({ result: "SUCCESS" });

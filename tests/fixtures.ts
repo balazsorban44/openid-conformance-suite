@@ -134,13 +134,19 @@ function selection(): { config: string | undefined; variant: string; skipModules
 	};
 }
 
+/** The PEM file named by `env`, or the bundled one under configs/certs */
+function pemFile(env: string, file: string): string {
+	return readFileSync(process.env[env] ?? resolve(root, "configs/certs", file), "utf8");
+}
+
 function tls(): { cert: string; key: string } | undefined {
 	if (!process.env["CONFORMANCE_TLS"] || process.env["CONFORMANCE_TLS"] === "0") {
 		return undefined;
 	}
-	const pem = (env: string, file: string) =>
-		readFileSync(process.env[env] ?? resolve(root, "configs/certs", file), "utf8");
-	return { cert: pem("CONFORMANCE_TLS_CERT", "localhost.crt"), key: pem("CONFORMANCE_TLS_KEY", "localhost.key") };
+	return {
+		cert: pemFile("CONFORMANCE_TLS_CERT", "localhost.crt"),
+		key: pemFile("CONFORMANCE_TLS_KEY", "localhost.key"),
+	};
 }
 
 /** The module a test is for: its title up to the first ':' ("oidcc-server: ..." -> "oidcc-server") */

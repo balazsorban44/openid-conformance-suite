@@ -125,14 +125,14 @@ function changedSymbols(): ChangedSymbol[] {
 		if (blob === info.blob) {
 			continue;
 		}
-		const diff =
+		const patch =
 			blob === null
 				? ""
 				: execFileSync("git", ["diff", lock.upstream.commit, "HEAD", "--", java], {
 						cwd: upstreamDir,
 						encoding: "utf8",
 					});
-		const lines = diff.split("\n");
+		const lines = patch.split("\n");
 		out.push({
 			ts: info.ts,
 			symbol: info.symbol,
@@ -140,11 +140,13 @@ function changedSymbols(): ChangedSymbol[] {
 			deleted: blob === null,
 			added: lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length,
 			removed: lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length,
-			diff,
+			diff: patch,
 		});
 	}
 	return out.sort((a, b) => a.ts.localeCompare(b.ts) || a.symbol.localeCompare(b.symbol));
 }
+
+const shortSha = (c: string) => c.slice(0, 12);
 
 /** The weekly sync PR: a full report (every diff) and a short PR body pointing at it */
 export function renderReport(
@@ -153,7 +155,6 @@ export function renderReport(
 ): { report: string; body: string } {
 	const web = range.repo.replace(/\.git$/, "");
 	const compare = `${web}/-/compare/${range.pinned}...${range.head}`;
-	const short = (c: string) => c.slice(0, 12);
 	const javaLink = (java: string, deleted: boolean) =>
 		deleted
 			? `~~${java}~~`
@@ -166,7 +167,7 @@ export function renderReport(
 				`| \`${c.ts}#${c.symbol}\` | ${javaLink(c.java, c.deleted)} | ${c.deleted ? "deleted upstream" : `+${c.added} −${c.removed}`} |`,
 		),
 	].join("\n");
-	const intro = `Upstream moved from [\`${short(range.pinned)}\`](${web}/-/commit/${range.pinned}) to [\`${short(range.head)}\`](${web}/-/commit/${range.head}) (${range.headDate.slice(0, 10)}, [compare](${compare})). ${changes.length} ported ${changes.length === 1 ? "symbol has" : "symbols have"} upstream changes.`;
+	const intro = `Upstream moved from [\`${shortSha(range.pinned)}\`](${web}/-/commit/${range.pinned}) to [\`${shortSha(range.head)}\`](${web}/-/commit/${range.head}) (${range.headDate.slice(0, 10)}, [compare](${compare})). ${changes.length} ported ${changes.length === 1 ? "symbol has" : "symbols have"} upstream changes.`;
 	const howTo = [
 		"## How to finish this PR",
 		"",
@@ -187,8 +188,8 @@ export function renderReport(
 				: "";
 		return `### \`${c.ts}#${c.symbol}\`\n\n${javaLink(c.java, c.deleted)}${c.deleted ? " was deleted upstream." : ""}\n\n${c.deleted ? "" : "```diff\n" + shown + cut + "\n```"}`;
 	});
-	const report = `# Upstream changes\n\n${intro}\n\n${table}\n\n${diffs.join("\n\n")}\n`;
-	return { report, body };
+	const md = `# Upstream changes\n\n${intro}\n\n${table}\n\n${diffs.join("\n\n")}\n`;
+	return { report: md, body };
 }
 
 function report(reportFile: string, bodyFile: string): void {

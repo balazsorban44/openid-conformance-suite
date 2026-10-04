@@ -198,6 +198,9 @@ export interface AuthorizationRequestOptions {
  *
  * upstream: AbstractOIDCCServerTest.CreateAuthorizationRequestSteps + BuildPlainRedirectToAuthorizationEndpoint
  */
+/** A request step the module leaves out (upstream `omit`): logged, not run */
+const logOmitted = (name: string, reason: string): void => condition(name).log(reason);
+
 export function createAuthorizationRequest(
 	op: Pick<Op, "metadata" | "redirectUri" | "variant">,
 	client: Client,
@@ -205,7 +208,6 @@ export function createAuthorizationRequest(
 ): AuthorizationRequest {
 	const responseType = opts.responseType ?? op.variant.response_type;
 	const responseMode = opts.responseMode ?? op.variant.response_mode;
-	const skip = (name: string, reason: string) => condition(name).log(reason);
 
 	const params = createAuthorizationEndpointRequestFromClientInformation(client, op.redirectUri);
 	let state: string | null = null;
@@ -213,22 +215,22 @@ export function createAuthorizationRequest(
 		state = createRandomStateValue(opts.stateLength);
 		addStateToAuthorizationEndpointRequest(params, state);
 	} else {
-		skip("CreateRandomStateValue", opts.omit.state);
-		skip("AddStateToAuthorizationEndpointRequest", opts.omit.state);
+		logOmitted("CreateRandomStateValue", opts.omit.state);
+		logOmitted("AddStateToAuthorizationEndpointRequest", opts.omit.state);
 	}
 	let nonce: string | null = null;
 	if (opts.omit?.nonce === undefined) {
 		nonce = createRandomNonceValue(opts.nonceLength);
 		addNonceToAuthorizationEndpointRequest(params, nonce);
 	} else {
-		// upstream's `.skip(AddNonceToAuthorizationEndpointRequest, reason)` leaves CreateRandomNonceValue in place
+		// upstream's `.logOmitted(AddNonceToAuthorizationEndpointRequest, reason)` leaves CreateRandomNonceValue in place
 		createRandomNonceValue(opts.nonceLength);
-		skip("AddNonceToAuthorizationEndpointRequest", opts.omit.nonce);
+		logOmitted("AddNonceToAuthorizationEndpointRequest", opts.omit.nonce);
 	}
 	if (opts.omit?.response_type === undefined) {
 		setAuthorizationEndpointRequestResponseType(params, responseType);
 	} else {
-		skip("SetAuthorizationEndpointRequestResponseTypeFromEnvironment", opts.omit.response_type);
+		logOmitted("SetAuthorizationEndpointRequestResponseTypeFromEnvironment", opts.omit.response_type);
 	}
 	if (responseMode === "form_post") {
 		setAuthorizationEndpointRequestResponseModeToFormPost(params);
@@ -374,8 +376,10 @@ async function redirect(
 }
 
 /** upstream templates/implicitCallback.html: posts the URL fragment to `submitUrl`, then shows #submission_complete */
+/** A string literal for inline JavaScript (no `</` that could end the script element) */
+const js = (v: string): string => JSON.stringify(v).replaceAll("</", "<\\/");
+
 function implicitCallbackPage(submitUrl: string): string {
-	const js = (v: string) => JSON.stringify(v).replaceAll("</", "<\\/");
 	return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>OIDF Conformance: Processing Implicit Callback</title></head>
