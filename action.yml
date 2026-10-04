@@ -49,10 +49,10 @@ runs:
   using: "composite"
   steps:
     # pnpm/action-setup reads the version from the suite's own package.json (`packageManager`)
-    - uses: pnpm/action-setup@v4
+    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       with:
         package_json_file: ${{ github.action_path }}/package.json
-    - uses: actions/setup-node@v5
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
         cache: pnpm
@@ -61,10 +61,34 @@ runs:
     - name: Install the conformance suite
       shell: bash
       working-directory: ${{ github.action_path }}
+      run: pnpm install --frozen-lockfile
+
+    # The tests are headless, so the headless shell (a third of the download of full Chromium, plus ffmpeg for the
+    # videos) is enough, cached per Playwright version. Its system libraries ship with the ubuntu runner images
+    # (Chrome needs the same ones), so there is no `--with-deps` (apt is never cached); the ldd check installs them
+    # if the runner lacks one.
+    - name: Playwright version
+      id: playwright
+      shell: bash
+      run: echo "version=$(sed -n 's/^  playwright@\([0-9][^:(]*\):.*/\1/p' "${{ github.action_path }}/pnpm-lock.yaml" | head -n 1)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-headless-shell
+    - name: Install the Playwright headless shell
+      shell: bash
+      working-directory: ${{ github.action_path }}
       run: |
-        set -euo pipefail
-        pnpm install --frozen-lockfile
-        pnpm exec playwright install --with-deps chromium
+        # a no-op after a cache hit
+        pnpm exec playwright install chromium --only-shell
+        if [ "$RUNNER_OS" = Linux ]; then
+          shell=$(find ~/.cache/ms-playwright -name chrome-headless-shell -type f | head -n 1)
+          missing=$(ldd "$shell" | grep "not found" || true)
+          if [ -n "$missing" ]; then
+            echo "$missing"
+            pnpm exec playwright install-deps chromium-headless-shell
+          fi
+        fi
 
     - name: Run conformance plan
       id: run
@@ -91,7 +115,7 @@ runs:
 
     - name: Upload report
       if: ${{ always() && inputs.artifact-name != '' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.artifact-name }}
         path: |

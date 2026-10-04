@@ -49,3 +49,9 @@ tests produce. Before merging it, pass these gates:
 CI runs typecheck/lint/format, the lock symbols check, the unit tests, and every conformance project against the
 bundled targets. A change to a check must keep its message strings and severities identical to upstream unless the
 PR is a sync with upstream (then the lock file moves too).
+
+The workflows (`.github/workflows`, `.github/actions/setup`, `action.yml`) pin every action to a commit SHA with a
+`# vX.Y.Z` comment; when bumping one, take the SHA of the release tag (`git ls-remote --tags` of the action's
+repository, the `^{}` line for annotated tags) and update every file that uses it. A `setup` job installs the
+dependencies and the Playwright headless shell once, so the matrix jobs restore the pnpm store and
+`~/.cache/ms-playwright` (keyed on the Playwright version in `pnpm-lock.yaml`) instead of downloading them.

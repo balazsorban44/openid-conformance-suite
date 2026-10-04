@@ -23,7 +23,7 @@ jobs:
   oidc-conformance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Start my OP # anything that makes your OP reachable from the job
         run: npm start & # (or use `target` in the config file, see below)
       - uses: balazsorban44/openid-conformance-suite@main
@@ -37,6 +37,10 @@ The job summary shows one row per test module with the failing conditions and th
 artifact contains the Playwright HTML report with the full event log (`log.html`, the same information as the
 official suite's log page), screenshots and videos of the scripted browser, and `conformance-report/results.json`
 for tooling.
+
+The action installs only Playwright's headless Chromium shell (about 114 MB, no `apt` packages) and caches it per
+Playwright version together with the pnpm store, so only the first run on a branch pays for the download. Pin the
+actions you use to a commit SHA, as this repository does.
 
 `my-op.json` is the same configuration format as the official suite:
 
