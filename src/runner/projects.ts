@@ -471,3 +471,15 @@ export const projects: ConformanceProject[] = [
 export function matrix(): { project: string; browser: BrowserName }[] {
 	return projects.flatMap((p) => (p.browsers ?? [DEFAULT_BROWSER]).map((browser) => ({ project: p.name, browser })));
 }
+
+/**
+ * The same pairs grouped by browser, in the order of {@link browsers}: what .github/workflows/ci.yml runs as one
+ * conformance workflow per browser, each with its own project matrix
+ */
+export function matrixByBrowser(): Record<BrowserName, string[]> {
+	const byBrowser = Object.fromEntries(browsers.map((b) => [b, [] as string[]])) as Record<BrowserName, string[]>;
+	for (const { project, browser } of matrix()) {
+		byBrowser[browser].push(project);
+	}
+	return byBrowser;
+}

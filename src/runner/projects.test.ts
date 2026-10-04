@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { browsers, matrix, projects, runName } from "./projects.ts";
+import { browsers, matrix, matrixByBrowser, projects, runName } from "./projects.ts";
 
 describe("matrix", () => {
 	it("runs every project on chromium", () => {
@@ -19,6 +19,15 @@ describe("matrix", () => {
 					.map((m) => m.browser),
 			).toEqual([...browsers]);
 		}
+	});
+});
+
+describe("matrixByBrowser", () => {
+	it("groups the pairs by browser, every browser present, chromium with every project", () => {
+		const grouped = matrixByBrowser();
+		expect(Object.keys(grouped)).toEqual([...browsers]);
+		expect(grouped.chromium).toEqual(projects.map((p) => p.name));
+		expect(Object.values(grouped).flat().length).toBe(matrix().length);
 	});
 });
 

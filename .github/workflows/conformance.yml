@@ -1,0 +1,55 @@
+name: conformance
+
+# One browser's share of the CI matrix: called by ci.yml once per browser with the projects to run on it, so the
+# Actions view groups the jobs by browser ("firefox / op-session-management").
+
+on:
+  workflow_call:
+    inputs:
+      browser:
+        description: "CONFORMANCE_BROWSER: chromium | firefox | webkit | chrome-mobile"
+        required: true
+        type: string
+      projects:
+        description: "JSON array of the projects (src/runner/projects.ts) to run on this browser"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  project:
+    name: ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(inputs.projects) }}
+    env:
+      # the Playwright project's name: "<project>" on chromium, "<project>-<browser>" on the other browsers
+      RUN_NAME: ${{ inputs.browser == 'chromium' && matrix.project || format('{0}-{1}', matrix.project, inputs.browser) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          browser: ${{ inputs.browser }}
+      - name: Run ${{ matrix.project }} on ${{ inputs.browser }}
+        env:
+          CONFORMANCE_ARTIFACT: conformance-${{ env.RUN_NAME }}
+          PROJECT: ${{ matrix.project }}
+          BROWSER: ${{ inputs.browser }}
+        run: node bin/cli.ts ci --project "$PROJECT" --browser "$BROWSER"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: conformance-${{ env.RUN_NAME }}
+          path: |
+            conformance-report
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
