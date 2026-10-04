@@ -35,6 +35,9 @@ src/suite/            the engine (no OIDC knowledge)
   report.ts           ModuleReport + Outcome, the console output, summary.md, the Playwright reporter (results.json,
                       the job summary, ::error annotations)
   wait.ts             upstream's WaitFor* conditions (the only sleeps: the spec's timing is what is tested)
+  tls.ts              raw TLS handshakes for the TLS checks (upstream FAPITLSClient): probeTls() with a version range
+                      and an OpenSSL cipher list, the FAPI / BCP 195 / IANA recommended cipher lists
+                      (data/tls-parameters-4.csv)
   random.ts, testing.ts (Vitest helpers: useTestLog(), useMswServer())
 src/op/               helpers for testing an OpenID Provider, one file per concern
   op.ts               the Op / OpVariant types the `op` fixture provides (RegistrationOp: `registrationOp`)
@@ -58,9 +61,13 @@ src/op/               helpers for testing an OpenID Provider, one file per conce
                       the PAR / token / resource calls with client authentication and DPoP (nonce retries), the
                       token response checks, the resource request headers (x-fapi-*) and response checks
   par.ts              the PAR endpoint (RFC 9126): the request, the call, the response and error checks
-  dpop.ts             DPoP (RFC 9449): the key, the proofs for the token / PAR / resource endpoints, the nonces and
-                      the use_dpop_nonce retries, dpop_jkt
+  dpop.ts             DPoP (RFC 9449): the key, the proofs for the token / PAR / resource endpoints (with the hooks
+                      a module changes them through, `DpopProofSteps`), the nonces and the use_dpop_nonce retries,
+                      dpop_jkt, the invalid proofs of the DPoP negative tests
   jarm.ts             JARM: extracting and validating the `response` JWT of the authorization response
+  tls.ts              the TLS checks on an endpoint (EnsureTLS12RequireBCP195Ciphers, DisallowTLS10/11,
+                      EnsureTLS13OrLater, EnsureTLS13PreferredOverTLS12, the cipher checks) and the FAPI 2 TLS
+                      blocks (checkEndpointTls)
   logout.ts           RP-initiated / back-channel / front-channel logout: end_session request, post logout redirect,
                       logout token and front-channel request checks, the first login of the logout modules
   session.ts          session management: session_state, the suite's session check pages (check_session_iframe)
@@ -650,8 +657,7 @@ HTML/JS that every engine runs. A new project where the browser matters gets `br
   a project in `projects`.
 - A plan ported in steps lists all of upstream's modules in `plans` (so `list --modules` and the UI show the whole
   plan) and the ones not yet written as `// TODO(port): <Module>.java` comments at the end of the spec (the FAPI 2
-  specs; the TLS checks of the happy flow and ensure-holder-of-key-required are `TODO(port)` comments in
-  tests/fapi2/shared.ts).
+  specs).
 
 ## Sync with upstream
 

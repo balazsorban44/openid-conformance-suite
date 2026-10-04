@@ -126,6 +126,26 @@
 					]
 				}
 			]
+		},
+		"fapi2-security-profile-final-user-rejects-authentication": {
+			"browser": [
+				{
+					"comment": "the user rejects the login: the 'Cancel' link of oidc-provider's login page aborts the interaction",
+					"match": "${TARGET_URL}/auth*",
+					"tasks": [
+						{
+							"task": "Reject",
+							"match": "${TARGET_URL}/interaction*",
+							"commands": [["click", "xpath", "//a[contains(@href, '/abort')]"]]
+						},
+						{
+							"task": "Verify Complete",
+							"match": "*/test/*/callback*",
+							"commands": [["wait", "id", "submission_complete", 10]]
+						}
+					]
+				}
+			]
 		}
 	},
 	"target": {

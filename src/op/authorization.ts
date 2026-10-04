@@ -18,8 +18,10 @@ import { randomAlphanumeric } from "../suite/random.ts";
 import { htmlResponse, WaitTimeoutError, type IncomingRequest } from "../suite/server.ts";
 import { toUriString } from "../suite/uri.ts";
 import { JOSEException, ParseException } from "../suite/errors.ts";
+import { getString, JavaHashMap } from "../suite/json.ts";
 import { checkErrorDescriptionContainsCRLFTAB, validateErrorDescription, validateErrorUri } from "./endpoint.ts";
 import { parseJwt, type ParsedJwt } from "../suite/jose.ts";
+import type { ServerMetadata } from "./discovery.ts";
 import type { Op } from "./op.ts";
 import type { Client, RegisteredClient } from "./registration.ts";
 import { verifyJweEncryption, type AccessToken } from "./token.ts";
@@ -150,8 +152,9 @@ export function setAuthorizationEndpointRequestResponseModeToFormPost(params: Re
 export function buildPlainRedirectToAuthorizationEndpoint(
 	op: Pick<Op, "metadata">,
 	params: Record<string, unknown>,
+	...requirements: string[]
 ): string {
-	const c: Condition = condition("BuildPlainRedirectToAuthorizationEndpoint");
+	const c: Condition = condition("BuildPlainRedirectToAuthorizationEndpoint", ...requirements);
 	const endpoint = op.metadata.authorization_endpoint;
 	if (!endpoint) {
 		c.failure("Couldn't find authorization endpoint");
@@ -285,7 +288,7 @@ export function extractImplicitHashToCallbackResponse(implicitHash: string): Rec
 export async function authorize(
 	op: Pick<Op, "server" | "browser" | "baseUrl" | "log">,
 	request: AuthorizationRequest,
-	opts: { method?: "GET" | "POST"; timeoutSeconds?: number } = {},
+	opts: { method?: "GET" | "POST"; timeoutSeconds?: number; callbackPath?: string } = {},
 ): Promise<AuthorizationResponse> {
 	return (await redirect(op, request, { ...opts, placeholder: null })) as AuthorizationResponse;
 }
@@ -300,7 +303,7 @@ export async function authorizeExpectingErrorPageOrRedirect(
 	op: Pick<Op, "server" | "browser" | "baseUrl" | "log">,
 	request: AuthorizationRequest,
 	placeholder: string,
-	opts: { method?: "GET" | "POST"; timeoutSeconds?: number } = {},
+	opts: { method?: "GET" | "POST"; timeoutSeconds?: number; callbackPath?: string } = {},
 ): Promise<AuthorizationResponse | null> {
 	return redirect(op, request, { ...opts, placeholder });
 }
@@ -308,14 +311,21 @@ export async function authorizeExpectingErrorPageOrRedirect(
 async function redirect(
 	op: Pick<Op, "server" | "browser" | "baseUrl" | "log">,
 	request: AuthorizationRequest,
-	opts: { method?: "GET" | "POST"; timeoutSeconds?: number; placeholder: string | null; keepPlaceholder?: boolean },
+	opts: {
+		method?: "GET" | "POST";
+		timeoutSeconds?: number;
+		placeholder: string | null;
+		keepPlaceholder?: boolean;
+		/** the path the OP redirects back to when it is not the suite's "callback" (upstream callbackEndpoint) */
+		callbackPath?: string;
+	},
 ): Promise<AuthorizationResponse | null> {
 	const method = opts.method ?? "GET";
 	logModule({ msg: "Redirecting to authorization endpoint", redirect_to: request.url, method, http: "redirect" });
 	const done = new AbortController();
 	let implicitSubmission: Promise<IncomingRequest> | null = null;
 	const callback = op.server.waitFor(
-		"callback",
+		opts.callbackPath ?? "callback",
 		() => {
 			const submit = createRandomImplicitSubmitUrl(op.baseUrl);
 			implicitSubmission = op.server.waitFor(submit.path, new Response(null, { status: 204 }), { signal: done.signal });
@@ -2120,5 +2130,341 @@ export function expectAuthorizationRequestWithoutRequestObjectErrorPage(...requi
 		"ExpectAuthorizationRequestWithoutRequestObjectErrorPage",
 		"If the server does not return an invalid_request error back to the client, it must show an error page saying the request is invalid as it is missing the request_object - upload a screenshot of the error page.",
 		requirements,
+	);
+}
+
+/**
+ * The user pressed 'cancel' on the login screen or denied consent: the error must be access_denied.
+ *
+ * upstream: condition/client/ExpectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest.java
+ * (AbstractExpectAccessDeniedErrorDueToUserRejectingRequest)
+ */
+export function expectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition(
+		"ExpectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest",
+		...requirements,
+	);
+	const callbackParams = response.params;
+	if (!("error" in callbackParams)) {
+		c.failure(
+			"error parameter not found. When running this test, the tester MUST press 'cancel' on the login screen or deny consent so that an error is returned to the relying party.",
+			callbackParams,
+		);
+	}
+	const error = getString(callbackParams["error"]);
+	if (!error) {
+		c.failure(
+			"error parameter empty/invalid. When running this test, the tester MUST press 'cancel' on the login screen or deny consent so that an error is returned to the relying party.",
+			callbackParams,
+		);
+	}
+	const expected = "access_denied";
+	if (error !== expected) {
+		c.failure(
+			"error value is incorrect. When running this test, the tester MUST press 'cancel' on the login screen or deny consent so that an error is returned to the relying party.",
+			{ expected, actual: error },
+		);
+	}
+	c.success("error parameter is correctly '" + error + "'");
+}
+
+/** upstream: condition/client/ExpectRequestObjectWithLongNonceErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectWithLongNonceErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectWithLongNonceErrorPage",
+		"If the server does not return an invalid_request error back to the client, it must show an error page (saying server rejects long nonce at authorization endpoint - upload a screenshot of the error page) or must successfully authenticate and return the nonce correctly.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectWithLongStateErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectWithLongStateErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectWithLongStateErrorPage",
+		"If the server does not return an invalid_request error back to the client, it must show an error page (saying server rejects long state at authorization endpoint - upload a screenshot of the error page) or must successfully authenticate and return the state correctly.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/WarningAboutRejectingLongState.java */
+export function warningAboutRejectingLongState(...requirements: string[]): never {
+	return condition("WarningAboutRejectingLongState", ...requirements).failure(
+		"Rejecting a state of this length may result in interoperability issues.",
+	);
+}
+
+/** upstream: condition/common/ExpectResponseTypeErrorPage.java; returns the placeholder to wait for */
+export function expectResponseTypeErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectResponseTypeErrorPage",
+		"If the server does not return an error back to the client, " +
+			"upload a screenshot of the error page showing an invalid response type error.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/SetAuthorizationEndpointRequestResponseTypeToCodeIdtoken.java */
+export function setAuthorizationEndpointRequestResponseTypeToCodeIdtoken(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["response_type"] = "code id_token";
+	condition("SetAuthorizationEndpointRequestResponseTypeToCodeIdtoken", ...requirements).success(
+		"Added response_type parameter to request",
+		{ ...params },
+	);
+}
+
+/** upstream: condition/client/SetAuthorizationEndpointRequestResponseTypeToToken.java */
+export function setAuthorizationEndpointRequestResponseTypeToToken(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	params["response_type"] = "token";
+	condition("SetAuthorizationEndpointRequestResponseTypeToToken", ...requirements).success(
+		"Added response_type parameter to request",
+		{ ...params },
+	);
+}
+
+/**
+ * It doesn't really matter if the error in the fragment or the query, the specs aren't entirely clear on the
+ * matter: whichever carries `error` becomes the authorization endpoint response (`response.params`).
+ *
+ * upstream: condition/client/DetectWhetherErrorResponseIsInQueryOrFragment.java
+ */
+export function detectWhetherErrorResponseIsInQueryOrFragment(response: AuthorizationResponse): void {
+	const c: Condition = condition("DetectWhetherErrorResponseIsInQueryOrFragment");
+	if ("error" in response.query) {
+		c.log("Server has chosen to return 'error' in URL query, using query as response", {
+			error: str(response.query, "error"),
+		});
+		response.params = response.query;
+		return;
+	}
+	if ("error" in response.fragment) {
+		c.log("Server has chosen to return 'error' in URL fragment, using fragment as the response", {
+			error: str(response.fragment, "error"),
+		});
+		response.params = response.fragment;
+		return;
+	}
+	c.failure("authorization server did not return an error in the url query or fragment");
+}
+
+/**
+ * Check to make sure a "unsupported_response_type" or "invalid_request" error was received from the server
+ *
+ * upstream: condition/client/EnsureUnsupportedResponseTypeOrInvalidRequestError.java
+ */
+export function ensureUnsupportedResponseTypeOrInvalidRequestError(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureUnsupportedResponseTypeOrInvalidRequestError", ...requirements);
+	const permitted = ["invalid_request", "unsupported_response_type"];
+	const error = str(response.params, "error");
+	if (!error) {
+		c.failure("Expected 'error' field is missing from authorization endpoint response");
+	}
+	if (!permitted.includes(error)) {
+		c.failure("authorization endpoint response 'error' field has unexpected value", { permitted, actual: error });
+	}
+	c.success("Authorization endpoint returned an expected 'error'", { permitted, error });
+}
+
+/**
+ * The standard claims of OIDCC 5.1, as per https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims
+ * (upstream AddAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims.oidcClaims)
+ */
+export const OIDC_STANDARD_CLAIMS = [
+	"sub",
+	"name",
+	"given_name",
+	"family_name",
+	"middle_name",
+	"nickname",
+	"preferred_username",
+	"profile",
+	"picture",
+	"website",
+	"email",
+	"email_verified",
+	"gender",
+	"birthdate",
+	"zoneinfo",
+	"locale",
+	"phone_number",
+	"phone_number_verified",
+	"address",
+	"updated_at",
+];
+
+/**
+ * Whether `claims_supported` of the server metadata lists any of the standard OpenID Connect claims (upstream env
+ * "at_least_one_oidc_standard_claim_supported").
+ *
+ * upstream: condition/client/CheckIfOidcStandardClaimsSupported.java
+ */
+export function checkIfOidcStandardClaimsSupported(metadata: ServerMetadata, ...requirements: string[]): boolean {
+	const c: Condition = condition("CheckIfOidcStandardClaimsSupported", ...requirements);
+	const key = "claims_supported";
+	const claimsSupportedEl = metadata[key];
+	if (claimsSupportedEl === undefined) {
+		c.log(key + " not found in server metadata");
+		return false;
+	}
+	if (!Array.isArray(claimsSupportedEl)) {
+		c.failure(key + " in server metadata is not an array", { [key]: claimsSupportedEl });
+	}
+	// a HashSet: the claims in java.util.HashMap's order
+	const claimsSupported = new JavaHashMap();
+	for (const el of claimsSupportedEl) {
+		if (typeof el !== "string") {
+			c.failure(key + " in server metadata is not an array", { [key]: claimsSupportedEl });
+		}
+		claimsSupported.put(el, null);
+	}
+	const standard = claimsSupported
+		.entries()
+		.map(([claim]) => claim)
+		.filter((claim) => OIDC_STANDARD_CLAIMS.includes(claim));
+	if (standard.length === 0) {
+		c.log(key + " in server metadata does not contain any of the OpenID Connect standard claims");
+		return false;
+	}
+	c.log(key + " in server metadata contains at least one OpenID Connect standard claims", {
+		standard_claims: standard,
+	});
+	return true;
+}
+
+/**
+ * The `claims` request parameter's object for `location` (id_token, userinfo, ...), created as needed.
+ *
+ * upstream: condition/client/AbstractAddClaimToAuthorizationEndpointRequest.getClaimsForLocation
+ */
+function claimsForLocation(c: Condition, params: Record<string, unknown>, location: string): Record<string, unknown> {
+	let claims: Record<string, unknown>;
+	if ("claims" in params) {
+		const existing = params["claims"];
+		if (!isObject(existing)) {
+			c.failure("Invalid claims entry in authorization_endpoint_request", { authorization_endpoint_request: params });
+		}
+		claims = existing;
+	} else {
+		claims = {};
+		params["claims"] = claims;
+	}
+	if (location in claims) {
+		const existing = claims[location];
+		if (!isObject(existing)) {
+			c.failure("Invalid " + location + " entry in authorization_endpoint_request", {
+				authorization_endpoint_request: params,
+			});
+		}
+		return existing;
+	}
+	const forLocation = {};
+	claims[location] = forLocation;
+	return forLocation;
+}
+
+/**
+ * Requests each claim in a different form (null, an empty object, essential, an unknown member, not essential),
+ * cycling through them; we test (if we have enough supported claims!) all the ways a claim can be requested as per
+ * https://openid.net/specs/openid-connect-core-1_0.html#IndividualClaimsRequests. We don't test value / values as
+ * we don't know what values the server may return.
+ *
+ * upstream: condition/client/AbstractAddClaimToAuthorizationEndpointRequest.addRequestsForClaims
+ */
+function addRequestsForClaims(claimsObject: Record<string, unknown>, claimsToAdd: string[]): void {
+	const requestTypes = ["AsNull", "AsEmpty", "EssentialTrue", "Random", "EssentialFalse"] as const;
+	let requestType = 0;
+	for (const claimName of claimsToAdd) {
+		switch (requestTypes[requestType]) {
+			case "AsNull":
+				claimsObject[claimName] = null;
+				break;
+			case "AsEmpty":
+				claimsObject[claimName] = {};
+				break;
+			case "EssentialTrue":
+				claimsObject[claimName] = { essential: true };
+				break;
+			case "Random":
+				// "Other members MAY be defined to provide additional information about the requested Claims. Any members used that are not understood MUST be ignored."
+				claimsObject[claimName] = { [randomAlphanumeric(10)]: randomAlphanumeric(10) };
+				break;
+			case "EssentialFalse":
+				claimsObject[claimName] = { essential: false };
+				break;
+		}
+		requestType = (requestType + 1) % requestTypes.length;
+	}
+}
+
+/**
+ * Requests every standard claim of `claims_supported` in the id_token and at the userinfo endpoint.
+ *
+ * upstream: condition/client/AddAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims.java
+ */
+export function addAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims(
+	params: Record<string, unknown>,
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition(
+		"AddAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims",
+		...requirements,
+	);
+	const nonOidcClaims: string[] = [];
+	const supportedOidcClaims: string[] = [];
+	const serverValues = metadata["claims_supported"];
+	if (!Array.isArray(serverValues)) {
+		// UPSTREAM: getAsJsonArray() on a missing or non-array claims_supported throws
+		throw new TypeError("claims_supported is not a JSON array");
+	}
+	for (const el of serverValues) {
+		const claimName = getString(el);
+		if (!OIDC_STANDARD_CLAIMS.includes(claimName)) {
+			nonOidcClaims.push(claimName);
+			continue;
+		}
+		supportedOidcClaims.push(claimName);
+	}
+	if (supportedOidcClaims.length === 0) {
+		c.failure("Server does not seem to support any standard OpenID Connect claims.", {
+			oidc_claims: OIDC_STANDARD_CLAIMS,
+			supported_claims: serverValues,
+		});
+	}
+	for (const location of ["id_token", "userinfo"]) {
+		addRequestsForClaims(claimsForLocation(c, params, location), supportedOidcClaims);
+	}
+	c.success(
+		"Added OpenID Connect claims from claims_supported to authorization_endpoint_request for id_token and userinfo using various different forms of request",
+		{ authorization_endpoint_request: params, oidc_claims: OIDC_STANDARD_CLAIMS, non_oidc_claims: nonOidcClaims },
+	);
+}
+
+/**
+ * Requests a random claim in a random location of the `claims` parameter, which the server must ignore.
+ *
+ * upstream: condition/client/AddRandomLocationClaimsToAuthorizationEndpointRequest.java
+ */
+export function addRandomLocationClaimsToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddRandomLocationClaimsToAuthorizationEndpointRequest", ...requirements);
+	const location = randomAlphanumeric(10);
+	addRequestsForClaims(claimsForLocation(c, params, location), [randomAlphanumeric(10)]);
+	c.success(
+		"Added a request for claims to be returned in a random location to the authorization_endpoint_request. As per spec, 'Any members used that are not understood MUST be ignored.'.",
+		{ authorization_endpoint_request: params },
 	);
 }

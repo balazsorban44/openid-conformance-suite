@@ -382,3 +382,16 @@ export function ensureParHTTPError(res: ParResponse, ...requirements: string[]):
 	}
 	c.success("Pushed Authorization Request Endpoint returned a HTTP 4xx or 5xx error as expected", { actual: status });
 }
+
+/** upstream: condition/client/EnsurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError.java */
+export function ensurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError(
+	res: ParResponse,
+	...requirements: string[]
+): void {
+	ensureSpecifiedErrorFromPushedAuthorizationEndpointResponse(
+		"EnsurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError",
+		res,
+		["unsupported_response_type", "invalid_request", "unauthorized_client"],
+		requirements,
+	);
+}

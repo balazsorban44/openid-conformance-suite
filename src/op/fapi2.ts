@@ -40,6 +40,11 @@ export interface Fapi2Client extends dpop.DpopClient {
 	second: boolean;
 	/** The block name prefix of this client's blocks (upstream currentClientString()) */
 	prefix: string;
+	/**
+	 * What the module changes in the DPoP proofs for each endpoint (upstream createDpopForParEndpointSteps /
+	 * createDpopForTokenEndpointSteps / createDpopForResourceEndpointSteps overrides)
+	 */
+	dpopSteps?: { par?: dpop.DpopProofSteps; token?: dpop.DpopProofSteps; resource?: dpop.DpopProofSteps };
 }
 
 /** The protected resource (upstream env "resource" + "protected_resource_url") */
@@ -197,6 +202,12 @@ export interface Fapi2AuthorizationRequestOptions {
 	nonceLength?: number;
 	/** Steps the module adds after the standard ones (upstream `.then(condition(...))`); `pkce` is the code_verifier created */
 	steps?: (params: Record<string, unknown>, pkce: { codeVerifier: string | null }) => void | Promise<void>;
+	/** CreateRandomStateValue's `requested_state_length` (the long state and user-rejects modules; 128 for the second client) */
+	stateLength?: number;
+	/** upstream `.replace(SetAuthorizationEndpointRequestResponseTypeToCode, condition)` (the response_type modules) */
+	responseType?: (params: Record<string, unknown>) => void;
+	/** Run before the standard steps (upstream code of a makeCreateAuthorizationRequestSteps override before super) */
+	before?: () => void;
 }
 
 /**
@@ -215,9 +226,12 @@ export async function createAuthorizationRequest(
 ): Promise<Fapi2AuthorizationRequest> {
 	const isOpenId = op.variant.openid === "openid_connect";
 	const jarmMode = op.variant.fapi_response_mode === "jarm";
+	opts.before?.();
 	const params = authz.createAuthorizationEndpointRequestFromClientInformation(client.client, redirectUri);
-	// upstream `.skip(AddStateToAuthorizationEndpointRequest, reason)` leaves CreateRandomStateValue in place
-	const state = authz.createRandomStateValue(client.second ? 128 : undefined);
+	const stateLength = opts.stateLength ?? (client.second ? 128 : undefined);
+	// upstream `.skip(AddStateToAuthorizationEndpointRequest, reason)` leaves CreateRandomStateValue in place: `state`
+	// holds the value either way (upstream env "state")
+	const state = authz.createRandomStateValue(stateLength);
 	if (opts.omit?.state === undefined) {
 		authz.addStateToAuthorizationEndpointRequest(params, state);
 	} else {
@@ -233,7 +247,11 @@ export async function createAuthorizationRequest(
 			condition("AddNonceToAuthorizationEndpointRequest").log(opts.omit.nonce[1]);
 		}
 	}
-	authz.setAuthorizationEndpointRequestResponseTypeToCode(params);
+	if (opts.responseType) {
+		opts.responseType(params);
+	} else {
+		authz.setAuthorizationEndpointRequestResponseTypeToCode(params);
+	}
 	if (jarmMode) {
 		authz.setAuthorizationEndpointRequestResponseModeToJWT(params);
 	}
@@ -409,7 +427,7 @@ export async function createDpopForParEndpoint(
 	if (client.dpop.key == null) {
 		await dpop.generateDpopKey(op.metadata, client);
 	}
-	await dpop.createParEndpointDpopSteps(op.metadata, client, req);
+	await dpop.createParEndpointDpopSteps(op.metadata, client, req, undefined, client.dpopSteps?.par);
 }
 
 /**
@@ -623,7 +641,7 @@ export async function createDpopForTokenEndpoint(
 	if (client.dpop.key == null) {
 		await dpop.generateDpopKey(op.metadata, client);
 	}
-	await dpop.createTokenEndpointDpopSteps(op.metadata, client, req);
+	await dpop.createTokenEndpointDpopSteps(op.metadata, client, req, client.dpopSteps?.token);
 }
 
 /**
@@ -640,6 +658,8 @@ export async function callSenderConstrainedTokenEndpoint(
 	opts: {
 		/** the client authentication of this request (upstream addClientAuthenticationToTokenEndpointRequest overrides) */
 		addClientAuthentication?: (req: TokenRequest) => Promise<void>;
+		/** the DPoP proof of this request (upstream createDpopForTokenEndpoint overrides) */
+		createDpop?: (req: TokenRequest) => Promise<void>;
 		requirements?: string[];
 	} = {},
 ): Promise<TokenResponse> {
@@ -650,7 +670,11 @@ export async function callSenderConstrainedTokenEndpoint(
 		let response: TokenResponse | null = null;
 		for (let i = 0; i < MAX_RETRY; i++) {
 			await authenticate(req);
-			await createDpopForTokenEndpoint(op, client, req);
+			if (opts.createDpop) {
+				await opts.createDpop(req);
+			} else {
+				await createDpopForTokenEndpoint(op, client, req);
+			}
 			const result = await dpop.callTokenEndpointAllowingDpopNonceError(op, req, client.dpop, ...requirements);
 			response = result.response;
 			if (!result.nonceError) {
@@ -671,6 +695,8 @@ export interface Fapi2Tokens {
 	refreshToken: string | undefined;
 	/** null with openid=plain_oauth */
 	idToken: ParsedJwt | null;
+	/** The id_token claims ValidateIdTokenStandardClaims did not know (upstream "id_token_unknown_claims") */
+	idTokenUnknownClaims: Record<string, unknown> | null;
 }
 
 /**
@@ -720,15 +746,16 @@ export async function processTokenEndpointResponse(
 	soft(() => refresh.ensureMinimumAccessTokenEntropy(response, "FAPI2-SP-FINAL-5.4.1-4"));
 
 	let idToken: ParsedJwt | null = null;
+	let idTokenUnknownClaims: Record<string, unknown> | null = null;
 	if (op.variant.openid === "openid_connect") {
 		soft(() => token.validateIdTokenFromTokenResponseEncryption(response, client.keys.jwks, "OIDCC-10.2"), "warning");
 		idToken = await token.extractIdTokenFromTokenResponse(response, client, "FAPI2-SP-FINAL-5.3.2.3", "OIDCC-3.3.2.5");
-		await idTokenChecks.performStandardIdTokenChecks(
+		({ unknownClaims: idTokenUnknownClaims } = await idTokenChecks.performStandardIdTokenChecks(
 			{ metadata: op.metadata, jwks: op.jwks as Jwks },
 			client.client,
 			request,
 			idToken,
-		);
+		));
 		soft(() => idTokenChecks.ensureIdTokenContainsKid(idToken as ParsedJwt, "OIDCC-10.1"));
 		// plain_fapi: no profile id_token validation steps; FAPI2ProfileBehavior.validateIdTokenSigningAlg
 		soft(() => idTokenChecks.fapi2ValidateIdTokenSigningAlg(idToken as ParsedJwt, "FAPI2-SP-FINAL-5.4"));
@@ -756,7 +783,7 @@ export async function processTokenEndpointResponse(
 	} else {
 		token.expectNoIdTokenInTokenResponse(response);
 	}
-	return { response, accessToken, expiresIn, refreshToken, idToken };
+	return { response, accessToken, expiresIn, refreshToken, idToken, idTokenUnknownClaims };
 }
 
 // ---- the resource endpoint ----
@@ -957,13 +984,13 @@ export async function requestProtectedResourceUsingDpop(
 	client: Fapi2Client,
 	resource: Resource,
 	accessToken: AccessToken,
-	headers: Record<string, string>,
+	headers: dpop.DpopRequestHeaders,
 	...requirements: string[]
 ): Promise<EndpointResponse> {
 	const MAX_RETRY = 2;
 	let response: EndpointResponse | null = null;
 	for (let i = 0; i < MAX_RETRY; i++) {
-		await dpop.createResourceEndpointDpopSteps(client, resource, accessToken, headers);
+		await dpop.createResourceEndpointDpopSteps(client, resource, accessToken, headers, client.dpopSteps?.resource);
 		const result = await dpop.callProtectedResourceAllowingDpopNonceError(resource.url, accessToken, client.dpop, {
 			method: resource.method as "GET" | "POST" | undefined,
 			headers,

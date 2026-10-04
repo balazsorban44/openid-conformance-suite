@@ -19,6 +19,8 @@ import {
 } from "../../src/op/discovery-endpoint.ts";
 import * as dpop from "../../src/op/dpop.ts";
 import {
+	ensureContentTypeJson,
+	ensureHttpStatusCodeIs200,
 	ensureHttpStatusCodeIs200or201,
 	ensureHttpStatusCodeIs400or401,
 	ensureHttpStatusCodeIs4xx,
@@ -30,11 +32,14 @@ import type { Fapi2Op, Fapi2Variant, OpVariant } from "../../src/op/op.ts";
 import * as par from "../../src/op/par.ts";
 import * as refresh from "../../src/op/refresh-token.ts";
 import * as requestObject from "../../src/op/request-object.ts";
+import * as tls from "../../src/op/tls.ts";
 import * as token from "../../src/op/token.ts";
+import * as userinfo from "../../src/op/userinfo.ts";
 import { block, logModule, skipped, soft } from "../../src/suite/conditions.ts";
 import type { TestConfig } from "../../src/suite/config.ts";
 import type { EndpointResponse } from "../../src/suite/http.ts";
-import { waitFor30Seconds, waitForExpiry, waitForOneSecond } from "../../src/suite/wait.ts";
+import type { ParsedJwt } from "../../src/suite/jose.ts";
+import { waitFor30Seconds, waitFor62Seconds, waitForExpiry, waitForOneSecond } from "../../src/suite/wait.ts";
 import { skipTest } from "../fixtures.ts";
 
 /** The fixtures the shared test bodies use */
@@ -50,6 +55,8 @@ export interface AuthorizationFlowOptions {
 	requestObject?: fapi2.RequestObjectOptions;
 	/** upstream `useDpopAuthCodeBinding`: a DPoP proof with the PAR request (RFC 9449 10) */
 	useDpopAuthCodeBinding?: boolean;
+	/** The path the OP redirects back to when it is not the suite's "callback" (upstream callbackEndpoint overrides) */
+	callbackPath?: string;
 	/** The client authentication of the PAR request (upstream addClientAuthenticationToPAREndpointRequest overrides) */
 	addClientAuthenticationToPar?: (req: par.ParRequest) => Promise<void>;
 	/**
@@ -166,9 +173,11 @@ export async function performAuthorizationFlow(
 			return opts.performRedirect(request);
 		}
 		if (opts.createPlaceholder) {
-			return authz.authorizeExpectingErrorPageOrRedirect(op, request, opts.createPlaceholder());
+			return authz.authorizeExpectingErrorPageOrRedirect(op, request, opts.createPlaceholder(), {
+				callbackPath: opts.callbackPath,
+			});
 		}
-		return authz.authorize(op, request);
+		return authz.authorize(op, request, { callbackPath: opts.callbackPath });
 	};
 	// upstream's modules that leave the duplicates out start no block: the redirect stays in the PAR endpoint's
 	const response = opts.redirect?.withoutDuplicates
@@ -237,6 +246,8 @@ export async function verifyAuthorizationResponse(
 export interface TokenEndpointOptions {
 	/** The client authentication of the token request (upstream addClientAuthenticationToTokenEndpointRequest overrides) */
 	addClientAuthentication?: (req: token.TokenRequest) => Promise<void>;
+	/** The DPoP proof of the token request (upstream createDpopForTokenEndpoint overrides) */
+	createDpop?: (req: token.TokenRequest) => Promise<void>;
 	requirements?: string[];
 }
 
@@ -478,9 +489,17 @@ async function happyFlowClient(
 	)) as string;
 	const { tokenRequest, response: tokenResponse } = await callTokenEndpoint(op, client, request, code);
 	const tokens = await verifyTokenEndpointResponse(op, client, request, tokenResponse, code);
-	// TODO(port): ExtractTLSTestValuesFromResourceConfiguration and the "Resource endpoint TLS test" block
-	// (EnsureTLS12RequireBCP195Ciphers, DisallowTLS10, DisallowTLS11, EnsureTLS13OrLater, EnsureTLS13PreferredOverTLS12,
-	// RequireOnlyBCP195RecommendedCiphersForTLS12, CheckForBCP195InsecureFAPICiphers) of the first client
+	if (!client.second) {
+		// plain_fapi: the single resource endpoint (not Brazil's accounts endpoints)
+		const resourceTls = tls.extractTLSTestValuesFromResourceConfiguration(resource.url);
+		await block("Resource endpoint TLS test", () =>
+			tls.checkEndpointTls(
+				resourceTls,
+				{ tls13Negotiated: false },
+				{ requireOnlyBCP195Ciphers: true, checkInsecureFAPICiphers: true },
+			),
+		);
+	}
 	const { headers } = await requestProtectedResource(op, client, resource, tokens.accessToken);
 	if (!client.second) {
 		await performAdditionalResourceEndpointTests(op, client, resource, tokens.accessToken, headers);
@@ -626,10 +645,28 @@ export async function fapi2EnsureClientIdInTokenEndpoint({ fapi }: Fapi2Fixtures
 export async function fapi2EnsureHolderOfKeyRequired({ fapi }: Fapi2Fixtures): Promise<void> {
 	const client = fapi2.configureClient(fapi);
 	fapi2.setupResourceEndpoint(fapi);
-	// TODO(port): ExtractTLSTestValuesFromServerConfiguration and the "Authorization endpoint TLS test", "Userinfo
-	// Endpoint TLS test", "Token Endpoint TLS test" and "Registration Endpoint TLS test" blocks
-	// (EnsureTLS12RequireBCP195Ciphers, DisallowTLS10, DisallowTLS11, EnsureTLS13OrLater, EnsureTLS13PreferredOverTLS12,
-	// RequireOnlyBCP195RecommendedCiphersForTLS12, CheckForBCP195InsecureFAPICiphers)
+	const endpointTls = discovery.extractTLSTestValuesFromServerConfiguration(fapi.metadata) as Record<
+		string,
+		tls.TlsTestValues | null
+	>;
+	// check that all known endpoints support TLS correctly (plain_fapi: not the client credentials grant)
+	const tlsState: tls.TlsTestState = { tls13Negotiated: false };
+	// additional ciphers are allowed on the authorization endpoint
+	await block("Authorization endpoint TLS test", () =>
+		tls.checkEndpointTls(endpointTls["authorization_endpoint"], tlsState, {}),
+	);
+	await block("Userinfo Endpoint TLS test", () =>
+		tls.checkEndpointTls(endpointTls["userinfo_endpoint"], tlsState, { requireOnlyBCP195Ciphers: true }),
+	);
+	await block("Token Endpoint TLS test", () =>
+		tls.checkEndpointTls(endpointTls["token_endpoint"], tlsState, {
+			requireOnlyBCP195Ciphers: true,
+			checkInsecureFAPICiphers: true,
+		}),
+	);
+	await block("Registration Endpoint TLS test", () =>
+		tls.checkEndpointTls(endpointTls["registration_endpoint"], tlsState, { requireOnlyBCP195Ciphers: true }),
+	);
 	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri);
 	const code = (await verifyAuthorizationResponse(
 		fapi,
@@ -1946,5 +1983,1063 @@ export async function fapi2EnsureDifferentStateInsideAndOutsideRequestObject({ f
 		resource,
 		authz.addIncorrectStateToAuthorizationEndpointRequest,
 		() => authz.expectRequestDifferentStateInsideAndOutsideErrorPage("FAPI2-MS-ID1-5.3.2-1"),
+	);
+}
+
+/**
+ * One client's authorization that the user rejects: the access_denied error redirect and its checks.
+ *
+ * upstream: FAPI2SPFinalUserRejectsAuthentication.onAuthorizationCallbackResponse
+ */
+async function userRejectsAuthenticationFlow(op: Fapi2Op, client: Fapi2Client, redirectUri: string): Promise<void> {
+	// Add length state with 128
+	const { request, response } = await performAuthorizationFlow(op, client, redirectUri, {
+		request: { stateLength: 128 },
+	});
+	await verifyAuthorizationResponse(op, client, request, response as authz.AuthorizationResponse, {
+		onAuthorizationCallbackResponse: (res) => {
+			soft(() => authz.checkStateInAuthorizationResponse(request, res));
+			soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+			soft(
+				() =>
+					authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(
+						res,
+						{ expectDummy1Dummy2: client.second },
+						"OIDCC-3.1.2.6",
+					),
+				"warning",
+			);
+			soft(() =>
+				authz.expectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest(
+					res,
+					"OIDCC-3.1.2.6",
+					"RFC6749-4.1.2.1",
+				),
+			);
+			if (client.second) {
+				// Check if server return correct params as we requested in redirect_uri query part
+				authz.checkMatchingCallbackParameters(request, res);
+			}
+			return null;
+		},
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalUserRejectsAuthentication.java (AbstractFAPI2SPFinalMultipleClient) */
+export async function fapi2UserRejectsAuthentication({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const client2 = await fapi2.configureSecondClient(fapi, client);
+	fapi2.setupResourceEndpoint(fapi);
+	await userRejectsAuthenticationFlow(fapi, client, fapi.redirectUri);
+	// performAuthorizationFlowWithSecondClient
+	const redirectUri2 = await setUpSecondClientRedirectUri(fapi, client2);
+	await userRejectsAuthenticationFlow(fapi, client2, redirectUri2);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureAuthorizationRequestWith64CharNonceSuccess.java */
+export async function fapi2EnsureAuthorizationRequestWith64CharNonceSuccess({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	await performCompleteFlow(fapi, client, fapi.redirectUri, resource, { request: { nonceLength: 64 } });
+}
+
+/** upstream: FAPI2SPFinalTestClaimsParameterIdentityClaims.isClaimsParameterSupported */
+function isClaimsParameterSupported(op: Fapi2Op): boolean {
+	const claimsSupportedEl = op.metadata["claims_parameter_supported"];
+	if (claimsSupportedEl === undefined) {
+		return false;
+	}
+	if (typeof claimsSupportedEl !== "boolean") {
+		// upstream: a TestFailureException
+		throw new Error("'claims_parameter_supported' in the server metadata is not a boolean");
+	}
+	return claimsSupportedEl;
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalTestClaimsParameterIdentityClaims.java */
+export async function fapi2TestClaimsParameterIdentityClaims({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		request: {
+			before: () => {
+				if (!isClaimsParameterSupported(fapi)) {
+					skipTest(
+						"The 'claims_parameter_supported' server metadata indicates that it does not support the claims parameter (which is permitted behaviour), so claims behaviour cannot be tested.",
+					);
+				}
+				if (!authz.checkIfOidcStandardClaimsSupported(fapi.metadata, "OIDCC-5.1")) {
+					skipTest(
+						"The 'claims_supported' server metadata does not contain any standard OpenID Connect claims (which is permitted behaviour), and means claims behaviour cannot be tested.",
+					);
+				}
+			},
+			steps: (params) => {
+				authz.addAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims(
+					params,
+					fapi.metadata,
+					"OIDCC-5.1",
+					"OIDCC-5.5",
+					"OIDCD-3",
+				);
+				authz.addRandomLocationClaimsToAuthorizationEndpointRequest(params, "OIDCC-5.5");
+			},
+		},
+	});
+	const code = (await verifyAuthorizationResponse(
+		fapi,
+		client,
+		request,
+		response as authz.AuthorizationResponse,
+	)) as string;
+	const { response: tokenResponse } = await callTokenEndpoint(fapi, client, request, code);
+	const tokens = await verifyTokenEndpointResponse(fapi, client, request, tokenResponse, code);
+
+	// requestProtectedResource
+	const identityClaims = idToken.extractIdentityClaimsFromIdToken(tokens.idToken as ParsedJwt);
+	if (fapi.metadata.userinfo_endpoint != null) {
+		await block(client.prefix + "Call userinfo endpoint", async () => {
+			const headers = fapi2.createEmptyResourceEndpointRequestHeaders();
+			// isDpop: so the 'htu' value is correct
+			const url = discovery.setProtectedResourceUrlToUserInfoEndpoint(fapi.metadata);
+			const res = await fapi2.requestProtectedResourceUsingDpop(
+				client,
+				{ url },
+				tokens.accessToken,
+				headers,
+				"FAPI2-SP-FINAL-5.3.4-2",
+			);
+			soft(() => ensureHttpStatusCodeIs200(res));
+			soft(() => ensureContentTypeJson(res, "OIDCC-5.3.2"));
+			const info = userinfo.extractUserInfoFromUserInfoEndpointResponse(res);
+			// upstream stores "userinfo_unknown_claims" even when the validation fails; a failed one has none here
+			const unknownClaims = soft(() => userinfo.validateUserInfoStandardClaims(info, "OIDCC-5.1")) ?? {};
+			soft(() => userinfo.checkForUnexpectedClaimsInUserinfo(unknownClaims, "OIDCC-5.1"), "warning");
+			soft(() => userinfo.ensureUserInfoContainsSub(info, "OIDCC-5.3.2"));
+			soft(() => userinfo.ensureUserInfoUpdatedAtValid(info, "OIDCC-5.1"));
+			soft(() => userinfo.ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources(info, "OIDCC-5.6.2"));
+			soft(() =>
+				userinfo.verifyUserInfoAndIdTokenInTokenEndpointSameSub(info, tokens.idToken as ParsedJwt, "OIDCC-5.3.2"),
+			);
+			userinfo.addIdentityClaimsFromUserInfo(identityClaims, info);
+		});
+	} else {
+		logModule("No userinfo_endpoint in server metadata; skipping calling userinfo endpoint");
+	}
+	soft(
+		() => userinfo.ensureIdentityClaimsContainRequestedClaims(identityClaims, request.params, "OIDCC-5.5"),
+		"warning",
+	);
+	// We don't include this check in the more general PerformStandardIdTokenChecks as it could be pretty noisy
+	soft(() => idToken.checkForUnexpectedClaimsInIdToken(tokens.idTokenUnknownClaims, "OIDCC-5.1"), "warning");
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalCheckDpopProofNbfExp.java */
+export async function fapi2CheckDpopProofNbfExp({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const nbfAndExp: dpop.DpopProofSteps = {
+		beforeSign: ({ claims }) => {
+			dpop.setDpopNbfToNow(claims);
+			dpop.setDpopExpToFiveMinutesInFuture(claims);
+		},
+	};
+	client.dpopSteps = { token: nbfAndExp, resource: nbfAndExp };
+	await performCompleteFlow(fapi, client, fapi.redirectUri, resource);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureDpopProofWithIat10SecondsBeforeSucceeds.java */
+export async function fapi2EnsureDpopProofWithIat10SecondsBeforeSucceeds({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const iatInPast: dpop.DpopProofSteps = {
+		beforeSign: ({ claims }) => dpop.setDpopIatTo10SecondsInPast(claims, "FAPI2-SP-FINAL-5.3.2.1-13"),
+	};
+	client.dpopSteps = { par: iatInPast, token: iatInPast, resource: iatInPast };
+	await performCompleteFlow(fapi, client, fapi.redirectUri, resource, { useDpopAuthCodeBinding: true });
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureDpopProofWithIat10SecondsAfterSucceeds.java */
+export async function fapi2EnsureDpopProofWithIat10SecondsAfterSucceeds({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const iatInFuture: dpop.DpopProofSteps = {
+		beforeSign: ({ claims }) => dpop.setDpopIatTo8SecondsInFuture(claims, "FAPI2-SP-FINAL-5.3.2.1-13"),
+	};
+	client.dpopSteps = { par: iatInFuture, token: iatInFuture, resource: iatInFuture };
+	await performCompleteFlow(fapi, client, fapi.redirectUri, resource, { useDpopAuthCodeBinding: true });
+}
+
+/**
+ * The flow of the modules that end at the token endpoint: the authorization flow and the code, then the token
+ * request with the module's changes (no "Call token endpoint" block: upstream makes the request inside the
+ * "Verify authorization endpoint response" one) and the module's checks in "Verify token endpoint response".
+ *
+ * upstream: fapi2spfinal/AbstractFAPI2SPFinalPerformTokenEndpoint.java (performPostAuthorizationFlow,
+ * exchangeAuthorizationCode with the module's processTokenEndpointResponse)
+ */
+async function performTokenEndpointModule(
+	op: Fapi2Op,
+	client: Fapi2Client,
+	opts: AuthorizationFlowOptions & TokenEndpointOptions & { beforeTokenRequest?: () => Promise<void> },
+	processTokenEndpointResponse: (response: token.TokenResponse) => void,
+): Promise<void> {
+	const { request, response } = await performAuthorizationFlow(op, client, op.redirectUri, opts);
+	const code = (await verifyAuthorizationResponse(
+		op,
+		client,
+		request,
+		response as authz.AuthorizationResponse,
+	)) as string;
+	await opts.beforeTokenRequest?.();
+	const tokenRequest = fapi2.createAuthorizationCodeRequest(request, code);
+	const tokenResponse = await fapi2.callSenderConstrainedTokenEndpoint(op, client, tokenRequest, opts);
+	await block(client.prefix + "Verify token endpoint response", () => processTokenEndpointResponse(tokenResponse));
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureTokenEndpointFailsWithMismatchedDpopProofJkt.java */
+export async function fapi2EnsureTokenEndpointFailsWithMismatchedDpopProofJkt({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{
+			useDpopAuthCodeBinding: true,
+			createDpop: async (req) => {
+				// Generate a new key to overwrite the key created during the PAR endpoint
+				await dpop.generateDpopKey(fapi.metadata, client);
+				await fapi2.createDpopForTokenEndpoint(fapi, client, req);
+			},
+		},
+		(res) => {
+			soft(() => token.checkTokenEndpointReturnedInvalidRequestGrantOrDPopProofError(res, "DPOP-10.1"));
+		},
+	);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureTokenEndpointFailsWithMismatchedDpopJkt.java */
+export async function fapi2EnsureTokenEndpointFailsWithMismatchedDpopJkt({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	// Generate DPOP key for use by AddInvalidDpopJktToAuthorizationEndpointRequest
+	await dpop.generateDpopKey(fapi.metadata, client);
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{ request: { steps: (params) => dpop.addInvalidDpopJktToAuthorizationEndpointRequest(params, client) } },
+		(res) => {
+			soft(() => token.checkTokenEndpointReturnedInvalidRequestGrantOrDPopProofError(res, "DPOP-10.1"));
+		},
+	);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureDpopProofAtParEndpointBindingSuccess.java */
+export async function fapi2EnsureDpopProofAtParEndpointBindingSuccess({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	await performCompleteFlow(fapi, client, fapi.redirectUri, resource, { useDpopAuthCodeBinding: true });
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureDpopAuthCodeBindingSuccess.java */
+export async function fapi2EnsureDpopAuthCodeBindingSuccess({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	await dpop.generateDpopKey(fapi.metadata, client);
+	await performCompleteFlow(fapi, client, fapi.redirectUri, resource, {
+		useDpopAuthCodeBinding: true,
+		request: { steps: (params) => dpop.addDpopJktToAuthorizationEndpointRequest(params, client) },
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalDpopNegativeTests.java */
+export async function fapi2DpopNegativeTests({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri);
+	const code = (await verifyAuthorizationResponse(
+		fapi,
+		client,
+		request,
+		response as authz.AuthorizationResponse,
+	)) as string;
+	// super.requestProtectedResource()
+	const { tokens } = await performPostAuthorizationFlow(fapi, client, request, code, resource);
+	const accessToken = tokens.accessToken;
+	// upstream env "jti" (FixedJtiClaim)
+	const jtiState = { jti: null as string | null };
+	const method = resource.method as "GET" | "POST" | undefined;
+
+	/** upstream FAPI2SPFinalDpopNegativeTests.callResourceEndpointSteps */
+	const callResourceEndpointSteps = async (
+		steps: dpop.DpopProofSteps,
+		expectSuccess: boolean,
+		shouldFail: boolean,
+		requirements: string[],
+		forceBearer = false,
+	) => {
+		const MAX_RETRY = 2;
+		let res: EndpointResponse | null = null;
+		for (let i = 0; i < MAX_RETRY; i++) {
+			const headers: dpop.DpopRequestHeaders = fapi2.createEmptyResourceEndpointRequestHeaders();
+			// makeUpdateResourceRequestSteps (plain_fapi: the DPoP proof)
+			await dpop.createResourceEndpointDpopSteps(client, resource, accessToken, headers, steps);
+			let nonceError: string | null = null;
+			if (forceBearer) {
+				res = await dpop.callProtectedResourceForceBearer(resource, accessToken, headers, "RFC7231-5.3.2");
+			} else {
+				({ response: res, nonceError } = await dpop.callProtectedResourceAllowingDpopNonceError(
+					resource.url,
+					accessToken,
+					client.dpop,
+					{ method, headers, requirements: ["FAPI2-SP-FINAL-5.3.4-2"] },
+				));
+			}
+			if (!nonceError) {
+				break; // no nonce error so
+			}
+			// Remove any stored 'jti' previously stored in the environment by FixedJtiClaim to ensure the retry will use a new 'jti'.
+			jtiState.jti = null;
+			// continue call with nonce
+		}
+		const result = shouldFail ? "failure" : "warning";
+		const resourceResponse = res as EndpointResponse;
+		if (expectSuccess) {
+			soft(() => ensureHttpStatusCodeIs200or201(resourceResponse, ...requirements), result);
+		} else {
+			soft(() => ensureHttpStatusCodeIs400or401(resourceResponse, ...requirements), result);
+		}
+	};
+
+	/**
+	 * Special method to handle tests for iat: results will depend on whether the server required the use of DPOP
+	 * nonce (upstream callResourceEndpointStepsForIatAndNonceTests)
+	 */
+	const callResourceEndpointStepsForIatAndNonceTests = async (
+		steps: dpop.DpopProofSteps,
+		expectSuccess: boolean,
+		shouldFail: boolean,
+		requirements: string[],
+	) => {
+		const MAX_RETRY = 2;
+		let usedNonce = false;
+		// Remove any previous stored nonces that may affect outcome
+		client.dpop.resourceServerNonce = null;
+		let res: EndpointResponse | null = null;
+		for (let i = 0; i < MAX_RETRY; i++) {
+			const headers: dpop.DpopRequestHeaders = fapi2.createEmptyResourceEndpointRequestHeaders();
+			await dpop.createResourceEndpointDpopSteps(client, resource, accessToken, headers, steps);
+			const result = await dpop.callProtectedResourceAllowingDpopNonceError(resource.url, accessToken, client.dpop, {
+				method,
+				headers,
+				requirements: ["FAPI2-SP-FINAL-5.3.4-2"],
+			});
+			res = result.response;
+			if (!result.nonceError) {
+				break; // no nonce error so
+			}
+			usedNonce = true;
+			// Remove any stored 'jti' previously stored in the environment by FixedJtiClaim to ensure the retry will use a new 'jti'.
+			jtiState.jti = null;
+			// continue call with nonce
+		}
+		// If server required nonce, it should succeed
+		if (usedNonce) {
+			shouldFail = false;
+			expectSuccess = true;
+		}
+		const result = shouldFail ? "failure" : "warning";
+		const resourceResponse = res as EndpointResponse;
+		if (expectSuccess) {
+			soft(() => ensureHttpStatusCodeIs200or201(resourceResponse, ...requirements), result);
+		} else {
+			soft(() => ensureHttpStatusCodeIs400or401(resourceResponse, ...requirements), result);
+		}
+	};
+
+	// as per https://www.ietf.org/archive/id/draft-ietf-oauth-dpop-07.html#section-4.3:
+
+	await block("Try DPoP proof with all upper case header value", () =>
+		callResourceEndpointSteps({ addHeader: dpop.addDpopHeaderAllCapital }, true, false, ["DPOP-4.1"]),
+	);
+
+	// 1. that there is not more than one DPoP header in the request,
+	await block("Try with more than one DPoP in the header", () =>
+		callResourceEndpointSteps(
+			{
+				addHeader: async (headers, proof) => {
+					const proof2 = dpop.renameDPoPProof(proof);
+					await dpop.createResourceEndpointDpopSteps(client, resource, accessToken, headers, {
+						addHeader: (h, p) => dpop.addMultipleDpopHeaderForResourceEndpointRequest(h, p, proof2),
+					});
+				},
+			},
+			false,
+			true,
+			["DPOP-7.1"],
+		),
+	);
+
+	// 2. the string value of the header field is a well-formed JWT,
+	await block("Try DPoP proof not well-formed JWT", () =>
+		callResourceEndpointSteps({ afterSign: dpop.notWellformedDPoP }, false, true, ["DPOP-4.2"]),
+	);
+
+	// 3. all required claims per Section 4.2 are contained in the JWT,
+	await block("Try DPoP proof where 'typ' is missing in header", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ header }) => dpop.removeTypFromDpopProof(header) }, false, true, [
+			"DPOP-4.2",
+		]),
+	);
+	await block("Try DPoP proof where 'alg' is missing", () =>
+		callResourceEndpointSteps({ afterSign: dpop.signDpopAndRemoveAlg }, false, true, ["DPOP-4.2"]),
+	);
+	await block("Try DPoP proof where 'jwk' is missing", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ header }) => dpop.removeJwkFromDpopProof(header) }, false, true, [
+			"DPOP-4.2",
+		]),
+	);
+	await block("Try DPoP proof where 'jti' is missing", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ claims }) => dpop.removeJtiFromDpopProof(claims) }, false, true, [
+			"DPOP-4.2",
+		]),
+	);
+	await block("Try DPoP proof where 'htm' is missing", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ claims }) => dpop.removeHtmFromDpopProof(claims) }, false, true, [
+			"DPOP-4.2",
+		]),
+	);
+	await block("Try DPoP proof where 'htu' is missing", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ claims }) => dpop.removeHtuFromDpopProof(claims) }, false, true, [
+			"DPOP-4.2",
+		]),
+	);
+	await block("Try DPoP proof where 'iat' is missing", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ claims }) => dpop.removeIatFromDpopProof(claims) }, false, true, [
+			"DPOP-4.2",
+		]),
+	);
+	await block("Try DPoP proof where 'ath' is missing", () =>
+		callResourceEndpointSteps({ ath: "Skipping adding DPoP ATH" }, false, true, ["DPOP-4.2"]),
+	);
+
+	// 4. the typ field in the header has the value dpop+jwt,
+	await block("Try DPoP proof with invalid 'typ' in header", () =>
+		callResourceEndpointSteps(
+			{ afterHtmHtu: ({ header }) => dpop.setDpopHeaderTypToInvalidValue(header) },
+			false,
+			true,
+			["DPOP-4.2"],
+		),
+	);
+
+	// 5. the algorithm in the header of the JWT indicates an asymmetric digital signature algorithm, is not none, is supported by the application, and is deemed secure,
+	// I think mostly this is one that can only be tested at the token endpoint, but there are a few things we can try:
+	// Run test only if RSA key was generated
+	const dpopKeyKty = client.dpop.key?.["kty"];
+	if (dpopKeyKty === "RSA") {
+		await block("Try DPoP proof signed using RS256", () =>
+			callResourceEndpointSteps({ beforeSign: ({ header }) => dpop.changeSignAlgorithm(header) }, false, true, [
+				"FAPI2-SP-FINAL-5.4",
+			]),
+		);
+	}
+
+	await block("Try DPoP proof with none alg", () =>
+		callResourceEndpointSteps({ sign: ({ claims }) => dpop.signDpopProofWithNone(claims) }, false, true, [
+			"FAPI2-SP-FINAL-5.4",
+		]),
+	);
+
+	// 6. the JWT signature verifies with the public key contained in the jwk header of the JWT,
+	await block("Try DPoP proof with invalid signature", () =>
+		callResourceEndpointSteps({ afterSign: dpop.invalidateDpopProofSignature }, false, true, ["FAPI2-SP-FINAL-5.4"]),
+	);
+
+	// 7. the jwk header of the JWT does not contain a private key,
+	await block("Try DPoP proof with jwk header incorrectly containing private key", () =>
+		callResourceEndpointSteps(
+			{ afterHtmHtu: (proof) => dpop.setDpopHeaderJwkToPrivateKey(proof, client) },
+			false,
+			true,
+			["DPOP-4.3"],
+		),
+	);
+
+	// 8. the htm claim matches the HTTP method value of the HTTP request in which the JWT was received,
+	await block("Try DPoP proof with incorrect 'htm'", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ claims }) => dpop.setDpopHtmToPut(claims) }, false, true, ["DPOP-4.3"]),
+	);
+
+	// 9. the htu claim matches the HTTPS URI value for the HTTP request in which the JWT was received, ignoring any query and fragment parts,
+	await block(
+		"Try DPoP proof where 'htu' has a query/fragment (which must be ignored in match as per 4.3-9 in DPoP spec)",
+		() =>
+			callResourceEndpointSteps(
+				{ afterHtmHtu: ({ claims }) => dpop.addQueryAndFragmentToDpopHtu(claims) },
+				true,
+				true,
+				["DPOP-4.3"],
+			),
+	);
+	await block(
+		"Try DPoP proof where 'htu' does not contain the query/fragment (which must be ignored in match as per 4.3-9 in DPoP spec)",
+		() =>
+			callResourceEndpointSteps(
+				{ afterHtmHtu: ({ claims }) => dpop.removeQueryAndFragmentFromDpopHtu(claims) },
+				true,
+				true,
+				["DPOP-4.3"],
+			),
+	);
+	await block("Try DPoP proof where 'htu' is a different url", () =>
+		callResourceEndpointSteps({ afterHtmHtu: ({ claims }) => dpop.setDpopHtuToDifferentUrl(claims) }, false, true, [
+			"DPOP-7.1",
+		]),
+	);
+
+	// 10. if the server provided a nonce value to the client, the nonce claim matches the server-provided nonce value,
+	// We're not doing nonces yet
+
+	// 11. the iat claim value is within an acceptable timeframe and, within a reasonable consideration of accuracy and resource utilization, a proof JWT with the same jti value has not previously been received at the same resource during that time period (see Section 11.1),
+	// iat is expected to be within seconds/minutes of current time as per https://mailarchive.ietf.org/arch/msg/oauth/CC0ZlExBdZFOjO2ltgkJ3w6VioI/
+	// This might need to be changed when we support nonces if the server is using nonce; there's been discussion on the IETF OAuth list about the nonce check replacing the iat check
+	// https://mailarchive.ietf.org/arch/msg/oauth/T4stTh9mQRExvZTdEC30OF541p0/
+	// Tests will expect failure ONLY when nonce is not used
+	await block("Try DPoP proof where 'iat' is one hour in the future", () =>
+		callResourceEndpointStepsForIatAndNonceTests(
+			{ afterHtmHtu: ({ claims }) => dpop.setDpopIatToOneHourInFuture(claims) },
+			false,
+			true,
+			["DPOP-7.1"],
+		),
+	);
+	await block("Try DPoP proof where 'iat' is one hour in the past", () =>
+		callResourceEndpointStepsForIatAndNonceTests(
+			{ afterHtmHtu: ({ claims }) => dpop.setDpopIatToOneHourInPast(claims) },
+			false,
+			true,
+			["DPOP-7.1"],
+		),
+	);
+
+	await block("DPoP reuse, First use of jti", () =>
+		callResourceEndpointSteps({ afterClaims: (claims) => dpop.fixedJtiClaim(claims, jtiState) }, true, true, [
+			"DPOP-7.1",
+		]),
+	);
+	await block("DPoP reuse, Second use of the same jti, this 'should' fail", () =>
+		callResourceEndpointSteps({ afterClaims: (claims) => dpop.fixedJtiClaim(claims, jtiState) }, false, false, [
+			"DPOP-7.1",
+		]),
+	);
+
+	// 12 if presented to a protected resource in conjunction with an access token,
+	// 12.1 ensure that the value of the ath claim equals the hash of that access token,
+	await block("Try DPoP proof where 'ath' is incorrect", () =>
+		callResourceEndpointSteps({ ath: dpop.setDpopAccessTokenHashToIncorrectValue }, false, true, ["DPOP-7.1"]),
+	);
+
+	// 12.2 confirm that the public key to which the access token is bound matches the public key from the DPoP proof.
+	await block("Try DPoP signed with a different key", () =>
+		callResourceEndpointSteps(
+			{
+				beforeSign: () => dpop.generateNewSignKey(client),
+				afterSign: (proof) => {
+					dpop.recoverSignKey(client);
+					return proof;
+				},
+			},
+			false,
+			true,
+			["DPOP-7.1"],
+		),
+	);
+
+	// try proof with unknown values in header/body (should succeed)
+	await block("Try DPoP proof with extra claims on header and claims, as it should be ignored by resource server", () =>
+		callResourceEndpointSteps(
+			{
+				// the second insertAfter(SetDpopHtmHtuForResourceEndpoint) lands before the first one
+				afterHtmHtu: ({ header, claims }) => {
+					dpop.addExtraClaimsToClaims(claims);
+					dpop.addExtraClaimsToHeader(header);
+				},
+			},
+			true,
+			true,
+			["DPOP-7.2"],
+		),
+	);
+
+	// Servers SHOULD employ Syntax-Based Normalization and Scheme-Based Normalization in accordance with Section 6.2.2. and Section 6.2.3. of [RFC3986] before comparing the htu claim.
+	await block(
+		"Try DPoP proof expecting RS to compare scheme and hostname using case independent mode when validating htu claim",
+		() =>
+			callResourceEndpointSteps({ htmHtu: (claims) => dpop.dpopHtuUpperCase(claims, resource) }, true, false, [
+				"RFC3986-6.2.2",
+				"RFC3986-6.2.3",
+			]),
+	);
+	await block(
+		"Try DPoP proof expecting Scheme based normalization of htu claim, where the port is not considered if that is the default for the scheme.",
+		() =>
+			callResourceEndpointSteps({ htmHtu: (claims) => dpop.dpopHtuWithPort(claims, resource) }, true, false, [
+				"RFC3986-6.2.2",
+				"RFC3986-6.2.3",
+			]),
+	);
+
+	await block("Try resource access without DPoP proof", () =>
+		callResourceEndpointSteps({ afterAddHeader: dpop.removeDpopFromResourceRequest }, false, true, [
+			"FAPI2-BASE-4.3.3",
+		]),
+	);
+	await block("Try resource access without DPoP proof and authorization type changed to 'Bearer'", () =>
+		callResourceEndpointSteps({ afterAddHeader: dpop.removeDpopFromResourceRequest }, false, true, ["DPOP-7.1"], true),
+	);
+
+	// This is a final sanity check to make sure that all the above tests failed because of the invalid dpop proofs,
+	// and not because the access token had stopped working for some reason etc.
+	await block("Check a correct DPoP proof still works", () => callResourceEndpointSteps({}, true, true, ["DPOP-7.1"]));
+	// plain_fapi: no signed response validation
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalAttemptToUseExpiredAuthCode.java (AbstractFAPI2SPFinalPerformTokenEndpoint) */
+export async function fapi2AttemptToUseExpiredAuthCode({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{
+			// Wait 60s + 2s clock skew before proceeding to the token endpoint.
+			beforeTokenRequest: () => waitFor62Seconds(),
+		},
+		(res) => {
+			if (res.status === 200) {
+				soft(() => token.serverAllowedExpiredAuthorizationCode("FAPI2-SP-FINAL-5.3.2.1-11"));
+			} else {
+				soft(() => token.checkTokenEndpointHttpStatus400(res, "OIDCC-3.1.3.4"));
+				soft(() => token.checkTokenEndpointReturnedJsonContentType(res, "OIDCC-3.1.3.4"));
+				soft(() => token.checkErrorFromTokenEndpointResponseErrorInvalidGrant(res, "RFC6749-5.2"));
+				soft(() => token.validateErrorFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+				soft(
+					() => token.checkErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB(res, "RFC6749-5.2"),
+					"warning",
+				);
+				soft(() => token.validateErrorDescriptionFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+				soft(() => token.validateErrorUriFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+			}
+		},
+	);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureSignedClientAssertionWithRS256Fails.java */
+export async function fapi2EnsureSignedClientAssertionWithRS256Fails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const alg = algFromClientJwks(client);
+	if (alg !== "PS256") {
+		// FAPI only allows ES256 and PS256. This throws an exception: the test will stop here
+		skipTest(
+			`This test requires RSA keys to be performed, the alg in client configuration is '${alg}' so this test is being skipped. If your server does not support PS256 then this will not prevent you certifying.`,
+		);
+	}
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{
+			addClientAuthentication: (req) =>
+				token.createJWTClientAuthenticationAssertionWithIssAudAndAddToRequest(fapi, req, client, {
+					beforeSign: () => token.changeClientJwksAlgToRS256(client, "FAPI2-SP-FINAL-5.4"),
+				}),
+		},
+		(res) => {
+			/* If we get an error back from the token endpoint server:
+			 * - It must be a 'invalid_client' error
+			 */
+			soft(() => token.checkTokenEndpointHttpStatusIs400Allowing401ForInvalidClientError(res, "RFC6749-5.2"));
+			soft(() => token.checkTokenEndpointReturnedJsonContentType(res, "OIDCC-3.1.3.4"));
+			soft(() => token.checkErrorFromTokenEndpointResponseErrorInvalidClient(res, "RFC6749-5.2"));
+			soft(() => token.validateErrorFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+			soft(
+				() => token.checkErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB(res, "RFC6749-5.2"),
+				"warning",
+			);
+			soft(() => token.validateErrorDescriptionFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+			soft(() => token.validateErrorUriFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+		},
+	);
+}
+
+/**
+ * The checks of the client assertion modules on the token response: an 'invalid_client' or 'invalid_request' error.
+ *
+ * upstream: FAPI2SPFinalEnsureClientAssertionWith*Fails.processTokenEndpointResponse
+ */
+function checkInvalidClientAssertionTokenResponse(res: token.TokenResponse): void {
+	/* If we get an error back from the token endpoint server:
+	 * - It must be a 'invalid_client' or 'invalid_request' error
+	 */
+	soft(() => token.checkTokenEndpointReturnedJsonContentType(res, "OIDCC-3.1.3.4"));
+	soft(() => token.validateErrorFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+	soft(() => token.checkErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB(res, "RFC6749-5.2"), "warning");
+	soft(() => token.validateErrorDescriptionFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+	soft(() => token.validateErrorUriFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+	soft(() => token.checkTokenEndpointHttpStatusIs400Allowing401ForInvalidClientError(res, "RFC6749-5.2"));
+	soft(() => token.checkErrorFromTokenEndpointResponseErrorInvalidClientOrInvalidRequest(res, "RFC6749-5.2"));
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureClientAssertionWithExpIs5MinutesInPastFails.java */
+export async function fapi2EnsureClientAssertionWithExpIs5MinutesInPastFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{
+			addClientAuthentication: (req) =>
+				token.createJWTClientAuthenticationAssertionWithIssAudAndAddToRequest(fapi, req, client, {
+					afterClaims: (claims) => token.addExpIs5MinutesInPastToClientAssertionClaims(claims),
+				}),
+		},
+		checkInvalidClientAssertionTokenResponse,
+	);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureClientAssertionWithWrongAudFails.java */
+export async function fapi2EnsureClientAssertionWithWrongAudFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{
+			addClientAuthentication: (req) =>
+				token.createJWTClientAuthenticationAssertionWithIssAudAndAddToRequest(fapi, req, client, {
+					createClaims: () => token.createClientAuthenticationAssertionClaims(fapi, client.client),
+					afterClaims: (claims) => token.addWrongAudToClientAssertionClaims(claims),
+				}),
+		},
+		checkInvalidClientAssertionTokenResponse,
+	);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureClientAssertionWithNoSubFails.java */
+export async function fapi2EnsureClientAssertionWithNoSubFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await performTokenEndpointModule(
+		fapi,
+		client,
+		{
+			addClientAuthentication: (req) =>
+				token.createJWTClientAuthenticationAssertionWithIssAudAndAddToRequest(fapi, req, client, {
+					// this is the difference from 'super'
+					afterClaims: (claims) => token.removeSubFromClientAssertionClaims(claims, "RFC7523-3"),
+				}),
+		},
+		checkInvalidClientAssertionTokenResponse,
+	);
+}
+
+/**
+ * The PAR error checks of the response_type modules: a 4xx with unsupported_response_type, invalid_request or
+ * unauthorized_client (we only raise a warning here as per
+ * https://bitbucket.org/openid/fapi/issues/618/certification-conformance-strictness-of)
+ */
+function processResponseTypeParErrorResponse(res: par.ParResponse): void {
+	soft(() => ensureHttpStatusCodeIs4xx(res, "PAR-2.3"));
+	soft(() => par.ensurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError(res, "PAR-2.3"), "warning");
+}
+
+/**
+ * The checks on the authorization endpoint's error response of the response_type modules (upstream processCallback
+ * overrides, block "Verify authorization endpoint error response")
+ */
+function verifyResponseTypeErrorResponse(
+	request: Fapi2AuthorizationRequest,
+	response: authz.AuthorizationResponse,
+): void {
+	soft(() => authz.rejectAuthCodeInUrlQuery(response, "FAPI2-SP-FINAL-5.3.2.2-1"));
+	soft(() => authz.rejectAuthCodeInUrlFragment(response, "FAPI2-SP-FINAL-5.3.2.2-1"));
+	if (!request.jarm) {
+		// It doesn't really matter if the error in the fragment or the query, the specs aren't entirely clear on the matter
+		authz.detectWhetherErrorResponseIsInQueryOrFragment(response);
+	}
+	/* The error from the authorization server:
+	 * - must be a 'unsupported_response_type' or "invalid_request" error
+	 * - must have the correct state we supplied
+	 */
+	soft(() => authz.ensureUnsupportedResponseTypeOrInvalidRequestError(response, "OIDCC-3.3.2.6"));
+	soft(() => authz.checkStateInAuthorizationResponse(request, response));
+	soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(response, "OIDCC-3.1.2.6"));
+	soft(
+		() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(response, {}, "OIDCC-3.1.2.6"),
+		"warning",
+	);
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureResponseTypeCodeIdTokenFails.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2EnsureResponseTypeCodeIdTokenFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		request: {
+			responseType: (params) =>
+				authz.setAuthorizationEndpointRequestResponseTypeToCodeIdtoken(params, "FAPI2-SP-FINAL-5.3.2.2-1"),
+		},
+		processParResponse: expectingParErrorOrCallback(processResponseTypeParErrorResponse),
+		// see https://bitbucket.org/openid/fapi/issues/476/is-response_type-code-id_token-permitted
+		createPlaceholder: () => authz.expectResponseTypeErrorPage("FAPI2-SP-FINAL-5.3.2.2-1"),
+	});
+	if (response == null) {
+		return;
+	}
+	await block(client.prefix + "Verify authorization endpoint error response", () => {
+		// UPSTREAM: the JARM response is not processed by this module (the query is checked as it is)
+		verifyResponseTypeErrorResponse({ ...request, jarm: false }, response);
+	});
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureResponseTypeTokenFails.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2EnsureResponseTypeTokenFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		request: {
+			responseType: (params) =>
+				authz.setAuthorizationEndpointRequestResponseTypeToToken(params, "FAPI2-SP-FINAL-5.3.2.2-1"),
+		},
+		processParResponse: expectingParErrorOrCallback(processResponseTypeParErrorResponse),
+		createPlaceholder: () => authz.expectResponseTypeErrorPage("FAPI2-SP-FINAL-5.3.2.2-1"),
+	});
+	if (response == null) {
+		return;
+	}
+	await block(client.prefix + "Verify authorization endpoint error response", async () => {
+		if (request.jarm) {
+			await fapi2.processCallbackForJARM(fapi, client, request, response, false);
+		}
+		verifyResponseTypeErrorResponse(request, response);
+	});
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureRedirectUriInAuthorizationRequest.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2EnsureRedirectUriInAuthorizationRequest({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		request: {
+			// Remove the redirect URL (upstream: a plain removal from the request, nothing logged)
+			steps: (params) => {
+				delete params["redirect_uri"];
+			},
+		},
+		processParResponse: expectingParErrorOrCallback((res) =>
+			soft(() => par.ensurePARInvalidRequestOrInvalidRequestObjectError(res, "PAR-2.3")),
+		),
+		createPlaceholder: () => authz.expectRedirectUriMissingErrorPage("FAPI2-SP-FINAL-5.3.2.2-6"),
+	});
+	if (response == null) {
+		return;
+	}
+	// the authorization server accepted the request and used the registered redirect URI as a default
+	const code = (await verifyAuthorizationResponse(fapi, client, request, response)) as string;
+	await performPostAuthorizationFlow(fapi, client, request, code, resource);
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureRegisteredRedirectUri.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback; not applicable to plain_fapi)
+ */
+export async function fapi2EnsureRegisteredRedirectUri({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	// create a random redirect URI
+	const { redirectUri, badRedirectPath } = authz.createBadRedirectUriByAppending(fapi.baseUrl);
+	let redirectedToBadUri = false;
+	fapi.server.on("callback/" + badRedirectPath, () => {
+		redirectedToBadUri = true;
+		return new Response(null, { status: 204 });
+	});
+	const { response } = await performAuthorizationFlow(fapi, client, redirectUri, {
+		processParResponse: expectingParErrorOrCallback((res) =>
+			soft(() => par.ensurePARInvalidRequestOrInvalidRequestObjectError(res, "PAR-2.3")),
+		),
+		createPlaceholder: () => authz.expectRedirectUriErrorPage("PAR-2.1-3"),
+	});
+	if (redirectedToBadUri) {
+		throw new Error(
+			"The authorization server redirected the user to the requested but randomised/unregistered redirect uri. This must not happen as the provided redirect uri could not have been registered.",
+		);
+	}
+	if (response != null) {
+		throw new Error(
+			"The authorization server called the registered redirect uri. This should not have happened as the client provided a bad redirect_uri in the request.",
+		);
+	}
+	// the PAR endpoint rejected the request, or the OP showed an error page (its screenshot is in the log)
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalTolerateUnregisteredRedirectUri.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2TolerateUnregisteredRedirectUri({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	// create a random redirect URI; the OP may redirect back to it (RFC 9126 2.4)
+	const { redirectUri, badRedirectPath } = authz.createBadRedirectUriByAppending(fapi.baseUrl);
+	const { request, response } = await performAuthorizationFlow(fapi, client, redirectUri, {
+		callbackPath: "callback/" + badRedirectPath,
+		processParResponse: expectingParErrorOrCallback((res) =>
+			soft(() => par.ensurePARInvalidRequestOrInvalidRequestObjectError(res, "PAR-2.3")),
+		),
+		createPlaceholder: () => authz.expectRedirectUriErrorPage("PAR-2.1-3"),
+	});
+	if (response == null) {
+		// the PAR endpoint rejected the request (no request_uri, so no callback can follow), or the OP showed an
+		// error page
+		return;
+	}
+	const code = (await verifyAuthorizationResponse(fapi, client, request, response)) as string;
+	await performPostAuthorizationFlow(fapi, client, request, code, resource);
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureUnsignedAuthorizationRequestWithoutUsingParFails.java
+ * (AbstractFAPI2SPFinalExpectingAuthorizationEndpointPlaceholderOrCallback; isPar = false)
+ */
+export async function fapi2EnsureUnsignedAuthorizationRequestWithoutUsingParFails({
+	fapi,
+}: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	// Nothing as no request object required in this test (createAuthorizationRequestObject)
+	const request = await block("Create authorization request", () =>
+		fapi2.createAuthorizationRequest(fapi, client, fapi.redirectUri),
+	);
+	const response = await block("Make request to authorization endpoint", () => {
+		request.url = authz.buildPlainRedirectToAuthorizationEndpoint(fapi, request.params, "FAPI2-MS-ID1-5.3.1-1");
+		return authz.authorizeExpectingErrorPageOrRedirect(
+			fapi,
+			request,
+			authz.expectAuthorizationRequestWithoutRequestObjectErrorPage("FAPI2-MS-ID1-5.3.1-1"),
+		);
+	});
+	if (response == null) {
+		return;
+	}
+	await verifyAuthorizationResponse(fapi, client, request, response, {
+		onAuthorizationCallbackResponse: (res) => {
+			/* If we get an error back from the authorization server:
+			 * - It must be a 'invalid_request' error
+			 * - It must have the correct state we supplied
+			 */
+			// state can be absented if authorization request did not send state in the request object
+			if (res.params["state"] == null) {
+				skipped("CheckStateInAuthorizationResponse", { element: ["authorization_endpoint_response", "state"] });
+			} else {
+				soft(() => authz.checkStateInAuthorizationResponse(request, res));
+			}
+			soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+			soft(
+				() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(res, {}, "OIDCC-3.1.2.6"),
+				"warning",
+			);
+			soft(() => authz.ensureInvalidRequestError(res, "OIDCC-3.3.2.6"));
+			return null;
+		},
+	});
+}
+
+/**
+ * The flow of the long nonce / long state modules after the callback: the normal flow when the OP accepted the
+ * request, else the checks on the invalid_request error (the server MUST NOT return the value corrupted or
+ * truncated).
+ *
+ * upstream: FAPI2SPFinalEnsureAuthorizationRequestWithLongNonce / WithLongState.onAuthorizationCallbackResponse
+ */
+async function longValueCallback(
+	op: Fapi2Op,
+	client: Fapi2Client,
+	resource: Resource,
+	request: Fapi2AuthorizationRequest,
+	response: authz.AuthorizationResponse,
+	onError?: () => void,
+): Promise<void> {
+	const code = await verifyAuthorizationResponse(op, client, request, response, {
+		onAuthorizationCallbackResponse: (res) => {
+			if (!("error" in res.params)) {
+				return fapi2.onAuthorizationCallbackResponse(op, request, res);
+			}
+			soft(() => authz.checkStateInAuthorizationResponse(request, res));
+			soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+			soft(
+				() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(res, {}, "OIDCC-3.1.2.6"),
+				"warning",
+			);
+			soft(() => authz.ensureInvalidRequestError(res, "OIDCC-3.3.2.6"), "warning");
+			onError?.();
+			return null;
+		},
+	});
+	if (code != null) {
+		await performPostAuthorizationFlow(op, client, request, code, resource);
+	}
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureAuthorizationRequestWithLongNonce.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2EnsureAuthorizationRequestWithLongNonce({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		// Add long nonce with 384 bytes; see https://gitlab.com/openid/conformance-suite/-/issues/359 for background
+		request: { nonceLength: 384 },
+		processParResponse: expectingParErrorOrCallback((res) =>
+			soft(() => par.ensurePARInvalidRequestError(res, "PAR-2.3")),
+		),
+		createPlaceholder: () => authz.expectRequestObjectWithLongNonceErrorPage(),
+	});
+	if (response == null) {
+		return;
+	}
+	await longValueCallback(fapi, client, resource, request, response);
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalEnsureAuthorizationRequestWithLongState.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2EnsureAuthorizationRequestWithLongState({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		// Add long state with 1000 bytes
+		request: { stateLength: 1000 },
+		processParResponse: expectingParErrorOrCallback((res) =>
+			soft(() => par.ensurePARInvalidRequestError(res, "PAR-2.3")),
+		),
+		createPlaceholder: () => authz.expectRequestObjectWithLongStateErrorPage(),
+	});
+	if (response == null) {
+		return;
+	}
+	await longValueCallback(fapi, client, resource, request, response, () =>
+		soft(() => authz.warningAboutRejectingLongState("FAPI2-SP-FINAL-5.3.2.2"), "warning"),
 	);
 }

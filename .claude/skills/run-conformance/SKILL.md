@@ -75,7 +75,11 @@ the PAR endpoint; the JARM project (`fapi2-message-signing-jarm`, unsigned reque
 fapi2-message-signing-jarm.json without it. The DPoP nonce retries (`use_dpop_nonce` at the PAR, token and resource
 endpoints) are exercised because the target requires nonces. The configurations' `override` gives
 par-ensure-reused-request-uri-prior-to-auth-completion-succeeds a first browser automation entry
-(`"match-limit": 1`) that only waits for the login page, so the user takes no action on the first visit.
+(`"match-limit": 1`) that only waits for the login page, so the user takes no action on the first visit. The TLS blocks of the happy flow and
+ensure-holder-of-key-required make raw TLS handshakes with the OP's endpoints (TLS 1.0 / 1.1 offered, TLS 1.2 with
+the BCP 195 recommended ciphers only, TLS 1.3): in FAPI 2.0 mode the target serves https with that cipher policy.
+`fapi2-security-profile-final-user-rejects-authentication` needs the browser to reject the login: the configs'
+`override` for it clicks the "Cancel" link of oidc-provider's login page instead of logging in.
 
 ## Environment variables
 

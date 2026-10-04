@@ -413,9 +413,10 @@ export async function performStandardIdTokenChecks(
 	client: Pick<Client, "client_id">,
 	request: Pick<AuthorizationRequest, "params" | "nonce">,
 	idToken: ParsedJwt,
-): Promise<void> {
+): Promise<{ unknownClaims: Record<string, unknown> | null }> {
 	soft(() => validateIdToken(idToken, op, client, "OIDCC-3.1.3.7"));
-	soft(() => validateIdTokenStandardClaims(idToken, "OIDCC-5.1"));
+	// upstream env "id_token_unknown_claims" (null when ValidateIdTokenStandardClaims failed before it was stored)
+	const unknownClaims = soft(() => validateIdTokenStandardClaims(idToken, "OIDCC-5.1")) ?? null;
 	soft(() => validateIdTokenNonce(idToken, request.nonce, "OIDCC-2"));
 	soft(() => validateIdTokenACRClaimAgainstRequest(idToken, request, "OIDCC-5.5.1.1"));
 	await soft(() => validateIdTokenSignature(idToken, op.jwks));
@@ -426,6 +427,7 @@ export async function performStandardIdTokenChecks(
 	} else {
 		soft(() => validateEncryptedIdTokenHasKid(idToken, "OIDCC-10.2", "OIDCC-10.2.1"));
 	}
+	return { unknownClaims };
 }
 
 /** A hash claim of the id_token and the id_token's alg (upstream env "at_hash" / "c_hash") */
@@ -1129,4 +1131,46 @@ export function checkAuthorizationEndpointHashes(
 	} else {
 		soft(() => validateCHash(cHash, code, "OIDCC-3.3.2.11"));
 	}
+}
+
+/**
+ * The identity claims of the id_token (upstream env "identity_claims": the claims without the id_token's own ones,
+ * ValidateIdTokenStandardClaims.getIdTokenIdentityClaims), the start of what the claims module collects.
+ *
+ * upstream: condition/client/ExtractIdentityClaimsFromIdToken.java
+ */
+export function extractIdentityClaimsFromIdToken(idToken: ParsedJwt): Record<string, unknown> {
+	const c: Condition = condition("ExtractIdentityClaimsFromIdToken");
+	const identityClaims = structuredClone(idToken.claims);
+	for (const name of ID_TOKEN_NON_IDENTITY_CLAIMS) {
+		delete identityClaims[name];
+	}
+	c.log("Extracted identity_claims from id_token", { identity_claims: identityClaims });
+	return identityClaims;
+}
+
+/**
+ * The id_token had no claims ValidateIdTokenStandardClaims did not know (`unknownClaims`, upstream env
+ * "id_token_unknown_claims"; null when that check did not store them).
+ *
+ * upstream: condition/client/CheckForUnexpectedClaimsInIdToken.java
+ */
+export function checkForUnexpectedClaimsInIdToken(
+	unknownClaims: Record<string, unknown> | null,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckForUnexpectedClaimsInIdToken", ...requirements);
+	if (unknownClaims == null) {
+		// UPSTREAM: the framework reports the missing @PreEnvironment object
+		c.failure("Couldn't find id_token_unknown_claims");
+	}
+	// If this check was to be used more generally, it'd make sense for it to remove any claims we'd explicitly
+	// requested, e.g. openbanking_intent_id in the OpenBanking UK tests
+	if (Object.keys(unknownClaims).length !== 0) {
+		c.failure(
+			"id_token includes claims with names that are not known. This may indicate the authorization server has misunderstood the spec, or it may be using extensions the test suite is unaware of.",
+			unknownClaims,
+		);
+	}
+	c.success("id_token includes only known claims");
 }

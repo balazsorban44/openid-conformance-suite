@@ -1,18 +1,35 @@
 import { http, HttpResponse } from "msw";
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { ConditionFailed } from "../suite/conditions.ts";
 import { generateJwkForAlg, type JWK } from "../suite/jose.ts";
 import { useMswServer, useTestLog } from "../suite/testing.ts";
 import {
+	addDpopHeaderAllCapital,
+	addMultipleDpopHeaderForResourceEndpointRequest,
+	addQueryAndFragmentToDpopHtu,
 	callProtectedResourceAllowingDpopNonceError,
 	callTokenEndpointAllowingDpopNonceError,
 	checkTokenTypeIsDpop,
+	createResourceEndpointDpopSteps,
 	createTokenEndpointDpopSteps,
+	dpopHtuUpperCase,
+	dpopHtuWithPort,
 	dpopNonceResponseHeader,
+	fixedJtiClaim,
 	generateDpopKey,
+	generateNewSignKey,
 	hasUseDpopNonceChallenge,
+	invalidateDpopProofSignature,
 	newDpopState,
+	notWellformedDPoP,
 	parseWwwAuthenticate,
+	recoverSignKey,
+	removeQueryAndFragmentFromDpopHtu,
+	renameDPoPProof,
+	setDpopAccessTokenHashToIncorrectValue,
+	setDpopHtuToDifferentUrl,
+	signDpopAndRemoveAlg,
+	signDpopProofWithNone,
 	type DpopClient,
 } from "./dpop.ts";
 import type { TokenRequest, TokenResponse } from "./token.ts";
@@ -200,5 +217,164 @@ describe("CheckTokenTypeIsDpop", () => {
 		});
 		expect(() => checkTokenTypeIsDpop(tokenResponse("Bearer"))).toThrow("CheckTokenTypeIsDpop: Token type is not DPoP");
 		expect(() => checkTokenTypeIsDpop(tokenResponse(undefined))).toThrow("Couldn't find token type");
+	});
+});
+
+const resource = { url: "https://rs.example/accounts" };
+const at = { value: "at-1", type: "DPoP" };
+
+describe("the module's hooks into CreateDpopProofSteps", () => {
+	test("the hooks run where upstream inserts the conditions", async () => {
+		const c = client();
+		const headers: Record<string, string | string[]> = {};
+		const order: string[] = [];
+		await createResourceEndpointDpopSteps(c, resource, at, headers, {
+			afterClaims: () => order.push("afterClaims"),
+			afterHtmHtu: ({ header, claims }) => {
+				order.push("afterHtmHtu");
+				expect(claims["htu"]).toBe(resource.url);
+				expect(header["typ"]).toBe("dpop+jwt");
+			},
+			ath: "Skipping adding DPoP ATH",
+			beforeSign: ({ claims }) => {
+				order.push("beforeSign");
+				expect(claims["ath"]).toBeUndefined();
+			},
+			afterSign: (proof) => {
+				order.push("afterSign");
+				return proof + "x";
+			},
+			afterAddHeader: () => order.push("afterAddHeader"),
+		});
+		expect(order).toEqual(["afterClaims", "afterHtmHtu", "beforeSign", "afterSign", "afterAddHeader"]);
+		expect(headers["DPoP"]).toMatch(/x$/);
+		expect(t.entries().find((e) => e.src === "SetDpopAccessTokenHash")).toMatchObject({
+			msg: "Skipping adding DPoP ATH",
+		});
+	});
+
+	test("sign and addHeader replace SignDpopProof and AddDpopHeaderForResourceEndpointRequest", async () => {
+		const c = client();
+		const headers: Record<string, string | string[]> = {};
+		await createResourceEndpointDpopSteps(c, resource, at, headers, {
+			sign: ({ claims }) => signDpopProofWithNone(claims),
+			addHeader: addDpopHeaderAllCapital,
+		});
+		expect(t.entries().some((e) => e.src === "SignDpopProof")).toBe(false);
+		expect(headers["DPoP"]).toBeUndefined();
+		const proof = headers["DPOP"] as string;
+		expect(proof.endsWith(".")).toBe(true);
+		expect(decode(proof).header).toEqual({ alg: "none", typ: "dpop+jwt" });
+	});
+
+	test("two proofs in the DPoP header (MultipleProofs)", async () => {
+		const c = client();
+		const headers: Record<string, string | string[]> = {};
+		await createResourceEndpointDpopSteps(c, resource, at, headers, {
+			addHeader: async (h, proof) => {
+				const proof2 = renameDPoPProof(proof);
+				await createResourceEndpointDpopSteps(c, resource, at, h, {
+					addHeader: (h2, p) => addMultipleDpopHeaderForResourceEndpointRequest(h2, p, proof2),
+				});
+			},
+		});
+		const value = headers["DPoP"];
+		expect(Array.isArray(value) && value.length).toBe(2);
+		expect(t.entries().at(-1)).toMatchObject({
+			src: "AddMultipleDpopHeaderForResourceEndpointRequest",
+			msg: "Set DPoP header",
+		});
+	});
+});
+
+describe("the invalid proofs of the DPoP negative tests", () => {
+	let proof: string;
+	// per test: the log the conditions write to is installed per test
+	beforeEach(async () => {
+		const headers: Record<string, string | string[]> = {};
+		await createResourceEndpointDpopSteps(client(), resource, at, headers);
+		proof = headers["DPoP"] as string;
+	});
+
+	test("InvalidateDpopProofSignature flips bits of the signature", () => {
+		const invalid = invalidateDpopProofSignature(proof);
+		const [h, p, s] = proof.split(".");
+		expect(invalid.startsWith(h + "." + p + ".")).toBe(true);
+		expect(invalid.split(".")[2]).not.toBe(s);
+		expect(t.entries().at(-1)).toMatchObject({
+			src: "InvalidateDpopProofSignature",
+			msg: "Made the dpop_proof signature invalid",
+		});
+	});
+
+	test("NotWellformedDPoP drops the signature, SignDpopAndRemoveAlg renames alg in the signed header", () => {
+		expect(notWellformedDPoP(proof).split(".")).toHaveLength(2);
+		const noAlg = signDpopAndRemoveAlg(proof);
+		const header = JSON.parse(Buffer.from(noAlg.split(".")[0], "base64url").toString());
+		expect(header["alg"]).toBeUndefined();
+		expect(header["alg2"]).toBe("ES256");
+	});
+
+	test("the htu variations", () => {
+		const claims: Record<string, unknown> = { htu: resource.url };
+		addQueryAndFragmentToDpopHtu(claims);
+		expect(claims["htu"]).toBe(
+			resource.url + "?allthedoorsonthisspaceshiphavebeen#programmedtohaveacheeryandsunnydisposition",
+		);
+		removeQueryAndFragmentFromDpopHtu(claims);
+		expect(claims["htu"]).toBe(resource.url);
+		setDpopHtuToDifferentUrl(claims);
+		expect(claims["htu"]).toBe(resource.url + "ohnonotagain");
+
+		const upper: Record<string, unknown> = {};
+		dpopHtuUpperCase(upper, resource);
+		expect(upper).toEqual({ htm: "GET", htu: "HTTPS://RS.EXAMPLE/accounts" });
+		expect(
+			t
+				.entries()
+				.slice(-2)
+				.map((e) => e.msg),
+		).toEqual(["Added htm/htu to DPoP proof claims", "DPoP proof claims"]);
+
+		const withPort: Record<string, unknown> = {};
+		dpopHtuWithPort(withPort, { url: "https://rs.example/accounts", method: "POST" });
+		expect(withPort).toEqual({ htm: "POST", htu: "https://rs.example:443/accounts" });
+		dpopHtuWithPort(withPort, { url: "https://rs.example:8443/accounts" });
+		expect(withPort["htu"]).toBe("https://rs.example:8443/accounts");
+	});
+
+	test("FixedJtiClaim keeps the jti until the state is cleared", () => {
+		const state = { jti: null as string | null };
+		const first: Record<string, unknown> = { jti: "a" };
+		fixedJtiClaim(first, state);
+		const second: Record<string, unknown> = { jti: "b" };
+		fixedJtiClaim(second, state);
+		expect(first["jti"]).toBe(second["jti"]);
+		expect(String(first["jti"])).toHaveLength(15);
+		state.jti = null;
+		const third: Record<string, unknown> = {};
+		fixedJtiClaim(third, state);
+		expect(third["jti"]).not.toBe(first["jti"]);
+	});
+
+	test("GenerateNewSignKey replaces the key (same alg, no kid) and RecoverSignKey restores it", async () => {
+		const c = client();
+		const original = c.dpop.key;
+		await generateNewSignKey(c);
+		expect(c.dpop.key).not.toBe(original);
+		expect(c.dpop.key).toMatchObject({ kty: "EC", alg: "ES256" });
+		expect(c.dpop.key?.["kid"]).toBeUndefined();
+		recoverSignKey(c);
+		expect(c.dpop.key).toBe(original);
+	});
+
+	test("SetDpopAccessTokenHashToIncorrectValue hashes a random token", () => {
+		const claims: Record<string, unknown> = {};
+		setDpopAccessTokenHashToIncorrectValue(claims);
+		expect(String(claims["ath"])).toHaveLength(43);
+		expect(t.entries().at(-1)).toMatchObject({
+			msg: "Added ath to DPoP proof claims",
+			bad_access_token: expect.any(String),
+		});
 	});
 });

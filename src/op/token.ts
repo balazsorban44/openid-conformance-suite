@@ -982,6 +982,8 @@ export function removeClientAssertionFromRequest(req: Pick<TokenRequest, "form">
  * fapi2-security-profile-final-ensure-invalid-client-assertions-fail)
  */
 export interface ClientAssertionMutation {
+	/** replaces CreateClientAuthenticationAssertionClaimsWithIssAudience (e.g. CreateClientAuthenticationAssertionClaims) */
+	createClaims?: () => Record<string, unknown>;
 	/** inserted after CreateClientAuthenticationAssertionClaimsWithIssAudience */
 	afterClaims?: (claims: Record<string, unknown>) => void;
 	/** inserted before SignClientAuthenticationAssertion */
@@ -1008,7 +1010,9 @@ export async function createJWTClientAuthenticationAssertionWithIssAudAndAddToRe
 	client: Pick<RegisteredClient, "client" | "keys">,
 	mutation: ClientAssertionMutation = {},
 ): Promise<void> {
-	const claims = createClientAuthenticationAssertionClaimsWithIssAudience(op, client.client);
+	const claims = mutation.createClaims
+		? mutation.createClaims()
+		: createClientAuthenticationAssertionClaimsWithIssAudience(op, client.client);
 	mutation.afterClaims?.(claims);
 	mutation.beforeSign?.();
 	let clientAssertion = mutation.sign
@@ -1285,4 +1289,47 @@ export function invalidateClientAssertionSignature(clientAssertion: string, ...r
 	const invalid = parsed.parts[0] + "." + parsed.parts[1] + "." + bytes.toString("base64url");
 	c.log("Made the client_assertion signature invalid", { client_assertion: invalid });
 	return invalid;
+}
+
+/** upstream: condition/client/ServerAllowedExpiredAuthorizationCode.java */
+export function serverAllowedExpiredAuthorizationCode(...requirements: string[]): never {
+	return condition("ServerAllowedExpiredAuthorizationCode", ...requirements).failure(
+		"Server has incorrectly allowed the use of an expired authorization code.",
+	);
+}
+
+/**
+ * The claims of a client assertion whose audience is the token endpoint (OIDCC 9), valid for 60 seconds.
+ *
+ * upstream: condition/client/CreateClientAuthenticationAssertionClaims.java
+ */
+export function createClientAuthenticationAssertionClaims(
+	op: Pick<Op, "metadata">,
+	client: Pick<RegisteredClient["client"], "client_id">,
+): Record<string, unknown> {
+	const c: Condition = condition("CreateClientAuthenticationAssertionClaims");
+	const clientId = client.client_id;
+	if (!clientId) {
+		c.failure("Couldn't find required configuration element", { client_id: clientId });
+	}
+	// This code uses the mtls aliased token endpoint if there is one
+	// This is probably not correct, according to this ticket we should always use the non-MTLS one:
+	// https://bitbucket.org/openid/mobile/issues/203/mtls-aliases-ambiguity-in-private_key_jwt
+	// (mTLS is not ported: the metadata's token_endpoint)
+	const audience = op.metadata.token_endpoint;
+	if (!audience) {
+		c.failure("Couldn't find required configuration element", { audience });
+	}
+	const iat = Math.floor(Date.now() / 1000);
+	const claims = {
+		iss: clientId,
+		sub: clientId,
+		aud: audience,
+		jti: randomAlphanumeric(20),
+		nbf: iat,
+		iat,
+		exp: iat + 60,
+	};
+	c.success("Created client assertion claims", claims);
+	return claims;
 }

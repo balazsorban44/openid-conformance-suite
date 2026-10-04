@@ -8,6 +8,7 @@
 import { condition, soft, type Condition } from "../suite/conditions.ts";
 import { endpointResponse, HttpError, request, type EndpointResponse } from "../suite/http.ts";
 import { parseJwt, ParseException, verifyJwsSignature, type Jwks, type ParsedJwt } from "../suite/jose.ts";
+import { jsonEquals, type JsonValue } from "../suite/json.ts";
 import type { AuthorizationRequest } from "./authorization.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import {
@@ -34,7 +35,8 @@ export async function callProtectedResource(
 	accessToken: AccessToken,
 	opts: {
 		method?: "GET" | "POST";
-		headers?: Record<string, string>;
+		/** array values send the header several times (the DPoP negative test with two proofs) */
+		headers?: Record<string, string | string[]>;
 		body?: string | URLSearchParams;
 		/** the requirements the call site cites (upstream callAndStopOnFailure(CallProtectedResource, FAILURE, ...)) */
 		requirements?: string[];
@@ -57,7 +59,7 @@ export async function callProtectedResource(
 		c.failure("Missing Resource URL");
 	}
 	const method = opts.method ?? "GET";
-	const headers: Record<string, string> = { Authorization: type + " " + accessToken.value, ...opts.headers };
+	const headers: Record<string, string | string[]> = { Authorization: type + " " + accessToken.value, ...opts.headers };
 	if (!Object.keys(headers).some((h) => h.toLowerCase() === "accept")) {
 		headers["accept"] = "application/json";
 	}
@@ -607,4 +609,84 @@ export function ensureUserInfoDoesNotContainNonce(userinfo: Record<string, unkno
 		);
 	}
 	c.success("userinfo response does not contain 'nonce' and hence cannot be confused with an id_token.", { nonce });
+}
+
+/**
+ * The userinfo response had no claims ValidateUserInfoStandardClaims did not know (`unknownClaims`, upstream env
+ * "userinfo_unknown_claims").
+ *
+ * upstream: condition/client/CheckForUnexpectedClaimsInUserinfo.java
+ */
+export function checkForUnexpectedClaimsInUserinfo(
+	unknownClaims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckForUnexpectedClaimsInUserinfo", ...requirements);
+	// If this check was to be used more generally, it'd make sense for it to remove any claims we'd explicitly
+	// requested, e.g. openbanking_intent_id in the OpenBanking UK tests
+	if (Object.keys(unknownClaims).length !== 0) {
+		c.failure(
+			"userinfo response includes claims with names that are not known. This may indicate the server has misunderstood the spec, or it may be using extensions the test suite is unaware of.",
+			unknownClaims,
+		);
+	}
+	c.success("userinfo response includes only known claims");
+}
+
+/**
+ * Merges the userinfo claims into the identity claims collected from the id_token; a claim in both must have the
+ * same value.
+ *
+ * upstream: condition/client/AddIdentityClaimsFromUserInfo.java
+ */
+export function addIdentityClaimsFromUserInfo(identityClaims: Record<string, unknown>, userinfo: UserInfo): void {
+	const c: Condition = condition("AddIdentityClaimsFromUserInfo");
+	for (const claim of Object.keys(userinfo)) {
+		const userinfoValue = userinfo[claim];
+		if (claim in identityClaims) {
+			const idTokenValue = identityClaims[claim];
+			if (!jsonEquals(userinfoValue as JsonValue, idTokenValue as JsonValue)) {
+				c.failure("Value of " + claim + " differs between id_token and userinfo", {
+					id_token: idTokenValue,
+					userinfo: userinfoValue,
+				});
+			}
+		}
+		identityClaims[claim] = userinfoValue;
+	}
+	c.success("Merged identity claims from userinfo with those from id_token", {
+		userinfo,
+		identity_claims: identityClaims,
+	});
+}
+
+/**
+ * Every claim requested (in `claims.userinfo` of the authorization request) came back in the id_token or the
+ * userinfo response.
+ *
+ * upstream: condition/client/EnsureIdentityClaimsContainRequestedClaims.java
+ */
+export function ensureIdentityClaimsContainRequestedClaims(
+	identityClaims: Record<string, unknown>,
+	authorizationEndpointRequest: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureIdentityClaimsContainRequestedClaims", ...requirements);
+	// assume we requested same claims in id_token and userinfo, as per
+	// AddAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims
+	// (but deliberately use userinfo, as none-identity claims like acr might have been requested for the id_token)
+	const requestedClaims = (authorizationEndpointRequest["claims"] as Record<string, unknown> | undefined)?.["userinfo"];
+	if (typeof requestedClaims !== "object" || requestedClaims == null || Array.isArray(requestedClaims)) {
+		// UPSTREAM: getAsJsonObject() on a missing claims.userinfo throws
+		throw new TypeError("claims.userinfo of the authorization request is not a JSON object");
+	}
+	const missingClaims = Object.keys(requestedClaims).filter((claim) => !(claim in identityClaims));
+	if (missingClaims.length === 0) {
+		c.success("id_token and userinfo combined contain all the requested claims");
+		return;
+	}
+	c.failure(
+		"The server did not return all the requested claims. Please check the test user contains the claims, that the server correctly understood the request, and that consent was granted to share the claims. As the server listed the claims in claims_supported, it should have returned them in either the id_token or the userinfo response.",
+		{ requested: requestedClaims, returned: identityClaims, missing: missingClaims },
+	);
 }

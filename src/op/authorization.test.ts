@@ -4,15 +4,21 @@ import { useTestLog } from "../suite/testing.ts";
 import {
 	addBadRequestUriToAuthorizationRequest,
 	addClientIdToAuthorizationEndpointRequest,
+	addAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims,
 	addIdTokenEssentialNameClaimToAuthorizationEndpointRequest,
 	addIncorrectNonceToAuthorizationEndpointRequest,
 	addIncorrectStateToAuthorizationEndpointRequest,
+	addRandomLocationClaimsToAuthorizationEndpointRequest,
 	checkErrorFromAuthorizationEndpointErrorInvalidRequest,
 	checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject,
 	checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri,
 	createPlainCodeChallenge,
 	ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError,
 	ensureInvalidRequestUriError,
+	checkIfOidcStandardClaimsSupported,
+	detectWhetherErrorResponseIsInQueryOrFragment,
+	ensureUnsupportedResponseTypeOrInvalidRequestError,
+	expectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest,
 	extractAccessTokenFromAuthorizationResponse,
 	extractIdTokenFromAuthorizationResponse,
 	validateIdTokenFromAuthorizationResponseEncryption,
@@ -108,6 +114,64 @@ describe("claims request parameter", () => {
 			src: "AddIdTokenEssentialNameClaimToAuthorizationEndpointRequest",
 			msg: "Added name claim to authorization_endpoint_request",
 		});
+	});
+
+	test("CheckIfOidcStandardClaimsSupported: whether claims_supported lists a standard claim", () => {
+		expect(checkIfOidcStandardClaimsSupported({ issuer: "i" }, "OIDCC-5.1")).toBe(false);
+		expect(last()).toMatchObject({ msg: "claims_supported not found in server metadata" });
+		expect(checkIfOidcStandardClaimsSupported({ issuer: "i", claims_supported: ["acr", "custom"] })).toBe(false);
+		expect(last()).toMatchObject({
+			msg: "claims_supported in server metadata does not contain any of the OpenID Connect standard claims",
+		});
+		expect(checkIfOidcStandardClaimsSupported({ issuer: "i", claims_supported: ["acr", "email", "sub"] })).toBe(true);
+		expect(last()).toMatchObject({
+			msg: "claims_supported in server metadata contains at least one OpenID Connect standard claims",
+			standard_claims: expect.arrayContaining(["email", "sub"]),
+		});
+		expect(() => checkIfOidcStandardClaimsSupported({ issuer: "i", claims_supported: "email" })).toThrow(
+			"claims_supported in server metadata is not an array",
+		);
+	});
+
+	test("AddAllSupportedStandardClaims...: the standard claims of claims_supported in every request form", () => {
+		const params: Record<string, unknown> = { scope: "openid" };
+		addAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims(
+			params,
+			{ issuer: "i", claims_supported: ["sub", "acr", "name", "email", "birthdate", "phone_number", "address"] },
+			"OIDCC-5.5",
+		);
+		const claims = params["claims"] as Record<string, Record<string, unknown>>;
+		for (const location of ["id_token", "userinfo"]) {
+			const requested = claims[location];
+			expect(Object.keys(requested)).toEqual(["sub", "name", "email", "birthdate", "phone_number", "address"]);
+			expect(requested["sub"]).toBeNull();
+			expect(requested["name"]).toEqual({});
+			expect(requested["email"]).toEqual({ essential: true });
+			expect(Object.values(requested["birthdate"] as Record<string, string>)).toHaveLength(1);
+			expect(requested["phone_number"]).toEqual({ essential: false });
+			expect(requested["address"]).toBeNull();
+		}
+		expect(last()).toMatchObject({
+			src: "AddAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims",
+			result: "SUCCESS",
+			non_oidc_claims: ["acr"],
+		});
+		expect(() =>
+			addAllSupportedStandardClaimsToAuthorizationEndpointRequestIdTokenAndUserinfoClaims(
+				{},
+				{ issuer: "i", claims_supported: ["acr"] },
+			),
+		).toThrow("Server does not seem to support any standard OpenID Connect claims.");
+	});
+
+	test("AddRandomLocationClaimsToAuthorizationEndpointRequest: a random claim in a random location", () => {
+		const params: Record<string, unknown> = { claims: { id_token: { name: null } } };
+		addRandomLocationClaimsToAuthorizationEndpointRequest(params, "OIDCC-5.5");
+		const claims = params["claims"] as Record<string, Record<string, unknown>>;
+		const locations = Object.keys(claims).filter((k) => k !== "id_token");
+		expect(locations).toHaveLength(1);
+		expect(Object.values(claims[locations[0]])).toEqual([null]);
+		expect(last()).toMatchObject({ src: "AddRandomLocationClaimsToAuthorizationEndpointRequest", result: "SUCCESS" });
 	});
 });
 
@@ -216,5 +280,66 @@ describe("the errors the FAPI 2.0 request_uri and request object modules permit"
 		});
 		expect(last()).toMatchObject({ src: "CreatePlainCodeChallenge", code_challenge: "verifier-1" });
 		expect(() => createPlainCodeChallenge("")).toThrow("code_verifier was null or empty");
+	});
+});
+
+/** An authorization response with `query` in the URL query (the code flow) and `fragment` in the fragment */
+const queryResponse = (
+	query: Record<string, string>,
+	fragment: Record<string, string> = {},
+): AuthorizationResponse => ({
+	params: query,
+	query,
+	fragment,
+	method: "GET",
+	headers: {},
+});
+
+describe("the error responses of the FAPI 2 negative modules", () => {
+	test("DetectWhetherErrorResponseIsInQueryOrFragment picks the part carrying error", () => {
+		const inQuery = queryResponse({ error: "invalid_request" });
+		detectWhetherErrorResponseIsInQueryOrFragment(inQuery);
+		expect(inQuery.params).toBe(inQuery.query);
+		expect(last()).toMatchObject({ msg: "Server has chosen to return 'error' in URL query, using query as response" });
+		const inFragment = queryResponse({}, { error: "invalid_request" });
+		detectWhetherErrorResponseIsInQueryOrFragment(inFragment);
+		expect(inFragment.params).toBe(inFragment.fragment);
+		expect(() => detectWhetherErrorResponseIsInQueryOrFragment(queryResponse({ code: "x" }))).toThrow(
+			"authorization server did not return an error in the url query or fragment",
+		);
+	});
+
+	test("EnsureUnsupportedResponseTypeOrInvalidRequestError", () => {
+		ensureUnsupportedResponseTypeOrInvalidRequestError(
+			queryResponse({ error: "unsupported_response_type" }),
+			"OIDCC-3.3.2.6",
+		);
+		expect(last()).toMatchObject({
+			result: "SUCCESS",
+			permitted: ["invalid_request", "unsupported_response_type"],
+			error: "unsupported_response_type",
+		});
+		expect(() => ensureUnsupportedResponseTypeOrInvalidRequestError(queryResponse({ error: "access_denied" }))).toThrow(
+			"authorization endpoint response 'error' field has unexpected value",
+		);
+		expect(() => ensureUnsupportedResponseTypeOrInvalidRequestError(queryResponse({}))).toThrow(
+			"Expected 'error' field is missing from authorization endpoint response",
+		);
+	});
+
+	test("ExpectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest", () => {
+		expectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest(
+			queryResponse({ error: "access_denied" }),
+		);
+		expect(last()).toMatchObject({ result: "SUCCESS", msg: "error parameter is correctly 'access_denied'" });
+		expect(() =>
+			expectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest(queryResponse({ code: "x" })),
+		).toThrow("error parameter not found. When running this test, the tester MUST press 'cancel'");
+		expect(() =>
+			expectAccessDeniedErrorFromAuthorizationEndpointDueToUserRejectingRequest(
+				queryResponse({ error: "login_required" }),
+			),
+		).toThrow("error value is incorrect.");
+		expect(last()).toMatchObject({ expected: "access_denied", actual: "login_required" });
 	});
 });
