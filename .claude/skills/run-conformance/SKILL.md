@@ -128,7 +128,8 @@ prints the pairs) and calls `.github/workflows/conformance.yml` once per browser
 its own matrix, so the Actions view groups the jobs as `<browser> / <project>`. Without `browsers` a project runs
 on chromium only; the projects where the implementation under test sees the suite's browser list all four. Adding
 a project there adds the CI jobs. The setup job installs and caches every browser once (one cache per browser,
-keyed on the Playwright version); each job restores only its own, and runs `playwright install-deps` only when
+keyed on the Playwright version); each job restores only its own (an RP project on firefox or webkit also gets the
+Chromium headless shell, which the bundled RP target drives to log in), and runs `playwright install-deps` only when
 Playwright reports missing system libraries (WebKit on the ubuntu images).
 
 ## Reading the output

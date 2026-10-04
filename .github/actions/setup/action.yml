@@ -13,6 +13,12 @@ inputs:
       (none). Each browser is cached on its own, keyed on the Playwright version in pnpm-lock.yaml.
     required: false
     default: chromium
+  with-chromium:
+    description: >-
+      Also install the Chromium headless shell next to a firefox or webkit `browser`: the bundled RP target
+      (targets/openid-client-rp) drives its own Playwright Chromium to log in, whichever browser the suite drives.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -33,7 +39,7 @@ runs:
     # One cache per browser (its directory and ffmpeg, which Playwright installs with every browser), so a job
     # restores only the browser it runs. The tests are headless, so Chromium is the headless shell (about a third of
     # the download of full Chromium); chrome-mobile is that Chromium with a device descriptor.
-    - if: ${{ contains(fromJSON('["chromium", "chrome-mobile", "all"]'), inputs.browser) }}
+    - if: ${{ contains(fromJSON('["chromium", "chrome-mobile", "all"]'), inputs.browser) || inputs.with-chromium == 'true' }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
@@ -63,6 +69,7 @@ runs:
       shell: bash
       env:
         BROWSER: ${{ inputs.browser }}
+        WITH_CHROMIUM: ${{ inputs.with-chromium }}
       run: |
         case "$BROWSER" in
           chromium | chrome-mobile) names="chromium-headless-shell" ;;
@@ -70,6 +77,9 @@ runs:
           firefox | webkit) names="$BROWSER" ;;
           *) echo "::error::unknown browser '$BROWSER'"; exit 1 ;;
         esac
+        if [ "$WITH_CHROMIUM" = true ] && [ "$BROWSER" = firefox -o "$BROWSER" = webkit ]; then
+          names="$names chromium-headless-shell"
+        fi
         for b in $names; do
           args="$b"
           if [ "$b" = chromium-headless-shell ]; then args="chromium --only-shell"; fi

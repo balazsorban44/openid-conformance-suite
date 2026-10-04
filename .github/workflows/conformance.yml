@@ -36,6 +36,8 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           browser: ${{ inputs.browser }}
+          # the bundled RP target logs in with its own Playwright Chromium, whichever browser the suite drives
+          with-chromium: ${{ startsWith(matrix.project, 'rp-') }}
       - name: Run ${{ matrix.project }} on ${{ inputs.browser }}
         env:
           CONFORMANCE_ARTIFACT: conformance-${{ env.RUN_NAME }}
