@@ -6,8 +6,21 @@ The [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-
 [Playwright](https://playwright.dev), made for CI. Point it at your OpenID Provider or Relying Party and get the
 official suite's checks, messages and spec references as a job with a readable summary.
 
-Ported so far: the **OpenID Connect Core** OP and RP plans (basic, config, dynamic registration, RP-initiated,
-back-channel and front-channel logout, session management, 3rd-party-initiated login).
+What is ported:
+
+- [x] OpenID Connect Core, OpenID Provider
+  - [x] basic, config, dynamic client registration
+  - [x] RP-initiated, back-channel and front-channel logout, session management, 3rd-party-initiated login
+  - [ ] implicit and hybrid flows, form_post response mode
+- [x] OpenID Connect Core, Relying Party
+  - [x] basic, dynamic client registration
+  - [x] RP-initiated, back-channel and front-channel logout, session management, 3rd-party-initiated login
+  - [ ] implicit and hybrid flows, form_post response mode, config, refresh token
+- [ ] FAPI 1 Advanced, FAPI 2 Security Profile and Message Signing, FAPI-CIBA
+- [ ] OpenID Federation, Shared Signals Framework, OpenID4VC issuer / wallet / verifier, eKYC, AuthZEN
+
+A weekly job compares the ported code with upstream and keeps a "Sync with upstream" pull request open with the
+diffs to port.
 
 ## Test your OP in GitHub Actions
 

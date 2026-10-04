@@ -36,6 +36,7 @@ pnpm sync-upstream --status                                 # symbols whose Java
 pnpm sync-upstream --diff src/op/id-token.ts#validateIdTokenNonce   # the Java diff (pinned -> HEAD) of what a function ports
 pnpm sync-upstream --diff src/op/id-token.ts                # the same for every symbol of a file
 pnpm sync-upstream --pin                                    # after syncing: move commit + blob hashes to the upstream HEAD
+pnpm sync-upstream --report upstream-sync.md body.md         # the markdown the weekly workflow puts in the sync PR
 ```
 
 ## Workflow
@@ -75,3 +76,12 @@ Upstream's Spring runtime, MongoDB persistence, UI, API controllers (`info/`, `s
 those areas are evaluated by hand: if they change how a condition logs, how log entries or blocks look, how
 incoming requests are parsed (`requestParts`), or how run-test-plan.py judges a result, mirror them in src/suite
 or tests/fixtures.ts.
+
+## The weekly sync pull request
+
+`.github/workflows/sync-upstream.yml` runs every Monday (and on demand): it fetches upstream, runs `--report`, and
+opens or refreshes the pull request "Sync with upstream" on the branch `sync/upstream`, whose only file is
+`upstream-sync.md` (the status table and every changed symbol's Java diff; the PR body has the table and the
+steps). Port the changes on that branch (`--diff <ts>#<symbol>` per row), re-pin, run the gates and the affected
+projects, delete `upstream-sync.md`, merge. While the PR is open the next weekly run replaces the report with the
+current diffs; when nothing changed upstream the workflow does nothing.

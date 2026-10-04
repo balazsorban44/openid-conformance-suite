@@ -1,0 +1,50 @@
+name: Sync with upstream
+
+# Once a week: fetch the upstream Java suite, list the ported functions and tests whose Java source changed since
+# upstream.lock.json was pinned, and open (or refresh) the pull request "Sync with upstream" on the branch
+# sync/upstream with the report and the diffs. Finishing the PR (porting the changes and re-pinning) is manual:
+# see "How to finish this PR" in its description.
+
+on:
+  schedule:
+    - cron: "12 6 * * 1" # Mondays 06:12 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          browser: "false"
+      - name: Fetch upstream
+        run: node scripts/sync-upstream.ts --fetch
+      - name: Compare with the pin
+        id: compare
+        run: node scripts/sync-upstream.ts --report upstream-sync.md upstream-sync-body.md
+      - name: Open or update the sync pull request
+        if: ${{ steps.compare.outputs.changed != '0' }}
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: sync/upstream
+          base: main
+          add-paths: upstream-sync.md
+          commit-message: "Sync with upstream: ${{ steps.compare.outputs.changed }} ported symbols changed (upstream ${{ steps.compare.outputs.head }})"
+          title: "Sync with upstream: ${{ steps.compare.outputs.changed }} ported symbols changed"
+          body-path: upstream-sync-body.md
+          labels: upstream-sync
+          delete-branch: true
+      - name: Nothing to sync
+        if: ${{ steps.compare.outputs.changed == '0' }}
+        run: echo "every ported symbol is unchanged upstream" >> "$GITHUB_STEP_SUMMARY"

@@ -7,6 +7,7 @@
  *   node scripts/sync-upstream.ts --diff <ts>#<symbol>    git diff of the Java files a function/test ports (pinned..HEAD)
  *   node scripts/sync-upstream.ts --diff <ts path>        the same for every symbol of a TS file
  *   node scripts/sync-upstream.ts --pin                   re-pin commit + blob hashes to upstream HEAD
+ *   node scripts/sync-upstream.ts --report <report.md> <body.md>   write the changes as markdown (the weekly sync PR)
  *
  * The lock's `symbols` (Java file -> { blob, loc, ts, symbol }) are maintained by scripts/upstream-lock-symbols.ts
  * from the `upstream:` comments.
@@ -102,6 +103,118 @@ function diff(target: string): void {
 	process.stdout.write(out || "(no changes)\n");
 }
 
+/** A ported symbol whose Java source changed (or disappeared) upstream since the pin, with its diff */
+export interface ChangedSymbol {
+	ts: string;
+	symbol: string;
+	java: string;
+	deleted: boolean;
+	/** `git diff --stat`-like counts */
+	added: number;
+	removed: number;
+	/** the unified diff (empty for a deleted file) */
+	diff: string;
+}
+
+const DIFF_LINES_PER_SYMBOL = 400;
+
+function changedSymbols(): ChangedSymbol[] {
+	const out: ChangedSymbol[] = [];
+	for (const [java, info] of Object.entries(lock.symbols)) {
+		const blob = blobOf(java);
+		if (blob === info.blob) {
+			continue;
+		}
+		const diff =
+			blob === null
+				? ""
+				: execFileSync("git", ["diff", lock.upstream.commit, "HEAD", "--", java], {
+						cwd: upstreamDir,
+						encoding: "utf8",
+					});
+		const lines = diff.split("\n");
+		out.push({
+			ts: info.ts,
+			symbol: info.symbol,
+			java,
+			deleted: blob === null,
+			added: lines.filter((l) => l.startsWith("+") && !l.startsWith("+++")).length,
+			removed: lines.filter((l) => l.startsWith("-") && !l.startsWith("---")).length,
+			diff,
+		});
+	}
+	return out.sort((a, b) => a.ts.localeCompare(b.ts) || a.symbol.localeCompare(b.symbol));
+}
+
+/** The weekly sync PR: a full report (every diff) and a short PR body pointing at it */
+export function renderReport(
+	changes: ChangedSymbol[],
+	range: { repo: string; pinned: string; head: string; headDate: string; reportPath: string; reportUrl?: string },
+): { report: string; body: string } {
+	const web = range.repo.replace(/\.git$/, "");
+	const compare = `${web}/-/compare/${range.pinned}...${range.head}`;
+	const short = (c: string) => c.slice(0, 12);
+	const javaLink = (java: string, deleted: boolean) =>
+		deleted
+			? `~~${java}~~`
+			: `[${java.replace(/^src\/main\/java\/net\/openid\/conformance\//, "")}](${web}/-/blob/${range.head}/${java})`;
+	const table = [
+		"| Ported in | Upstream file | Change |",
+		"|---|---|---|",
+		...changes.map(
+			(c) =>
+				`| \`${c.ts}#${c.symbol}\` | ${javaLink(c.java, c.deleted)} | ${c.deleted ? "deleted upstream" : `+${c.added} −${c.removed}`} |`,
+		),
+	].join("\n");
+	const intro = `Upstream moved from [\`${short(range.pinned)}\`](${web}/-/commit/${range.pinned}) to [\`${short(range.head)}\`](${web}/-/commit/${range.head}) (${range.headDate.slice(0, 10)}, [compare](${compare})). ${changes.length} ported ${changes.length === 1 ? "symbol has" : "symbols have"} upstream changes.`;
+	const howTo = [
+		"## How to finish this PR",
+		"",
+		"1. For each row: `pnpm sync-upstream --diff <ts>#<symbol>` shows the Java diff; apply the change to the TypeScript",
+		"   function or test (`.claude/skills/writing-tests`, the porting rules), keeping messages, severities and",
+		"   requirement tags identical to upstream.",
+		"2. `pnpm sync-upstream --pin`, `pnpm lock-symbols`, `pnpm check`, `pnpm test:unit`, and the affected projects",
+		"   (`node bin/cli.ts ci --project <name>`).",
+		`3. Delete \`${range.reportPath}\` before merging; the weekly sync regenerates it while this PR is open.`,
+	].join("\n");
+	const body = `${intro}\n\n${table}\n\nThe diffs are in ${range.reportUrl ? `[\`${range.reportPath}\`](${range.reportUrl})` : `\`${range.reportPath}\``} on this branch.\n\n${howTo}`;
+	const diffs = changes.map((c) => {
+		const lines = c.diff.split("\n");
+		const shown = lines.slice(0, DIFF_LINES_PER_SYMBOL).join("\n");
+		const cut =
+			lines.length > DIFF_LINES_PER_SYMBOL
+				? `\n... ${lines.length - DIFF_LINES_PER_SYMBOL} more lines: pnpm sync-upstream --diff ${c.ts}#${c.symbol}`
+				: "";
+		return `### \`${c.ts}#${c.symbol}\`\n\n${javaLink(c.java, c.deleted)}${c.deleted ? " was deleted upstream." : ""}\n\n${c.deleted ? "" : "```diff\n" + shown + cut + "\n```"}`;
+	});
+	const report = `# Upstream changes\n\n${intro}\n\n${table}\n\n${diffs.join("\n\n")}\n`;
+	return { report, body };
+}
+
+function report(reportFile: string, bodyFile: string): void {
+	ensureUpstream();
+	const changes = changedSymbols();
+	const head = git(["rev-parse", "HEAD"]);
+	const { report: md, body } = renderReport(changes, {
+		repo: lock.upstream.repo,
+		pinned: lock.upstream.commit,
+		head,
+		headDate: git(["log", "-1", "--format=%cI"]),
+		reportPath: reportFile,
+		// on GitHub Actions: the file on the sync branch
+		reportUrl: process.env["GITHUB_REPOSITORY"]
+			? `${process.env["GITHUB_SERVER_URL"] ?? "https://github.com"}/${process.env["GITHUB_REPOSITORY"]}/blob/sync/upstream/${reportFile}`
+			: undefined,
+	});
+	writeFileSync(resolve(reportFile), md);
+	writeFileSync(resolve(bodyFile), body + "\n");
+	console.log(`changed=${changes.length}`);
+	const out = process.env["GITHUB_OUTPUT"];
+	if (out) {
+		writeFileSync(out, `changed=${changes.length}\nhead=${head}\n`, { flag: "a" });
+	}
+}
+
 function pin(): void {
 	ensureUpstream();
 	for (const [java, info] of Object.entries(lock.symbols)) {
@@ -118,20 +231,26 @@ function pin(): void {
 }
 
 const [cmd = "--status", ...args] = process.argv.slice(2);
-switch (cmd) {
-	case "--fetch":
-		fetch();
-		break;
-	case "--status":
-		status();
-		break;
-	case "--diff":
-		diff(args[0]);
-		break;
-	case "--pin":
-		pin();
-		break;
-	default:
-		console.error("unknown option " + cmd);
-		process.exit(2);
-}
+if (process.argv[1] !== import.meta.filename) {
+	// imported (the unit tests): nothing to run
+} else
+	switch (cmd) {
+		case "--fetch":
+			fetch();
+			break;
+		case "--status":
+			status();
+			break;
+		case "--diff":
+			diff(args[0]);
+			break;
+		case "--pin":
+			pin();
+			break;
+		case "--report":
+			report(args[0] ?? "upstream-sync.md", args[1] ?? "upstream-sync-body.md");
+			break;
+		default:
+			console.error("unknown option " + cmd);
+			process.exit(2);
+	}
