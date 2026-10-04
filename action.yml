@@ -20,6 +20,10 @@ inputs:
     description: "Only run test modules whose name matches this glob"
     required: false
     default: ""
+  browser:
+    description: "The browser the suite drives: chromium (the headless shell), firefox, webkit (Safari's engine) or chrome-mobile (Chromium emulating a Pixel 7)"
+    required: false
+    default: "chromium"
   node-version:
     description: "Node.js version to use"
     required: false
@@ -63,31 +67,43 @@ runs:
       working-directory: ${{ github.action_path }}
       run: pnpm install --frozen-lockfile
 
-    # The tests are headless, so the headless shell (a third of the download of full Chromium, plus ffmpeg for the
-    # videos) is enough, cached per Playwright version. Its system libraries ship with the ubuntu runner images
-    # (Chrome needs the same ones), so there is no `--with-deps` (apt is never cached); the ldd check installs them
-    # if the runner lacks one.
-    - name: Playwright version
+    # One browser, cached per Playwright version: its directory and ffmpeg (for the videos). The tests are headless,
+    # so Chromium is the headless shell (a third of the download of full Chromium); chrome-mobile is the same
+    # Chromium with a device descriptor. apt is never cached, so `install-deps` runs only when Playwright reports
+    # missing system libraries: the ubuntu runner images ship what the headless shell needs, WebKit needs GTK 4 and
+    # GStreamer packages they lack.
+    - name: Playwright version and browser
       id: playwright
       shell: bash
-      run: echo "version=$(sed -n 's/^  playwright@\([0-9][^:(]*\):.*/\1/p' "${{ github.action_path }}/pnpm-lock.yaml" | head -n 1)" >> "$GITHUB_OUTPUT"
+      env:
+        BROWSER: ${{ inputs.browser }}
+      run: |
+        echo "version=$(sed -n 's/^  playwright@\([0-9][^:(]*\):.*/\1/p' "${{ github.action_path }}/pnpm-lock.yaml" | head -n 1)" >> "$GITHUB_OUTPUT"
+        case "$BROWSER" in
+          chromium | chrome-mobile) echo "install=chromium-headless-shell" >> "$GITHUB_OUTPUT" ;;
+          firefox | webkit) echo "install=$BROWSER" >> "$GITHUB_OUTPUT" ;;
+          *) echo "::error::unknown browser '$BROWSER' (chromium, firefox, webkit, chrome-mobile)"; exit 1 ;;
+        esac
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-headless-shell
-    - name: Install the Playwright headless shell
+        path: |
+          ~/.cache/ms-playwright/${{ steps.playwright.outputs.install == 'chromium-headless-shell' && 'chromium_headless_shell' || steps.playwright.outputs.install }}-*
+          ~/.cache/ms-playwright/ffmpeg-*
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.install }}
+    - name: Install the Playwright browser
       shell: bash
       working-directory: ${{ github.action_path }}
+      env:
+        INSTALL: ${{ steps.playwright.outputs.install }}
       run: |
-        # a no-op after a cache hit
-        pnpm exec playwright install chromium --only-shell
-        if [ "$RUNNER_OS" = Linux ]; then
-          shell=$(find ~/.cache/ms-playwright -name chrome-headless-shell -type f | head -n 1)
-          missing=$(ldd "$shell" | grep "not found" || true)
-          if [ -n "$missing" ]; then
-            echo "$missing"
-            pnpm exec playwright install-deps chromium-headless-shell
-          fi
+        args="$INSTALL"
+        if [ "$INSTALL" = chromium-headless-shell ]; then args="chromium --only-shell"; fi
+        # a no-op after a cache hit; the system library check is skipped while the (cached) marker is there
+        rm -f ~/.cache/ms-playwright/"${INSTALL//-/_}"-*/DEPENDENCIES_VALIDATED
+        out=$(pnpm exec playwright install $args 2>&1) || { echo "$out"; exit 1; }
+        echo "$out"
+        if grep -q "missing dependencies" <<<"$out"; then
+          pnpm exec playwright install-deps "$INSTALL"
         fi
 
     - name: Run conformance plan
@@ -98,8 +114,9 @@ runs:
         CONFORMANCE_PLAN: ${{ inputs.plan }}
         CONFORMANCE_VARIANT: ${{ inputs.variant }}
         CONFORMANCE_MODULE: ${{ inputs.module }}
+        CONFORMANCE_BROWSER: ${{ inputs.browser }}
         CONFORMANCE_REPORT_DIR: ${{ github.workspace }}/conformance-report
-        CONFORMANCE_SUMMARY_TITLE: "OpenID conformance: ${{ inputs.plan }}"
+        CONFORMANCE_SUMMARY_TITLE: "OpenID conformance: ${{ inputs.plan }}${{ inputs.browser != 'chromium' && format(' ({0})', inputs.browser) || '' }}"
         CONFORMANCE_ARTIFACT: ${{ inputs.artifact-name }}
         PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/playwright-report
         PLAYWRIGHT_TEST_OUTPUT_DIR: ${{ github.workspace }}/test-results

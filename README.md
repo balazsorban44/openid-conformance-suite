@@ -39,9 +39,12 @@ artifact contains the Playwright HTML report with the full event log (`log.html`
 official suite's log page), screenshots and videos of the scripted browser, and `conformance-report/results.json`
 for tooling.
 
-The action installs only Playwright's headless Chromium shell (about 114 MB, no `apt` packages) and caches it per
-Playwright version together with the pnpm store, so only the first run on a branch pays for the download. Pin the
-actions you use to a commit SHA, as this repository does.
+The action installs only the browser it drives (by default Playwright's headless Chromium shell, about 114 MB, no
+`apt` packages) and caches it per Playwright version together with the pnpm store, so only the first run on a
+branch pays for the download. `browser: firefox`, `webkit` (Safari's engine) or `chrome-mobile` (Chromium emulating
+a Pixel 7: mobile viewport, user agent and touch) runs the plan in another browser, which is what your OP's login,
+logout and session management pages see; WebKit also installs its system libraries (`playwright install-deps`).
+Pin the actions you use to a commit SHA, as this repository does.
 
 `my-op.json` is the same configuration format as the official suite:
 
@@ -125,13 +128,18 @@ implementation built on [`openid-client`](https://github.com/panva/openid-client
 ```bash
 npm i -g pnpm                                          # pnpm 12 (or the standalone installer); npm works too
 pnpm add -D @balazsorban44/openid-conformance-suite   # or: npm i -D @balazsorban44/openid-conformance-suite
-pnpm exec playwright install --with-deps chromium
+pnpm exec playwright install --with-deps chromium       # and firefox / webkit for --browser
 
 pnpm exec openid-conformance list [--modules]            # plans, their variants (and modules)
 pnpm exec openid-conformance run --plan oidcc-basic-certification-test-plan \
    --variant server_metadata=discovery --variant client_registration=static_client \
-   --config ./conformance/my-op.json [--module 'oidcc-server*'] [--headed]
+   --config ./conformance/my-op.json [--module 'oidcc-server*'] [--browser webkit] [--headed]
 ```
+
+`--browser` (or `CONFORMANCE_BROWSER`) is `chromium` (the default), `firefox`, `webkit` or `chrome-mobile`. This
+repository's CI runs every project on Chromium, and the projects where the implementation under test sees the
+suite's browser (the OP plans that drive one, and the RP session management, front-channel logout and
+3rd-party-initiated login plans) also on Firefox, WebKit and Chrome mobile.
 
 Node.js 24 or newer; no build step (native TypeScript).
 

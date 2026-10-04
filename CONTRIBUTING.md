@@ -5,10 +5,10 @@
 ```bash
 npm i -g pnpm      # pnpm 12 (or the standalone installer, https://pnpm.io/installation)
 pnpm install --frozen-lockfile
-pnpm exec playwright install --with-deps chromium
+pnpm exec playwright install --with-deps chromium   # firefox webkit too, for --browser
 pnpm check        # typecheck + lint + format
 pnpm test:unit    # unit tests (Vitest, src/**/*.test.ts, scripts/**/*.test.ts)
-node bin/cli.ts ci --project op-basic-dynamic   # one CI project locally
+node bin/cli.ts ci --project op-basic-dynamic   # one CI project locally ([--browser firefox|webkit|chrome-mobile])
 ```
 
 Node.js 24+. Sources run as native TypeScript; keep to erasable syntax (no enums, namespaces, decorators,

@@ -1,5 +1,5 @@
 name: Set up the suite
-description: pnpm, Node.js, the locked dependencies and (optionally) the cached Playwright headless shell. Used by ci.yml after checkout.
+description: pnpm, Node.js, the locked dependencies and (optionally) a cached Playwright browser. Used by ci.yml after checkout.
 
 inputs:
   node-version:
@@ -7,9 +7,12 @@ inputs:
     required: false
     default: "24"
   browser:
-    description: Install the Playwright headless shell (restored from the cache keyed on the Playwright version in pnpm-lock.yaml)
+    description: >-
+      The Playwright browser to install, by the CONFORMANCE_BROWSER it is for: chromium (the headless shell),
+      chrome-mobile (the same), firefox, webkit, all (the three, for the job that populates the caches) or false
+      (none). Each browser is cached on its own, keyed on the Playwright version in pnpm-lock.yaml.
     required: false
-    default: "true"
+    default: chromium
 
 runs:
   using: composite
@@ -23,28 +26,60 @@ runs:
     - run: pnpm install --frozen-lockfile
       shell: bash
 
-    # The tests are headless, so the headless shell (about a third of the download of full Chromium, plus ffmpeg for
-    # the videos) is enough. Its system libraries ship with the ubuntu runner images (Chrome needs the same ones), so
-    # there is no `--with-deps` (apt is never cached); the ldd check below installs them if an image ever drops one.
-    - if: ${{ inputs.browser == 'true' }}
+    - if: ${{ inputs.browser != 'false' }}
       id: playwright
       shell: bash
       run: echo "version=$(sed -n 's/^  playwright@\([0-9][^:(]*\):.*/\1/p' pnpm-lock.yaml | head -n 1)" >> "$GITHUB_OUTPUT"
-    - if: ${{ inputs.browser == 'true' }}
+    # One cache per browser (its directory and ffmpeg, which Playwright installs with every browser), so a job
+    # restores only the browser it runs. The tests are headless, so Chromium is the headless shell (about a third of
+    # the download of full Chromium); chrome-mobile is that Chromium with a device descriptor.
+    - if: ${{ contains(fromJSON('["chromium", "chrome-mobile", "all"]'), inputs.browser) }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-headless-shell
-    - if: ${{ inputs.browser == 'true' }}
+        path: |
+          ~/.cache/ms-playwright/chromium_headless_shell-*
+          ~/.cache/ms-playwright/ffmpeg-*
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium-headless-shell
+    - if: ${{ contains(fromJSON('["firefox", "all"]'), inputs.browser) }}
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/ms-playwright/firefox-*
+          ~/.cache/ms-playwright/ffmpeg-*
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-firefox
+    - if: ${{ contains(fromJSON('["webkit", "all"]'), inputs.browser) }}
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/ms-playwright/webkit-*
+          ~/.cache/ms-playwright/ffmpeg-*
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-webkit
+    # `playwright install` is a no-op after a cache hit. It then checks the browser's system libraries and reports
+    # the missing ones (a warning, exit 0); apt is never cached, so `install-deps` runs only when that check fails.
+    # The ubuntu runner images ship what the headless shell needs (Chrome needs the same libraries); WebKit needs GTK
+    # 4 and GStreamer packages they lack. Playwright skips the check for a browser directory with a
+    # DEPENDENCIES_VALIDATED marker, which may come from the cache (another runner), so the marker is dropped first.
+    - if: ${{ inputs.browser != 'false' }}
       shell: bash
+      env:
+        BROWSER: ${{ inputs.browser }}
       run: |
-        # a no-op after a cache hit
-        pnpm exec playwright install chromium --only-shell
-        if [ "$RUNNER_OS" = Linux ]; then
-          shell=$(find ~/.cache/ms-playwright -name chrome-headless-shell -type f | head -n 1)
-          missing=$(ldd "$shell" | grep "not found" || true)
-          if [ -n "$missing" ]; then
-            echo "$missing"
-            pnpm exec playwright install-deps chromium-headless-shell
+        case "$BROWSER" in
+          chromium | chrome-mobile) names="chromium-headless-shell" ;;
+          all) names="chromium-headless-shell firefox webkit" ;;
+          firefox | webkit) names="$BROWSER" ;;
+          *) echo "::error::unknown browser '$BROWSER'"; exit 1 ;;
+        esac
+        for b in $names; do
+          args="$b"
+          if [ "$b" = chromium-headless-shell ]; then args="chromium --only-shell"; fi
+          rm -f ~/.cache/ms-playwright/"${b//-/_}"-*/DEPENDENCIES_VALIDATED
+          out=$(pnpm exec playwright install $args 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          # `all` only fills the caches; the job that runs a browser installs its libraries
+          if [ "$BROWSER" != all ] && grep -q "missing dependencies" <<<"$out"; then
+            echo "::group::playwright install-deps $b"
+            pnpm exec playwright install-deps "$b"
+            echo "::endgroup::"
           fi
-        fi
+        done

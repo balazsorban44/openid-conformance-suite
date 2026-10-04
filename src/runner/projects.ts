@@ -6,11 +6,34 @@
  * user (upstream's values; the spec's `test.use({ plan })` fixes the others). playwright.config.ts runs the spec of
  * the selected plan, `openid-conformance list` prints this table.
  *
- * `projects`: every entry becomes a GitHub Actions job (.github/workflows/ci.yml reads the names from
- * `openid-conformance projects --json`): a plan, the variant selection and the test configuration file (which also
- * names the implementation under test to start). Mirrors upstream `.gitlab-ci/run-tests.sh` (makeOidccTest /
- * makeClientTest / local provider runs).
+ * `projects`: a plan, the variant selection and the test configuration file (which also names the implementation
+ * under test to start), and the browsers it runs on. Every (project, browser) pair of {@link matrix} is a GitHub
+ * Actions job (.github/workflows/ci.yml reads them from `openid-conformance projects --json`). Mirrors upstream
+ * `.gitlab-ci/run-tests.sh` (makeOidccTest / makeClientTest / local provider runs).
+ *
+ * `browsers`: the browsers the suite drives (CONFORMANCE_BROWSER, `ci|run --browser`); playwright.config.ts turns the
+ * name into the Playwright project's `use`.
  */
+
+/**
+ * chromium: Playwright's headless Chromium shell (the default); firefox, webkit (Safari's engine): Playwright's
+ * builds; chrome-mobile: Chromium emulating a Pixel 7 (mobile viewport and user agent, touch)
+ */
+export const browsers = ["chromium", "firefox", "webkit", "chrome-mobile"] as const;
+export type BrowserName = (typeof browsers)[number];
+export const DEFAULT_BROWSER: BrowserName = "chromium";
+
+export function isBrowserName(name: string): name is BrowserName {
+	return (browsers as readonly string[]).includes(name);
+}
+
+/**
+ * The Playwright project (and report / artifact) name of a project run: the project's name, suffixed with the
+ * browser unless it is the default one
+ */
+export function runName(project: string, browser: BrowserName): string {
+	return browser === DEFAULT_BROWSER ? project : `${project}-${browser}`;
+}
 
 const SERVER_METADATA = ["static", "discovery"];
 const CLIENT_REGISTRATION = ["static_client", "dynamic_client"];
@@ -287,6 +310,14 @@ export interface ConformanceProject {
 	 * tests/fixtures.ts skips them)
 	 */
 	skipModules?: Record<string, string>;
+	/**
+	 * the browsers CI runs the project on (default: chromium only). All of them where the suite's browser is the one
+	 * the implementation under test sees: the OP plans that drive a browser (authorization, logout, the
+	 * check_session_iframe, front-channel logout and 3rd-party-initiated login pages) and the RP plans whose module the
+	 * suite's browser visits (session management, front-channel logout, 3rd-party-initiated login); the other RP plans
+	 * only see the RP's own HTTP client.
+	 */
+	browsers?: readonly BrowserName[];
 }
 
 const DISCOVERY_DYNAMIC = "[server_metadata=discovery][client_registration=dynamic_client]";
@@ -309,54 +340,63 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-basic-certification-test-plan",
 		variant: "[server_metadata=discovery][client_registration=static_client]",
 		config: "configs/oidc-provider/oidcc-basic-static.json",
+		browsers,
 	},
 	{
 		name: "op-basic-dynamic",
 		plan: "oidcc-basic-certification-test-plan",
 		variant: DISCOVERY_DYNAMIC,
 		config: "configs/oidc-provider/oidcc-basic-dynamic.json",
+		browsers,
 	},
 	{
 		name: "op-config",
 		plan: "oidcc-config-certification-test-plan",
 		variant: "",
 		config: "configs/oidc-provider/oidcc-config.json",
+		// discovery only, no browser
 	},
 	{
 		name: "op-dynamic",
 		plan: "oidcc-dynamic-certification-test-plan",
 		variant: "[response_type=code][client_auth_type=client_secret_basic][response_mode=default]",
 		config: "configs/oidc-provider/oidcc-dynamic.json",
+		browsers,
 	},
 	{
 		name: "op-rp-initiated-logout",
 		plan: "oidcc-rp-initiated-logout-certification-test-plan",
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-rp-initiated-logout.json",
+		browsers,
 	},
 	{
 		name: "op-backchannel-logout",
 		plan: "oidcc-backchannel-rp-initiated-logout-certification-test-plan",
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-backchannel-logout.json",
+		browsers,
 	},
 	{
 		name: "op-frontchannel-logout",
 		plan: "oidcc-frontchannel-rp-initiated-logout-certification-test-plan",
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-frontchannel-logout.json",
+		browsers,
 	},
 	{
 		name: "op-session-management",
 		plan: "oidcc-session-management-certification-test-plan",
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-session-management.json",
+		browsers,
 	},
 	{
 		name: "op-3rdparty-init-login",
 		plan: "oidcc-3rdparty-init-login-certification-test-plan",
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-3rdparty-init-login.json",
+		browsers,
 	},
 	// ---- RP plans against the openid-client based RP ----
 	{
@@ -388,18 +428,21 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-client-front-channel-logout-rp-basic",
 		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-front-channel-logout.json",
+		browsers,
 	},
 	{
 		name: "rp-session-management",
 		plan: "oidcc-client-rp-session-management-rp-basic",
 		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-session-management.json",
+		browsers,
 	},
 	{
 		name: "rp-3rdparty-init-login",
 		plan: "oidcc-client-test-3rd-party-init-login-test-plan",
 		variant: RP_CODE_BASIC,
 		config: "configs/openid-client-rp/oidcc-client-3rd-party-init-login.json",
+		browsers,
 	},
 	// ---- suite vs suite: our OP tests against our own emulated OP (RP test module as the OP) ----
 	{
@@ -407,6 +450,7 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-basic-certification-test-plan",
 		variant: DISCOVERY_DYNAMIC,
 		config: "configs/suite-vs-suite/oidcc-basic.json",
+		browsers,
 		// the emulated OP is the RP tests' OP with oidcc-client-test's options (tests/suite-target.ts); what it cannot
 		// do is skipped here, what it does differently is in configs/expected-failures/suite-vs-suite.json
 		skipModules: {
@@ -422,3 +466,8 @@ export const projects: ConformanceProject[] = [
 		},
 	},
 ];
+
+/** The CI matrix: every project on each of its browsers */
+export function matrix(): { project: string; browser: BrowserName }[] {
+	return projects.flatMap((p) => (p.browsers ?? [DEFAULT_BROWSER]).map((browser) => ({ project: p.name, browser })));
+}

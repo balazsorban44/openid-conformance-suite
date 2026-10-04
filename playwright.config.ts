@@ -1,5 +1,13 @@
-import { defineConfig } from "@playwright/test";
-import { plans, projects } from "./src/runner/projects.ts";
+import { defineConfig, devices, type PlaywrightTestOptions, type PlaywrightWorkerOptions } from "@playwright/test";
+import {
+	browsers,
+	DEFAULT_BROWSER,
+	isBrowserName,
+	plans,
+	projects,
+	runName,
+	type BrowserName,
+} from "./src/runner/projects.ts";
 import { globBody } from "./src/suite/config.ts";
 
 /**
@@ -9,6 +17,7 @@ import { globBody } from "./src/suite/config.ts";
  *   CONFORMANCE_PROJECT   a project from src/runner/projects.ts (plan, variant, config), or
  *   CONFORMANCE_PLAN + CONFORMANCE_CONFIG (+ CONFORMANCE_VARIANT)
  *   CONFORMANCE_MODULE    only modules whose name matches this glob
+ *   CONFORMANCE_BROWSER   the browser the suite drives: chromium (default), firefox, webkit, chrome-mobile
  *
  * The selected plan runs from its spec file (`plans` in src/runner/projects.ts). Without a plan every spec file is
  * matched (so `playwright test --list` and editors see every test); running them needs a configuration.
@@ -20,6 +29,21 @@ if (planName && !plans[planName]) {
 }
 const specs = [...new Set(planName ? [plans[planName].spec] : Object.values(plans).map((p) => p.spec))];
 const moduleGlob = process.env["CONFORMANCE_MODULE"];
+const browser = process.env["CONFORMANCE_BROWSER"] || DEFAULT_BROWSER;
+if (!isBrowserName(browser)) {
+	throw new Error(`Unknown CONFORMANCE_BROWSER '${browser}'; known: ${browsers.join(", ")}`);
+}
+
+/**
+ * The Playwright project's `use` for each browser. chromium stays Playwright's plain default (the headless shell,
+ * 1280x720, its own user agent); the others are Playwright's device descriptors.
+ */
+const BROWSER_USE: Record<BrowserName, Partial<PlaywrightTestOptions & PlaywrightWorkerOptions>> = {
+	chromium: { browserName: "chromium" },
+	firefox: { ...devices["Desktop Firefox"], browserName: "firefox" },
+	webkit: { ...devices["Desktop Safari"], browserName: "webkit" },
+	"chrome-mobile": { ...devices["Pixel 7"], browserName: "chromium" },
+};
 
 export default defineConfig({
 	testDir: "./tests",
@@ -49,7 +73,9 @@ export default defineConfig({
 	},
 	projects: [
 		{
-			name: process.env["CONFORMANCE_PROJECT"] ?? "conformance",
+			// "<project>-<browser>" for the browsers other than chromium, so reports and artifacts tell them apart
+			name: runName(process.env["CONFORMANCE_PROJECT"] ?? "conformance", browser),
+			use: BROWSER_USE[browser],
 			testMatch: specs.map((s) => new RegExp(s.replace(/^tests\//, "").replace(/[.]/g, "\\.") + "$")),
 		},
 	],

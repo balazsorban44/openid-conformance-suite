@@ -3,8 +3,8 @@
  * openid-conformance: run the OpenID Connect OP/RP conformance tests (TypeScript port of the OIDF suite).
  *
  *   openid-conformance list [--modules|--variants]
- *   openid-conformance run --plan <name> --config <file> [--variant k=v]... [--module <glob>] [--tls] [--headed] [--report-dir <dir>] [-- <playwright args>]
- *   openid-conformance ci --project <name> [-- <playwright args>]
+ *   openid-conformance run --plan <name> --config <file> [--variant k=v]... [--module <glob>] [--browser <name>] [--tls] [--headed] [--report-dir <dir>] [-- <playwright args>]
+ *   openid-conformance ci --project <name> [--browser <name>] [-- <playwright args>]
  *   openid-conformance projects [--json]
  *
  * `run` and `ci` execute Playwright with the matching CONFORMANCE_* environment; playwright.config.ts picks the
@@ -16,7 +16,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { list } from "../src/runner/list.ts";
-import { plans, projects } from "../src/runner/projects.ts";
+import { browsers, DEFAULT_BROWSER, matrix, plans, projects } from "../src/runner/projects.ts";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -36,10 +36,17 @@ interface RunOptions {
 	config: string;
 	variant?: string[];
 	module?: string;
+	browser?: string;
 	tls?: boolean;
 	headed?: boolean;
 	reportDir?: string;
 }
+
+/** --browser: chromium (default), firefox, webkit, chrome-mobile; sets CONFORMANCE_BROWSER */
+const browserOption = () =>
+	new Option("--browser <name>", "the browser the suite drives (CONFORMANCE_BROWSER)")
+		.choices(browsers)
+		.default(process.env["CONFORMANCE_BROWSER"] || DEFAULT_BROWSER);
 
 const program = new Command("openid-conformance")
 	.description("OpenID Connect OP/RP conformance tests (TypeScript port of the OpenID Foundation suite)")
@@ -75,6 +82,7 @@ program
 		]),
 	)
 	.option("--module <glob>", "only run test modules whose name matches this glob")
+	.addOption(browserOption())
 	.option("--tls", "serve the suite over https (bundled localhost certificate)")
 	.option("--headed", "show the scripted browser")
 	.option("--report-dir <dir>", "where results.json and summary.md are written")
@@ -87,7 +95,11 @@ program
 		if (!existsSync(configPath)) {
 			program.error(`config not found: ${configPath}`);
 		}
-		const env: Record<string, string> = { CONFORMANCE_PLAN: opts.plan, CONFORMANCE_CONFIG: configPath };
+		const env: Record<string, string> = {
+			CONFORMANCE_PLAN: opts.plan,
+			CONFORMANCE_CONFIG: configPath,
+			CONFORMANCE_BROWSER: opts.browser ?? DEFAULT_BROWSER,
+		};
 		if (opts.variant) {
 			env["CONFORMANCE_VARIANT"] = opts.variant.map((v) => `[${v}]`).join("");
 		}
@@ -107,8 +119,9 @@ program
 	.command("ci")
 	.description("run one CI project (see `projects`) against its bundled target")
 	.requiredOption("--project <name>", "project name")
+	.addOption(browserOption())
 	.argument("[playwright...]", "extra Playwright arguments (after --)")
-	.action((extra: string[], opts: { project: string }) => {
+	.action((extra: string[], opts: { project: string; browser: (typeof browsers)[number] }) => {
 		const p = projects.find((x) => x.name === opts.project);
 		if (!p) {
 			return program.error(`unknown project '${opts.project}'; known: ${projects.map((x) => x.name).join(", ")}`);
@@ -119,7 +132,7 @@ program
 				CONFORMANCE_PLAN: p.plan,
 				CONFORMANCE_VARIANT: p.variant,
 				CONFORMANCE_CONFIG: resolve(root, p.config),
-				CONFORMANCE_SUMMARY_TITLE: p.name,
+				CONFORMANCE_BROWSER: opts.browser,
 				// on GitHub Actions: one ::error annotation per unexpectedly failed module
 				CONFORMANCE_ANNOTATIONS: "1",
 				CONFORMANCE_TLS: process.env["CONFORMANCE_TLS"] ?? "1",
@@ -130,15 +143,16 @@ program
 
 program
 	.command("projects")
-	.description("list the CI projects (the GitHub Actions matrix)")
-	.option("--json", "names only, as a JSON array")
+	.description("list the CI projects and their browsers (the GitHub Actions matrix)")
+	.option("--json", "the matrix, as a JSON array of {project, browser}")
 	.action((opts: { json?: boolean }) => {
 		if (opts.json) {
-			console.log(JSON.stringify(projects.map((p) => p.name)));
+			console.log(JSON.stringify(matrix()));
 			return;
 		}
 		for (const p of projects) {
-			console.log(`${p.name}\t${p.plan}\t${p.variant}\t${p.config}`);
+			const on = (p.browsers ?? [DEFAULT_BROWSER]).join(",");
+			console.log(`${p.name}\t${p.plan}\t${p.variant}\t${p.config}\t${on}`);
 		}
 	});
 

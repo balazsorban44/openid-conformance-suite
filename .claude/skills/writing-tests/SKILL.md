@@ -527,6 +527,7 @@ code site):
 CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts               # the spec, against the bundled OP
 CONFORMANCE_PROJECT=op-basic-dynamic CONFORMANCE_TLS=1 pnpm test tests/op/basic.spec.ts -g "oidcc-codereuse:"
 node bin/cli.ts ci --project op-basic-dynamic                                         # the whole project
+node bin/cli.ts ci --project op-session-management --browser webkit                   # on another browser
 CONFORMANCE_MODULE='oidcc-server' node bin/cli.ts ci --project op-basic-dynamic
 pnpm test:unit                                                                        # Vitest
 ```
@@ -539,7 +540,17 @@ after (`scripts/log-fingerprint.ts --out` on both test-results directories, then
 
 `plans` in src/runner/projects.ts lists every plan: its title (upstream displayName), its spec file, its modules
 and the variant parameters the user selects; playwright.config.ts runs the selected plan's spec and the CLI's
-`list` prints the table. `projects` is the CI matrix (one GitHub Actions job each).
+`list` prints the table. `projects` is the CI matrix: one GitHub Actions job per project and browser (`matrix()`).
+
+Browsers: `CONFORMANCE_BROWSER` (`ci`/`run --browser`) is `chromium` (default, the headless shell), `firefox`,
+`webkit` or `chrome-mobile` (Chromium with `devices["Pixel 7"]`); playwright.config.ts turns it into the Playwright
+project's `use` and names the project `<project>-<browser>` when it is not chromium. A project's `browsers` lists
+the browsers CI runs it on (chromium only without it): all four for the projects where the implementation under test
+sees the suite's browser (the OP plans that drive a browser, suite-vs-suite, rp-session-management,
+rp-frontchannel-logout, rp-3rdparty-init-login). The suite's side of a flow must work in all of them: drive pages
+through `op.browser` / the config's tasks (never a browser-specific API), wait for URLs and elements rather than
+for timings, and keep the pages the suite serves (implicit callback, RP iframes, front-channel logout) plain
+HTML/JS that every engine runs. A new project where the browser matters gets `browsers` and must pass on each.
 
 - A new module of an existing plan: write the test in the plan's spec (or in tests/op/shared.ts / tests/rp/shared.ts
   when several plans have it), add its name to the plan's `modules`, run the project, `pnpm lock-symbols`.

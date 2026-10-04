@@ -10,7 +10,7 @@ description: How to run the ported OpenID conformance test plans locally and in 
 ```bash
 npm i -g pnpm      # pnpm 12 (or the standalone installer, https://pnpm.io/installation)
 pnpm install --frozen-lockfile
-pnpm exec playwright install --with-deps chromium   # once
+pnpm exec playwright install --with-deps chromium   # once (firefox / webkit too for --browser firefox|webkit)
 
 node bin/cli.ts projects       # the CI projects: name, plan, variant, config
 # OP plan against the bundled panva oidc-provider (started automatically by the config)
@@ -19,13 +19,15 @@ node bin/cli.ts ci --project op-basic-dynamic
 node bin/cli.ts ci --project rp-basic
 # extra Playwright args after `--`, e.g. one module
 node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
+# another browser: chromium (default) | firefox | webkit | chrome-mobile
+node bin/cli.ts ci --project op-session-management --browser webkit
 # a plan's spec directly (tests/op/*.spec.ts, tests/rp/*.spec.ts; see .claude/skills/writing-tests)
 CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts
 
 # Any plan/config:
 node bin/cli.ts run --plan oidcc-basic-certification-test-plan \
   --variant server_metadata=discovery --variant client_registration=dynamic_client \
-  --config configs/oidc-provider/oidcc-basic-dynamic.json [--module 'oidcc-server*'] [--tls] [--headed]
+  --config configs/oidc-provider/oidcc-basic-dynamic.json [--module 'oidcc-server*'] [--browser firefox] [--tls] [--headed]
 node bin/cli.ts list [--modules|--variants]   # plans (spec, variants, CI projects) [+ modules] | variant values
 ```
 
@@ -35,7 +37,8 @@ node bin/cli.ts list [--modules|--variants]   # plans (spec, variants, CI projec
 Playwright's `grep` on the module name before the `:` of the titles. `pnpm test` is plain `playwright test`: it
 runs whatever the environment selects (`CONFORMANCE_PROJECT=<name>`, or `CONFORMANCE_PLAN` +
 `CONFORMANCE_CONFIG`); without a configuration the tests fail with a hint. The Playwright project is named after
-`CONFORMANCE_PROJECT` (default `conformance`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs
+`CONFORMANCE_PROJECT` (default `conformance`), suffixed with `-<browser>` when `CONFORMANCE_BROWSER` is not
+chromium (`op-basic-dynamic-webkit`), so `--project=<name>` does not select a plan. `pnpm test:unit` runs
 the Vitest unit tests.
 
 One Playwright test = one test module instance (`<plan> › <module>: <behaviour>`). Each test writes into its
@@ -56,6 +59,7 @@ Playwright test is reported skipped), and it was not INTERRUPTED. Expected failu
 | `CONFORMANCE_PROJECT`                                           | select a project from `src/runner/projects.ts` (plan, variant, config, skipped modules) |
 | `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG` | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)       |
 | `CONFORMANCE_MODULE`                                            | only modules whose `testName` matches this glob                                         |
+| `CONFORMANCE_BROWSER` (`ci`/`run --browser`)                    | browser the suite drives: `chromium` (default), `firefox`, `webkit`, `chrome-mobile`    |
 | `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`              | serve the suite over https (default: the bundled `configs/certs/localhost.*`)           |
 | `CONFORMANCE_CWD`                                               | directory the config's `target.command` runs in (the CLI sets the caller's cwd)         |
 | `CONFORMANCE_TEST_TIMEOUT` (ms, 240000)                         | Playwright test timeout                                                                 |
@@ -92,11 +96,39 @@ by the port:
 Modules that upstream starts manually from the UI (`oidcc-server-rotate-keys`) run right away, as upstream's
 `run-test-plan.py` does in CI.
 
+## Browsers
+
+`CONFORMANCE_BROWSER` (`ci`/`run --browser <name>`) picks the browser the suite drives; playwright.config.ts turns
+it into the Playwright project's `use`:
+
+| Name            | Playwright                                                                          |
+| --------------- | ----------------------------------------------------------------------------------- |
+| `chromium`      | the default: the headless Chromium shell, Playwright's defaults (1280x720)          |
+| `firefox`       | `devices["Desktop Firefox"]`                                                        |
+| `webkit`        | `devices["Desktop Safari"]` (Safari's engine)                                       |
+| `chrome-mobile` | `devices["Pixel 7"]` on Chromium: mobile viewport and user agent, touch, `isMobile` |
+
+The browser is what the OP sees in the OP plans (authorization and login pages, logout redirects, the
+check_session_iframe postMessage, front-channel logout iframes, 3rd-party-initiated login) and what the RP sees in
+the RP plans whose module the suite's browser visits (session management, front-channel logout, 3rd-party-initiated
+login); the other RP plans only see the RP's own HTTP client. Install the browser first (`pnpm exec playwright
+install --with-deps firefox webkit`). The project name, the summary title and the CI artifact carry the browser
+(`op-basic-dynamic-webkit`, `op-basic-dynamic (webkit)`, `conformance-op-basic-dynamic-webkit`); `results.json`
+entries have a `browser` field. The bundled targets pass on every browser with the same expected-failure and
+expected-skip lists (the suite and the targets share the `localhost` site, so WebKit's third-party storage
+partitioning does not apply to the check_session_iframe or the front-channel logout iframes there; an OP on another
+site may behave differently in WebKit, which is what the browser dimension is for).
+
 ## CI matrix
 
-`src/runner/projects.ts` is the matrix: each entry (name, plan, variant, config, optional `skipModules`) is one
-GitHub Actions job running `node bin/cli.ts ci --project <name>`; `.github/workflows/ci.yml` reads
-the names from `node bin/cli.ts projects --json`. Adding a project there adds the CI job.
+`src/runner/projects.ts` is the matrix: each entry (name, plan, variant, config, optional `skipModules`, optional
+`browsers`) runs as one GitHub Actions job per browser, `node bin/cli.ts ci --project <name> --browser <browser>`
+(job name `<project>` on chromium, `<project> (<browser>)` otherwise). `.github/workflows/ci.yml` reads the
+`[{project, browser}]` pairs from `matrix()` (`node bin/cli.ts projects --json` prints them). Without `browsers` a
+project runs on chromium only; the projects where the implementation under test sees the suite's browser list all
+four. Adding a project there adds the CI jobs. The setup job installs and caches every browser once (one cache per
+browser, keyed on the Playwright version); each matrix job restores only its own, and runs `playwright
+install-deps` only when Playwright reports missing system libraries (WebKit on the ubuntu images).
 
 ## Reading the output
 

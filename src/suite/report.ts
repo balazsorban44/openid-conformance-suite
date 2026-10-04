@@ -42,6 +42,8 @@ export interface ModuleReport {
 	analysis: ModuleAnalysis;
 	/** Playwright test title, for cross-referencing the HTML report */
 	title: string;
+	/** The browser the suite drove (CONFORMANCE_BROWSER: chromium, firefox, webkit, chrome-mobile) */
+	browser?: string;
 	/** Paths of the attached log files (`log.html`, `log.json`) relative to the working directory, when known */
 	attachments?: Record<string, string>;
 	/** Why the module was skipped (the reason the test gave), when it was */
@@ -346,7 +348,8 @@ export function githubErrorAnnotation(r: ModuleReport, location?: { file: string
  *   conformance-report/results.json  - machine readable, one {@link ModuleReport} per module
  *   conformance-report/summary.md    - human/agent readable; also appended to $GITHUB_STEP_SUMMARY
  *
- * Environment: CONFORMANCE_REPORT_DIR, CONFORMANCE_SUMMARY_TITLE (default: the project or plan),
+ * Environment: CONFORMANCE_REPORT_DIR, CONFORMANCE_SUMMARY_TITLE (default: the project or plan, and the browser
+ * when it is not chromium), CONFORMANCE_BROWSER,
  * CONFORMANCE_ARTIFACT (name of the uploaded artifact with the logs), CONFORMANCE_ANNOTATIONS=1 (set by
  * `openid-conformance ci`: on GitHub Actions, one `::error` per unexpectedly failed module).
  */
@@ -354,6 +357,7 @@ export default class ConformanceReporter implements Reporter {
 	private reports: ModuleReport[] = [];
 	private outDir = "conformance-report";
 	private title = "OpenID conformance";
+	private browser = "chromium";
 	private width = 0;
 	private colors = false;
 	private annotate = false;
@@ -363,8 +367,11 @@ export default class ConformanceReporter implements Reporter {
 		const env = process.env;
 		this.outDir = env["CONFORMANCE_REPORT_DIR"] ?? "conformance-report";
 		mkdirSync(this.outDir, { recursive: true });
+		this.browser = env["CONFORMANCE_BROWSER"] || "chromium";
 		this.title =
-			env["CONFORMANCE_SUMMARY_TITLE"] ?? env["CONFORMANCE_PROJECT"] ?? env["CONFORMANCE_PLAN"] ?? this.title;
+			env["CONFORMANCE_SUMMARY_TITLE"] ??
+			(env["CONFORMANCE_PROJECT"] ?? env["CONFORMANCE_PLAN"] ?? this.title) +
+				(this.browser === "chromium" ? "" : ` (${this.browser})`);
 		this.colors = process.stdout.isTTY === true && !env["NO_COLOR"];
 		this.annotate = env["GITHUB_ACTIONS"] === "true" && env["CONFORMANCE_ANNOTATIONS"] === "1";
 		this.workspace = env["GITHUB_WORKSPACE"] ?? process.cwd();
@@ -439,6 +446,7 @@ export default class ConformanceReporter implements Reporter {
 		} else {
 			return undefined;
 		}
+		r.browser = this.browser;
 		const skip = test.annotations.find((a) => a.type === "skip" && a.description);
 		if (r.outcome === "skipped" && skip?.description) {
 			r.skipReason = skip.description;
