@@ -99,7 +99,8 @@ runs:
         CONFORMANCE_VARIANT: ${{ inputs.variant }}
         CONFORMANCE_MODULE: ${{ inputs.module }}
         CONFORMANCE_REPORT_DIR: ${{ github.workspace }}/conformance-report
-        CONFORMANCE_SUMMARY_TITLE: "OpenID conformance: ${{ inputs.plan }} ${{ inputs.variant }}"
+        CONFORMANCE_SUMMARY_TITLE: "OpenID conformance: ${{ inputs.plan }}"
+        CONFORMANCE_ARTIFACT: ${{ inputs.artifact-name }}
         PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ github.workspace }}/playwright-report
         PLAYWRIGHT_TEST_OUTPUT_DIR: ${{ github.workspace }}/test-results
       run: |

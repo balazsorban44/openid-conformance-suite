@@ -31,11 +31,11 @@ export default defineConfig({
 	expect: { timeout: 10_000 },
 	// test titles are "<module>: <what the OP/RP must do>"
 	grep: moduleGlob ? new RegExp(`(^|\\s)(${globBody(moduleGlob)}):`) : undefined,
+	// ./src/suite/report.ts: the console output (a line per module, the failures), conformance-report/, the GitHub
+	// step summary and annotations; the HTML report is the record with the logs, screenshots and videos
 	reporter: [
-		["list"],
-		["html", { open: "never", outputFolder: process.env["PLAYWRIGHT_HTML_OUTPUT_DIR"] ?? "playwright-report" }],
-		["github"],
 		["./src/suite/report.ts"],
+		["html", { open: "never", outputFolder: process.env["PLAYWRIGHT_HTML_OUTPUT_DIR"] ?? "playwright-report" }],
 	],
 	outputDir: process.env["PLAYWRIGHT_TEST_OUTPUT_DIR"] ?? "test-results",
 	use: {

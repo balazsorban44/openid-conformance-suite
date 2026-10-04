@@ -32,7 +32,8 @@ src/suite/            the engine (no OIDC knowledge)
   bcp47.ts            upstream util/Bcp47LocaleValidation + Bcp47SubtagRegistry (data/language-subtag-registry.txt)
   json-schema.ts      upstream util/validation/JsonSchemaValidation* (schemas in data/json-schemas/)
   expected.ts         expected-failures / expected-skips analysis (upstream run-test-plan.py)
-  report.ts           ModuleReport, summary.md, the Playwright reporter (results.json, $GITHUB_STEP_SUMMARY)
+  report.ts           ModuleReport + Outcome, the console output, summary.md, the Playwright reporter (results.json,
+                      the job summary, ::error annotations)
   wait.ts             upstream's WaitFor* conditions (the only sleeps: the spec's timing is what is tested)
   random.ts, testing.ts (Vitest helpers: useTestLog(), useMswServer())
 src/op/               helpers for testing an OpenID Provider, one file per concern
@@ -299,6 +300,24 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   skips, or expected ones that did not happen fail the test; a test stopped (by a thrown check) only by failures
   the config expects is marked "expected to fail" and passes. Any other exception is logged as a FAILURE entry and
   the module status is INTERRUPTED.
+- **Outcome and output** (src/suite/report.ts, the only reporter in playwright.config.ts besides the HTML one).
+  Every module has one `outcome` (`ModuleReport.outcome`): `passed`, `review`, `skipped`, `expected failure` /
+  `expected warning` (all failures/warnings of the log are in the expected-failures list; the run is fine) or
+  `failed` (anything unexpected, or a crash). "failed" never means an expected failure; counts are written
+  "20 passed, 3 skipped, 1 expected failure". The console shows one line per module as it finishes
+  (`<glyph> <module>  <duration>  <note>`: `✓` passed, `?` review, `-` skipped, `~` expected failure/warning,
+  `✗` failed) and at the end `OK: <counts>` or `FAILED: <counts>` followed by each unexpected failure (condition,
+  block, message, path of its `log.html`). `openid-conformance ci` on a GitHub runner also prints one `::error`
+  annotation per failed module (at its `test()` line). `conformance-report/summary.md` (the same markdown is
+  appended to the job summary file, `$GITHUB_STEP_SUMMARY`) is one short section per run: a heading with a
+  green/red mark, the counts, the unexpected failures first, then per plan the variant most modules share, a table
+  of what is not a plain pass (expected failures, skips with their reason, reviews; a "Variant differs" column only
+  for modules that deviate from the plan's variant) and the passed modules as a list.
+  `conformance-report/results.json` is an array of `ModuleReport`: `plan`, `testName`, `variant`, `variantString`,
+  `testId`, `status` (FINISHED/INTERRUPTED), `result` (upstream's PASSED/WARNING/REVIEW/SKIPPED/FAILED), `ok`,
+  `outcome`, `durationMs`, `analysis` (the expected-failures analysis: unexpected/expected failures and warnings
+  with condition, block, message), `title`, `attachments` (paths of `log.html` / `log.json`), `skipReason`, `error`.
+  Presentation only: it never changes what the conditions log.
 - `skipModules` of the CI project (src/runner/projects.ts): the `conformance` fixture skips a listed module with the
   reason given there, so it applies to every spec.
 - **suite-vs-suite** (`suiteTarget`, tests/suite-target.ts): a config with `suite_target` (configs/suite-vs-suite)

@@ -64,6 +64,8 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - name: Run ${{ matrix.project }}
+        env:
+          CONFORMANCE_ARTIFACT: conformance-${{ matrix.project }}
         run: node bin/cli.ts ci --project ${{ matrix.project }}
       - name: Upload report
         if: always()

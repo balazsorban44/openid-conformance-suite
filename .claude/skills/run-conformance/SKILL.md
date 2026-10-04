@@ -65,7 +65,8 @@ Playwright test is reported skipped), and it was not INTERRUPTED. Expected failu
 | `CONFORMANCE_KEEP_SERVER=1`                                     | do not stop the `target` process after the plan                                         |
 | `CONFORMANCE_VIDEO=off`, `CONFORMANCE_TRACE=on`                 | skip video recording / record a trace for every test                                    |
 | `CONFORMANCE_REPORT_DIR`, `CONFORMANCE_SUMMARY_TITLE`           | where/with which title the summary is written (`conformance-report/`)                   |
-| `CONFORMANCE_PRINT_SUMMARY=1`                                   | print the summary to stdout (always on when `CI` is set)                                |
+| `CONFORMANCE_ARTIFACT`                                          | name of the uploaded artifact with the logs (named next to failures in the summary)     |
+| `CONFORMANCE_ANNOTATIONS=1`                                     | on a GitHub runner: one `::error` per failed module (`ci` sets it)                      |
 
 ## Configuration file
 
@@ -97,11 +98,18 @@ Modules that upstream starts manually from the UI (`oidcc-server-rotate-keys`) r
 GitHub Actions job running `node bin/cli.ts ci --project <name>`; `.github/workflows/ci.yml` reads
 the names from `node bin/cli.ts projects --json`. Adding a project there adds the CI job.
 
-## Reading the CI summary
+## Reading the output
 
-`conformance-report/summary.md` (also written to `$GITHUB_STEP_SUMMARY`) has one row per module: result,
-failed/warned condition names with their messages, and links to the artifacts. `playwright-report/` is the full
-HTML report (upload artifact). `conformance-report/results.json` is machine-readable.
+The console prints one line per module (`✓` passed, `?` review, `-` skipped, `~` expected failure or warning, `✗`
+failed) and ends with `OK: 20 passed, 3 skipped, 1 expected failure` or `FAILED: ...` with every unexpected failure:
+the condition, its message and block, and the path of the module's `log.html`. An expected failure (listed in
+`configs/expected-failures`) is not a failure: it has its own count and never turns the run red.
+
+`conformance-report/summary.md` (also appended to the job summary, `$GITHUB_STEP_SUMMARY`) is the same as a short
+markdown section: unexpected failures first, then the modules that are not plain passes (expected failures, skips
+and their reason, reviews), then the passed ones. `playwright-report/` is the full HTML report (upload artifact).
+`conformance-report/results.json` is machine-readable (one `ModuleReport` per module with `outcome`, see the
+writing-tests skill).
 
 ## Checking log fidelity after engine changes
 

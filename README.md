@@ -33,7 +33,8 @@ jobs:
           config: ./conformance/my-op.json
 ```
 
-The job summary shows one row per test module with the failing conditions and their messages; the uploaded
+The job summary lists the unexpected failures first (condition, message, where the log is), then the modules that
+were skipped, need a review or failed as expected; the uploaded
 artifact contains the Playwright HTML report with the full event log (`log.html`, the same information as the
 official suite's log page), screenshots and videos of the scripted browser, and `conformance-report/results.json`
 for tooling.

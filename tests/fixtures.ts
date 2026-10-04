@@ -45,7 +45,7 @@ import { block, condition, logTestSkipped, soft } from "../src/suite/conditions.
 import { loadConfig, moduleConfig, readConfig, type LoadedConfig, type TestConfig } from "../src/suite/config.ts";
 import { analyzeResultLogs, describeProblems } from "../src/suite/expected.ts";
 import { createLog, renderLogHtml, resultOf, useLog, type EventLog, type LogEntry } from "../src/suite/log.ts";
-import type { ModuleReport } from "../src/suite/report.ts";
+import { outcomeOf, type ModuleReport } from "../src/suite/report.ts";
 import { startServer, type TestServer } from "../src/suite/server.ts";
 import { startTarget, type RunningTarget } from "../src/suite/target.ts";
 import type { RpVariant } from "../src/rp/op.ts";
@@ -407,6 +407,7 @@ async function finish(args: {
 		suite.loaded.filename,
 	);
 	const vs = variantString(variantObj);
+	const ok = analysis.ok && status !== "INTERRUPTED";
 	const report: ModuleReport = {
 		plan: plan.name,
 		testName,
@@ -415,7 +416,8 @@ async function finish(args: {
 		testId: log.testId,
 		status,
 		result,
-		ok: analysis.ok && status !== "INTERRUPTED",
+		ok,
+		outcome: outcomeOf({ result, ok, analysis }),
 		durationMs: Date.now() - args.started,
 		analysis,
 		title: testInfo.title,

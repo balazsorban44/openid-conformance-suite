@@ -119,7 +119,9 @@ program
 				CONFORMANCE_PLAN: p.plan,
 				CONFORMANCE_VARIANT: p.variant,
 				CONFORMANCE_CONFIG: resolve(root, p.config),
-				CONFORMANCE_SUMMARY_TITLE: `OpenID conformance: ${p.name}`,
+				CONFORMANCE_SUMMARY_TITLE: p.name,
+				// on GitHub Actions: one ::error annotation per unexpectedly failed module
+				CONFORMANCE_ANNOTATIONS: "1",
 				CONFORMANCE_TLS: process.env["CONFORMANCE_TLS"] ?? "1",
 			},
 			extra,
