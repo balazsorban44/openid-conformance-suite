@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table.tsx";
 import { planInfos, projects } from "@/lib/catalog.ts";
 import { parseVariant } from "@/lib/format.ts";
-import { latestByModule, readModuleRecords } from "@/lib/reports.ts";
+import { latestByModule, moduleStatuses, readModuleRecords } from "@/lib/reports.ts";
 
 interface Props {
 	params: Promise<{ plan: string }>;
@@ -25,8 +25,7 @@ export default async function PlanPage({ params }: Props) {
 	if (!plan) {
 		notFound();
 	}
-	const latest = latestByModule(plan.name, await readModuleRecords());
-	const modules = plan.modules.map((m) => ({ name: m, record: latest.get(m) ?? null }));
+	const modules = moduleStatuses(plan.name, latestByModule(plan.name, await readModuleRecords()));
 	const planProjects = projects.filter((p) => p.plan === plan.name);
 	return (
 		<>

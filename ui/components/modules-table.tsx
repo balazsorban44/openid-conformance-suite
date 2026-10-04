@@ -44,7 +44,7 @@ export function ModulesTable({
 					const outcome = r ? outcomeOf(r) : m.skipReason ? "skipped" : "not-run";
 					const href = r?.testId ? `/modules/${r.testId}` : null;
 					return (
-						<TableRow key={m.name} className="group">
+						<TableRow key={m.moduleList ? `${m.name} (${m.moduleList})` : m.name} className="group">
 							<TableCell className="pl-6">
 								<OutcomeBadge outcome={outcome} />
 							</TableCell>
@@ -55,6 +55,9 @@ export function ModulesTable({
 									</Link>
 								) : (
 									<span className="font-mono text-sm">{m.name}</span>
+								)}
+								{m.moduleList && (
+									<span className="text-muted-foreground ml-2 font-mono text-[11px]">{m.moduleList}</span>
 								)}
 								<p className="text-muted-foreground truncate text-xs">
 									{r

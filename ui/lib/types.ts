@@ -34,6 +34,8 @@ export type Outcome =
 
 export interface ModuleStatus {
 	name: string;
+	/** the module list (nested describe) of a plan that runs the module once per list, e.g. "response_type=id_token" */
+	moduleList?: string;
 	record: ModuleRecord | null;
 	/** the project does not run this module (skipModules), and why */
 	skipReason?: string;

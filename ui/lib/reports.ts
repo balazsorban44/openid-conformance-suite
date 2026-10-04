@@ -117,7 +117,15 @@ export function recordInProject(record: ModuleRecord, project: ConformanceProjec
 	return selectable.every((k) => wanted[k] == null || record.report.variant[k] === wanted[k]);
 }
 
-/** The latest record of each module of the plan; `filter` narrows the records (a project, a variant) */
+/** The key of a module's result: the module, and the module list when the plan runs it once per list */
+export function moduleKey(testName: string, moduleList?: string | null): string {
+	return moduleList ? `${testName} (${moduleList})` : testName;
+}
+
+/**
+ * The latest record of each module of the plan (keyed by {@link moduleKey}: a module a plan runs once per module
+ * list has one record per list); `filter` narrows the records (a project, a variant)
+ */
 export function latestByModule(
 	plan: string,
 	records: ModuleRecord[],
@@ -126,21 +134,36 @@ export function latestByModule(
 	const latest = new Map<string, ModuleRecord>();
 	for (const r of records) {
 		// records are sorted newest first
-		if (r.report.plan === plan && !latest.has(r.report.testName) && filter(r)) {
-			latest.set(r.report.testName, r);
+		const key = moduleKey(r.report.testName, r.report.moduleList);
+		if (r.report.plan === plan && !latest.has(key) && filter(r)) {
+			latest.set(key, r);
 		}
 	}
 	return latest;
 }
 
+/** One status per plan module, or per module list the module ran in; a module without a record once */
+export function moduleStatuses(
+	plan: string,
+	latest: Map<string, ModuleRecord>,
+	skip: Record<string, string> = {},
+): ModuleStatus[] {
+	const byName = new Map<string, ModuleRecord[]>();
+	for (const r of latest.values()) {
+		byName.set(r.report.testName, [...(byName.get(r.report.testName) ?? []), r]);
+	}
+	return (plans[plan]?.modules ?? []).flatMap((name): ModuleStatus[] => {
+		const records = byName.get(name);
+		if (!records) {
+			return [{ name, record: null, skipReason: skip[name] }];
+		}
+		return records.map((record) => ({ name, moduleList: record.report.moduleList, record }));
+	});
+}
+
 export function projectStatus(project: ConformanceProject, records: ModuleRecord[]): ProjectStatus {
 	const latest = latestByModule(project.plan, records, (r) => recordInProject(r, project));
-	const skip = project.skipModules ?? {};
-	const modules: ModuleStatus[] = (plans[project.plan]?.modules ?? []).map((name) => ({
-		name,
-		record: latest.get(name) ?? null,
-		skipReason: skip[name],
-	}));
+	const modules = moduleStatuses(project.plan, latest, project.skipModules);
 	const counts = { ok: 0, failed: 0, notRun: 0 };
 	let lastRunAt: number | null = null;
 	for (const m of modules) {
