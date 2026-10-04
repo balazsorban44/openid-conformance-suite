@@ -6,8 +6,9 @@
  */
 import { createHash } from "node:crypto";
 import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
-import { verifyJwsSignature, type ParsedJwt } from "../suite/jose.ts";
+import { ParseException, verifyJwsSignature, type ParsedJwt } from "../suite/jose.ts";
 import { getDigestAlgorithmForSigAlg, InvalidAlgorithmException } from "../suite/jose-algorithms.ts";
+import { parseSignedJWT } from "../suite/jose-jwt.ts";
 import { isSymmetricJWEAlgorithm } from "../suite/jose-jwe.ts";
 import type { AuthorizationRequest } from "./authorization.ts";
 import type { Op } from "./op.ts";
@@ -461,6 +462,11 @@ export function extractCHash(idToken: ParsedJwt, ...requirements: string[]): Ext
 	return extractHash("ExtractCHash", "c_hash", idToken, requirements);
 }
 
+/** upstream: condition/client/ExtractSHash.java */
+export function extractSHash(idToken: ParsedJwt, ...requirements: string[]): ExtractedHash {
+	return extractHash("ExtractSHash", "s_hash", idToken, requirements);
+}
+
 /** upstream: condition/client/AbstractValidateHash.java: the left half of the digest of `baseString` */
 function validateHash(
 	name: string,
@@ -521,6 +527,34 @@ export function validateAtHash(
 export function validateCHash(cHash: ExtractedHash, code: string | null, ...requirements: string[]): void {
 	const base = { value: code, missing: "Could not find authorization_endpoint_response.code" };
 	validateHash("ValidateCHash", "c_hash", cHash, base, requirements);
+}
+
+/** upstream: condition/client/ValidateSHash.java */
+export function validateSHash(sHash: ExtractedHash, state: string | null, ...requirements: string[]): void {
+	validateHash("ValidateSHash", "s_hash", sHash, { value: state, missing: "Couldn't find state" }, requirements);
+}
+
+/**
+ * The id_token is signed with a FAPI 2.0 algorithm (PS256, ES256, EdDSA, Ed25519).
+ *
+ * upstream: condition/client/FAPI2ValidateIdTokenSigningAlg.java (AbstractValidateIdTokenSigningAlg)
+ */
+export function fapi2ValidateIdTokenSigningAlg(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("FAPI2ValidateIdTokenSigningAlg", ...requirements);
+	const permitted = ["PS256", "ES256", "EdDSA", "Ed25519"];
+	let alg: string;
+	try {
+		alg = String(parseSignedJWT(idToken.value).header["alg"]);
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Error parsing ID Token", e);
+		}
+		throw e;
+	}
+	if (!permitted.includes(alg)) {
+		c.failure("id_token must be signed with a permitted alg", { alg, permitted });
+	}
+	c.success("id_token was signed with a permitted algorithm", { alg, permitted });
 }
 
 /**

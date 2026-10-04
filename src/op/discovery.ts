@@ -30,7 +30,31 @@ export interface ServerMetadata {
 export async function getDynamicServerConfiguration(
 	config: TestConfig,
 ): Promise<{ metadata: ServerMetadata; response: EndpointResponse }> {
-	const c: Condition = condition("GetDynamicServerConfiguration");
+	return getServerConfiguration("GetDynamicServerConfiguration", "/.well-known/openid-configuration", config);
+}
+
+/**
+ * GetDynamicServerConfiguration for an OAuth 2.0 authorization server (RFC 8414): `server.discoveryIssuer` +
+ * /.well-known/oauth-authorization-server (the `openid=plain_oauth` FAPI variant).
+ *
+ * upstream: condition/client/GetOauthDynamicServerConfiguration.java
+ */
+export async function getOauthDynamicServerConfiguration(
+	config: TestConfig,
+): Promise<{ metadata: ServerMetadata; response: EndpointResponse }> {
+	return getServerConfiguration(
+		"GetOauthDynamicServerConfiguration",
+		"/.well-known/oauth-authorization-server",
+		config,
+	);
+}
+
+async function getServerConfiguration(
+	name: string,
+	configurationEndpoint: string,
+	config: TestConfig,
+): Promise<{ metadata: ServerMetadata; response: EndpointResponse }> {
+	const c: Condition = condition(name);
 	const server = (config.server ?? {}) as Record<string, unknown>;
 	const staticIssuer = server["issuer"];
 	if (typeof staticIssuer === "string" && staticIssuer) {
@@ -45,7 +69,7 @@ export async function getDynamicServerConfiguration(
 		if (typeof iss !== "string" || !iss) {
 			c.failure("Couldn't find discoveryUrl or discoveryIssuer field for discovery purposes");
 		}
-		discoveryUrl = iss + "/.well-known/openid-configuration";
+		discoveryUrl = iss + configurationEndpoint;
 	}
 	let res;
 	try {
@@ -233,8 +257,11 @@ export function ensureServerConfigurationSupportsClientAuthNone(metadata: Server
 }
 
 /** upstream: condition/client/EnsureServerConfigurationSupportsPrivateKeyJwt.java */
-export function ensureServerConfigurationSupportsPrivateKeyJwt(metadata: ServerMetadata): void {
-	const c: Condition = condition("EnsureServerConfigurationSupportsPrivateKeyJwt");
+export function ensureServerConfigurationSupportsPrivateKeyJwt(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureServerConfigurationSupportsPrivateKeyJwt", ...requirements);
 	const methods = metadata.token_endpoint_auth_methods_supported;
 	if (methods == null) {
 		// Null implies default (only client_secret_basic)

@@ -2,7 +2,9 @@
  * The test plans and the CI matrix.
  *
  * `plans`: every plan this suite implements - its spec file (one `test()` per module, tests/op/*.spec.ts for the
- * OP plans, tests/rp/*.spec.ts for the RP plans), its modules, and the variant parameters the plan leaves to the
+ * OIDCC OP plans, tests/fapi2/*.spec.ts for the FAPI 2.0 OP plans, tests/rp/*.spec.ts for the RP plans), its
+ * modules (all of upstream's, the ones not ported yet listed as `TODO(port)` at the end of the spec), and the
+ * variant parameters the plan leaves to the
  * user (upstream's values; the spec's `test.use({ plan })` fixes the others). playwright.config.ts runs the spec of
  * the selected plan, `openid-conformance list` prints this table.
  *
@@ -49,6 +51,154 @@ const CLIENT_AUTH_TYPE = [
 	"private_key_jwt",
 	"tls_client_auth",
 	"self_signed_tls_client_auth",
+];
+
+/** upstream FAPI2 variants (the OP plans); the port covers the first value of each (see src/op/op.ts Fapi2Variant) */
+const FAPI2_CLIENT_AUTH_TYPE = ["private_key_jwt", "mtls"];
+const FAPI2_SENDER_CONSTRAIN = ["dpop", "mtls"];
+const FAPI2_PROFILE = [
+	"plain_fapi",
+	"consumerdataright_au",
+	"openbanking_brazil",
+	"connectid_au",
+	"cbuae",
+	"openbanking_chile",
+	"ksa",
+	"fapi_client_credentials_grant",
+];
+const FAPI2_OPENID = ["openid_connect", "plain_oauth"];
+const FAPI2_REQUEST_METHOD = ["unsigned", "signed_non_repudiation"];
+const FAPI2_RESPONSE_MODE = ["plain_response", "jarm"];
+const FAPI2_AUTHORIZATION_REQUEST_TYPE = ["simple", "rar"];
+const FAPI2_GRANT_MANAGEMENT = ["disabled", "enabled"];
+
+/**
+ * The modules of upstream FAPI2MessageSigningFinalTestPlan.testModules, in its order; the security profile plan
+ * is this list without the modules that need a signed request object
+ */
+const FAPI2_MESSAGE_SIGNING_MODULES = [
+	// Normal well behaved client cases
+	"fapi2-security-profile-final-discovery-end-point-verification",
+	"fapi2-security-profile-final-happy-flow",
+	"fapi2-security-profile-final-user-rejects-authentication",
+	"fapi2-security-profile-final-ensure-request-object-with-multiple-aud-succeeds",
+	"fapi2-security-profile-final-ensure-authorization-request-without-state-success",
+	"fapi2-security-profile-final-ensure-authorization-request-without-nonce-success",
+	"fapi2-security-profile-final-ensure-authorization-request-with-64-char-nonce-success",
+	"fapi2-security-profile-final-ensure-other-scope-order-succeeds",
+	"fapi2-security-profile-final-test-claims-parameter-identity-claims",
+	"fapi2-security-profile-final-access-token-type-header-case-sensitivity",
+	"fapi2-security-profile-final-ensure-request-object-with-nbf-8-seconds-in-the-future-is-accepted",
+	// DPoP tests
+	"fapi2-security-profile-final-check-dpop-proof-nbf-exp",
+	"fapi2-security-profile-final-ensure-dpopproof-with-iat-10seconds-before-succeeds",
+	"fapi2-security-profile-final-ensure-dpopproof-with-iat-10seconds-after-succeeds",
+	// DPop Authorization Code Binding negative tests
+	"fapi2-security-profile-final-ensure-mismatched-dpop-jkt-fails",
+	"fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-proof-jkt",
+	"fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-jkt",
+	"fapi2-security-profile-final-ensure-dpopproof-at-par-endpoint-binding-success",
+	"fapi2-security-profile-final-ensure-dpop-auth-code-binding-success",
+	// Possible failure case
+	"fapi2-security-profile-final-ensure-different-nonce-inside-and-outside-request-object",
+	"fapi2-security-profile-final-ensure-different-state-inside-and-outside-request-object",
+	"fapi2-security-profile-final-ensure-authorization-request-with-long-nonce",
+	"fapi2-security-profile-final-ensure-authorization-request-with-long-state",
+	// Negative tests for request objects
+	"fapi2-security-profile-final-ensure-request-object-without-exp-fails",
+	"fapi2-security-profile-final-ensure-request-object-without-nbf-fails",
+	"fapi2-security-profile-final-state-only-outside-request-object-not-used",
+	"fapi2-security-profile-final-ensure-request-object-without-redirect-uri-fails",
+	"fapi2-security-profile-final-ensure-expired-request-object-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-bad-aud-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-exp-over-60-fails",
+	"fapi2-security-profile-final-australia-connectid-ensure-request-object-with-exp-over-10-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-nbf-over-60-fails",
+	"fapi2-security-profile-final-australia-connectid-ensure-request-object-with-nbf-over-15-fails",
+	"fapi2-security-profile-final-ksa-ensure-request-object-with-exp-over-10-fails",
+	"fapi2-security-profile-final-ksa-ensure-request-object-with-nbf-over-10-fails",
+	"fapi2-security-profile-final-ensure-signed-request-object-with-RS256-fails",
+	"fapi2-security-profile-final-ensure-request-object-signature-algorithm-is-not-none",
+	"fapi2-security-profile-final-ensure-request-object-with-invalid-signature-fails",
+	"fapi2-security-profile-final-ensure-matching-key-in-authorization-request",
+	"fapi2-security-profile-final-ensure-unsigned-request-at-par-endpoint-fails",
+	// Negative tests for authorization request
+	"fapi2-security-profile-final-ensure-registered-redirect-uri",
+	"fapi2-security-profile-final-plain-fapi-tolerate-unregistered-redirect-uri",
+	"fapi2-security-profile-final-ensure-unsigned-authorization-request-without-using-par-fails",
+	"fapi2-security-profile-final-ensure-redirect-uri-in-authorization-request",
+	"fapi2-security-profile-final-ensure-response-type-code-idtoken-fails",
+	"fapi2-security-profile-final-australia-connectid-ensure-invalid-purpose-fails",
+	"fapi2-security-profile-final-ensure-response-type-token-fails",
+	// Negative tests for token endpoint
+	"fapi2-security-profile-final-ensure-client-id-in-token-endpoint",
+	"fapi2-security-profile-final-ensure-holder-of-key-required",
+	"fapi2-security-profile-final-ensure-authorization-code-is-bound-to-client",
+	"fapi2-security-profile-final-attempt-reuse-authorization-code-after-one-second",
+	"fapi2-security-profile-final-ensure-token-endpoint-fails-with-expired-auth-code",
+	// Private key specific tests
+	"fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails",
+	"fapi2-security-profile-final-ensure-client-assertion-in-token-endpoint",
+	"fapi2-security-profile-final-ensure-client-assertion-with-exp-is-5-minutes-in-past-fails",
+	"fapi2-security-profile-final-ensure-client-assertion-with-wrong-aud-fails",
+	"fapi2-security-profile-final-ensure-client-assertion-with-no-sub-fails",
+	"fapi2-security-profile-final-ensure-invalid-client-assertions-fail",
+	"fapi2-security-profile-final-dpop-negative-tests",
+	// Refresh token tests
+	"fapi2-security-profile-final-refresh-token",
+	"fapi2-security-profile-final-cdr-sharing-duration-zero",
+	"fapi2-security-profile-final-cdr-negative-sharing-duration",
+	"fapi2-security-profile-final-cdr-refresh-token-introspection-expiry",
+	"fapi2-security-profile-final-cdr-arrangement-amendment",
+	"fapi2-security-profile-final-cdr-unrecognised-arrangement-id",
+	// OB Brazil specific tests
+	"fapi2-security-profile-final-brazil-ensure-bad-payment-signature-fails",
+	// ConnectID specific tests
+	"fapi2-security-profile-final-australia-connectid-test-claims-parameter-idtoken-identity-claims",
+	// PAR tests
+	"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds",
+	"fapi2-security-profile-final-par-attempt-reuse-request_uri",
+	"fapi2-security-profile-final-par-attempt-to-use-expired-request_uri",
+	"fapi2-security-profile-final-par-attempt-to-use-request_uri-for-different-client",
+	"fapi2-security-profile-final-par-authorization-request-containing-request_uri-form-param",
+	"fapi2-security-profile-final-par-attempt-invalid-http-method",
+	// PKCE tests
+	"fapi2-security-profile-final-par-ensure-pkce-required",
+	"fapi2-security-profile-final-ensure-pkce-code-verifier-required",
+	"fapi2-security-profile-final-incorrect-pkce-code-verifier-rejected",
+	"fapi2-security-profile-final-par-plain-pkce-rejected",
+	"fapi2-security-profile-final-par-authorization-request-containing-request_uri",
+	"fapi2-security-profile-final-par-without-duplicate-parameters",
+	// Grant Management tests
+	"fapi2-security-profile-final-grant-management-query-and-revoke",
+	"fapi2-security-profile-final-grant-management-merge",
+	"fapi2-security-profile-final-grant-management-replace",
+	"fapi2-security-profile-final-grant-management-ensure-invalid-grant-id-fails",
+	"fapi2-security-profile-final-grant-management-ensure-query-nonexistent-grant-fails",
+	"fapi2-security-profile-final-grant-management-ensure-wrong-client-cannot-query-grant",
+	"fapi2-security-profile-final-grant-management-ensure-wrong-client-cannot-revoke-grant",
+];
+
+/** upstream FAPI2SPFinalTestPlan.fapi2SPtestModules: the modules that require signing are removed */
+const FAPI2_SIGNED_REQUEST_MODULES = [
+	"fapi2-security-profile-final-ensure-request-object-with-multiple-aud-succeeds",
+	"fapi2-security-profile-final-ensure-request-object-without-exp-fails",
+	"fapi2-security-profile-final-ensure-request-object-without-nbf-fails",
+	"fapi2-security-profile-final-ensure-expired-request-object-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-bad-aud-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-exp-over-60-fails",
+	"fapi2-security-profile-final-australia-connectid-ensure-request-object-with-exp-over-10-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-nbf-over-60-fails",
+	"fapi2-security-profile-final-australia-connectid-ensure-request-object-with-nbf-over-15-fails",
+	"fapi2-security-profile-final-ksa-ensure-request-object-with-exp-over-10-fails",
+	"fapi2-security-profile-final-ksa-ensure-request-object-with-nbf-over-10-fails",
+	"fapi2-security-profile-final-ensure-request-object-with-nbf-8-seconds-in-the-future-is-accepted",
+	"fapi2-security-profile-final-ensure-signed-request-object-with-RS256-fails",
+	"fapi2-security-profile-final-ensure-request-object-signature-algorithm-is-not-none",
+	"fapi2-security-profile-final-ensure-request-object-with-invalid-signature-fails",
+	"fapi2-security-profile-final-ensure-matching-key-in-authorization-request",
+	"fapi2-security-profile-final-ensure-unsigned-request-at-par-endpoint-fails",
+	"fapi2-security-profile-final-par-authorization-request-containing-request_uri",
 ];
 
 /** The basic RP plan's modules (also the form post basic plan's) */
@@ -353,6 +503,34 @@ export const plans: Record<string, Plan> = {
 		modules: ["oidcc-3rd_party-init-login", "oidcc-3rd_party-init-login-nohttps"],
 		variants: { response_type: RESPONSE_TYPE },
 	},
+	"fapi2-security-profile-final-test-plan": {
+		title: "FAPI2-Security-Profile-Final: Authorization server test",
+		spec: "tests/fapi2/security-profile.spec.ts",
+		modules: FAPI2_MESSAGE_SIGNING_MODULES.filter((m) => !FAPI2_SIGNED_REQUEST_MODULES.includes(m)),
+		variants: {
+			client_auth_type: FAPI2_CLIENT_AUTH_TYPE,
+			sender_constrain: FAPI2_SENDER_CONSTRAIN,
+			fapi_profile: FAPI2_PROFILE,
+			openid: FAPI2_OPENID,
+			authorization_request_type: FAPI2_AUTHORIZATION_REQUEST_TYPE,
+			grant_management: FAPI2_GRANT_MANAGEMENT,
+		},
+	},
+	"fapi2-message-signing-final-test-plan": {
+		title: "FAPI2-Message-Signing-Final: Authorization server test",
+		spec: "tests/fapi2/message-signing.spec.ts",
+		modules: FAPI2_MESSAGE_SIGNING_MODULES,
+		variants: {
+			client_auth_type: FAPI2_CLIENT_AUTH_TYPE,
+			sender_constrain: FAPI2_SENDER_CONSTRAIN,
+			fapi_profile: FAPI2_PROFILE,
+			openid: FAPI2_OPENID,
+			fapi_request_method: FAPI2_REQUEST_METHOD,
+			fapi_response_mode: FAPI2_RESPONSE_MODE,
+			authorization_request_type: FAPI2_AUTHORIZATION_REQUEST_TYPE,
+			grant_management: FAPI2_GRANT_MANAGEMENT,
+		},
+	},
 	"oidcc-client-basic-certification-test-plan": {
 		title: "OpenID Connect Core: Basic Certification Profile Relying Party Tests",
 		spec: "tests/rp/basic.spec.ts",
@@ -543,6 +721,9 @@ export interface ConformanceProject {
 }
 
 const DISCOVERY_DYNAMIC = "[server_metadata=discovery][client_registration=dynamic_client]";
+/** the FAPI 2 variant the port covers (src/op/op.ts Fapi2Variant) */
+const FAPI2_PRIVATE_KEY_DPOP =
+	"[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][openid=openid_connect][authorization_request_type=simple][grant_management=disabled]";
 /** the variant the OP logout / session management / 3rd-party-initiated login plans run with */
 const OP_CODE_BASIC =
 	"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][server_metadata=discovery][client_registration=dynamic_client]";
@@ -660,6 +841,31 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-3rdparty-init-login-certification-test-plan",
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-3rdparty-init-login.json",
+		browsers,
+		workers: 3,
+	},
+	// ---- FAPI 2.0 plans against panva oidc-provider in its FAPI 2.0 profile (OIDC_PROVIDER_PROFILE=fapi2) ----
+	{
+		name: "fapi2-security-profile",
+		plan: "fapi2-security-profile-final-test-plan",
+		variant: FAPI2_PRIVATE_KEY_DPOP,
+		config: "configs/oidc-provider/fapi2-security-profile.json",
+		browsers,
+		workers: 3,
+	},
+	{
+		name: "fapi2-message-signing",
+		plan: "fapi2-message-signing-final-test-plan",
+		variant: FAPI2_PRIVATE_KEY_DPOP + "[fapi_request_method=signed_non_repudiation][fapi_response_mode=plain_response]",
+		config: "configs/oidc-provider/fapi2-message-signing.json",
+		browsers,
+		workers: 3,
+	},
+	{
+		name: "fapi2-message-signing-jarm",
+		plan: "fapi2-message-signing-final-test-plan",
+		variant: FAPI2_PRIVATE_KEY_DPOP + "[fapi_request_method=unsigned][fapi_response_mode=jarm]",
+		config: "configs/oidc-provider/fapi2-message-signing.json",
 		browsers,
 		workers: 3,
 	},

@@ -14,6 +14,9 @@
  * - `configureClient(setup?)`: the same client set up where the test calls it, with what the module changes about it
  *   (registration request, static client key, scope, the second client); `client` / `client2` are
  *   `configureClient()` / `configureClient({ configKey: "client2" })`.
+ * - `fapi`: for FAPI 2.0 tests, the OP discovered as upstream's AbstractFAPI2SPFinalServerTestModule.configure does (an
+ *   OpenID Connect or OAuth 2.0 discovery document, the keys with OpenID Connect or JARM); the test configures the
+ *   static clients and the resource endpoint itself (`fapi2.configureClient` etc.).
  * - `rp`: for RP tests, the emulated OP (`rp.start(options)`, on the test's own server; its issuer is the server's
  *   base url) and the client driver that makes the RP under test log in against it (`rp.driveClient()`).
  * - `variant`: the variant (the plan's fixed values + the selection from CONFORMANCE_VARIANT / the project).
@@ -34,9 +37,11 @@
 import { test as base, expect, type TestInfo } from "@playwright/test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import * as authz from "../src/op/authorization.ts";
 import * as discovery from "../src/op/discovery.ts";
+import * as fapi2 from "../src/op/fapi2.ts";
 import { loadServerKeys } from "../src/op/jwks.ts";
-import type { Op, OpVariant, RegistrationOp } from "../src/op/op.ts";
+import type { Fapi2Op, Fapi2Variant, Op, OpVariant, RegistrationOp } from "../src/op/op.ts";
 import * as registration from "../src/op/registration.ts";
 import type { ClientSetup, RegisteredClient } from "../src/op/registration.ts";
 import { projects } from "../src/runner/projects.ts";
@@ -89,6 +94,7 @@ interface Fixtures {
 	op: Op;
 	client: RegisteredClient;
 	client2: RegisteredClient;
+	fapi: Fapi2Op;
 	configureClient: ConfigureClient;
 	rp: Rp;
 }
@@ -291,6 +297,29 @@ export const test = base.extend<Fixtures, { suite: Suite }>({
 		discovery.extractTLSTestValuesFromServerConfiguration(registrationOp.metadata);
 		const jwks = await loadServerKeys(registrationOp.metadata);
 		await use({ ...registrationOp, jwks });
+	},
+
+	// the FAPI 2 OP: the redirect_uri, the (OpenID Connect or OAuth 2.0) metadata and - with OpenID Connect or JARM -
+	// the keys with the FAPI 2.0 key checks; the test configures the clients and the resource where upstream's
+	// configure() does, so the log keeps upstream's order
+	fapi: async ({ conformance, variant, suiteTarget: _suiteTarget }, use) => {
+		const { config, log, server, browser, testName } = conformance;
+		const fapiVariant = variant as unknown as Fapi2Variant;
+		const redirectUri = authz.createRedirectUri(server.baseUrl);
+		const { metadata, jwks } = await fapi2.discoverServer(config, fapiVariant);
+		await use({
+			testName,
+			testId: log.testId,
+			config,
+			variant: fapiVariant,
+			metadata,
+			jwks,
+			baseUrl: server.baseUrl,
+			redirectUri,
+			server,
+			browser,
+			log,
+		});
 	},
 
 	// the OP without keys is enough to register a client, so modules on `registrationOp` can configure clients too

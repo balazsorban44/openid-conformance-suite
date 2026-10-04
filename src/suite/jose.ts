@@ -8,6 +8,7 @@
  * upstream condition's name.
  */
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { calculateJwkThumbprint } from "jose";
 import type { Condition } from "./conditions.ts";
 import { isJwsAlgorithm, EC_CURVE_ALGORITHM, keyTypeForAlgorithm } from "./jose-algorithms.ts";
 import {
@@ -19,6 +20,7 @@ import {
 	type JWK,
 	type JWKSet,
 	jwkSetToJSONObject,
+	nimbusJwkOrder,
 } from "./jose-jwk.ts";
 import { jwtStringToJsonObjectForEnvironment, parseClaimsSet, parseSignedJWT, type JWT } from "./jose-jwt.ts";
 import { isJOSEException, JOSEException, KeyLengthException, ParseException } from "./errors.ts";
@@ -323,4 +325,30 @@ export async function signJwt(
 		}
 		throw e;
 	}
+}
+
+/**
+ * A fresh private signing JWK for a JWS algorithm with `use`, `alg` and a `kid` that is the key's thumbprint
+ * (upstream AbstractGenerateKey.createJwkForAlg with GenerateDpopKey's keyIDFromThumbprint): ES256 (P-256),
+ * EdDSA / Ed25519 (OKP), PS256 (RSA 2048). Throws for any other algorithm (Java: "Failed to generate key for alg").
+ */
+export async function generateJwkForAlg(alg: string): Promise<JWK> {
+	let privateKey: KeyObject;
+	switch (alg) {
+		case "ES256":
+			privateKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey;
+			break;
+		case "EdDSA":
+		case "Ed25519":
+			privateKey = generateKeyPairSync("ed25519").privateKey;
+			break;
+		case "PS256":
+			privateKey = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 0x10001 }).privateKey;
+			break;
+		default:
+			throw new Error("Failed to generate key for alg " + alg);
+	}
+	const jwk = { ...privateKey.export({ format: "jwk" }), use: "sig", alg } as JWK;
+	jwk["kid"] = await calculateJwkThumbprint(jwk as never, "sha256");
+	return nimbusJwkOrder(jwk as never) as JWK;
 }

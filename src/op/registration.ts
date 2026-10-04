@@ -6,7 +6,7 @@ import { calculateJwkThumbprint } from "jose";
 import { condition, skipped, soft, type Condition } from "../suite/conditions.ts";
 import type { TestConfig } from "../suite/config.ts";
 import { endpointResponse, HttpError, jsonBody, request, type EndpointResponse } from "../suite/http.ts";
-import { generateRsaJwk, privateJwks, publicJwks, type Jwks } from "../suite/jose.ts";
+import { generateRsaJwk, getSigningKey, privateJwks, publicJwks, type Jwks } from "../suite/jose.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { findStructurallyInvalidKeys, issuesToJson, parseJWK, parseJWKSet } from "../suite/jose-jwk.ts";
 import { ParseException } from "../suite/errors.ts";
@@ -455,6 +455,34 @@ export function validateClientJWKsPrivatePart(jwks: unknown, ...requirements: st
 	c.success(
 		"Valid client JWKs: keys are valid JSON, contain the required fields, the private/public exponents match and are correctly encoded using unpadded base64url",
 	);
+}
+
+/**
+ * The two clients of a multiple-client module sign with different keys (same thumbprint = same key).
+ *
+ * upstream: condition/client/ValidateClientPrivateKeysAreDifferent.java (AbstractGetSigningKey)
+ */
+export async function validateClientPrivateKeysAreDifferent(
+	client: Record<string, unknown>,
+	client2: Record<string, unknown>,
+	...requirements: string[]
+): Promise<void> {
+	const c: Condition = condition("ValidateClientPrivateKeysAreDifferent", ...requirements);
+	const jwk1 = getSigningKey(c, "client", client["jwks"]);
+	const jwk2 = getSigningKey(c, "client2", client2["jwks"]);
+	if (jwk1["kty"] !== jwk2["kty"]) {
+		c.success("Client signing JWK have different 'kty'", { jwk1, jwk2 });
+		return;
+	}
+	const thumb1 = await calculateJwkThumbprint(jwk1 as never, "sha256");
+	const thumb2 = await calculateJwkThumbprint(jwk2 as never, "sha256");
+	if (thumb1 === thumb2) {
+		c.failure(
+			"Client private keys are the same key. Please use different keys, as otherwise some tests will not work correctly. If you are using the Brazil sandbox directory, you should add different signing keys to each of the client's software statements.",
+			{ jwk1, jwk2 },
+		);
+	}
+	c.success("Client signing JWKs have different thumbprints", { jwk1, jwk2 });
 }
 
 /** upstream: condition/client/ExtractJWKsFromStaticClientConfiguration.java (AbstractExtractJWKsFromClientConfiguration) */

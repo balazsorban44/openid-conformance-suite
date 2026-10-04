@@ -16,13 +16,14 @@ import {
 	checkDiscEndpointAllEndpointsAreHttps,
 	checkDiscEndpointRequestParameterSupported,
 	checkDiscEndpointRequestUriParameterSupported,
+	ensureServerConfigurationSupportsPrivateKeyJwt,
 	validateJsonArray,
 	validateJsonBoolean,
 	validateJsonUriIsHttps,
 	type ServerMetadata,
 } from "./discovery.ts";
 import { fetchServerKeys, validateJwks } from "./jwks.ts";
-import type { OpVariant } from "./op.ts";
+import type { Fapi2Variant, OpVariant } from "./op.ts";
 import { SUPPORT_EMAIL } from "./registration.ts";
 
 const NEW_ISSUE_URL = "https://github.com/balazsorban44/openid-conformance-suite/issues/new";
@@ -32,9 +33,42 @@ function serverConfig(config: TestConfig): Record<string, unknown> {
 	return (config.server ?? {}) as Record<string, unknown>;
 }
 
+const OIDC_CONFIGURATION_ENDPOINT = "/.well-known/openid-configuration";
+const OAUTH_CONFIGURATION_ENDPOINT = "/.well-known/oauth-authorization-server";
+
 /** upstream: condition/client/CheckDiscEndpointDiscoveryUrl.java */
 export function checkDiscEndpointDiscoveryUrl(config: TestConfig, ...requirements: string[]): void {
-	const c: Condition = condition("CheckDiscEndpointDiscoveryUrl", ...requirements);
+	checkDiscoveryUrl(
+		condition("CheckDiscEndpointDiscoveryUrl", ...requirements),
+		config,
+		OIDC_CONFIGURATION_ENDPOINT,
+		(url) => url.pathname.endsWith(OIDC_CONFIGURATION_ENDPOINT),
+	);
+}
+
+/**
+ * The OAuth 2.0 (RFC 8414) discovery URL: /.well-known/oauth-authorization-server at the start of the path, with the
+ * OpenID Connect location as a fallback.
+ *
+ * upstream: condition/client/CheckOauthDiscEndpointDiscoveryUrl.java
+ */
+export function checkOauthDiscEndpointDiscoveryUrl(config: TestConfig, ...requirements: string[]): void {
+	checkDiscoveryUrl(
+		condition("CheckOauthDiscEndpointDiscoveryUrl", ...requirements),
+		config,
+		OAUTH_CONFIGURATION_ENDPOINT,
+		// check /.well-known/oauth-authorization-server and then fallback to super's /.well-known/openid-configuration
+		(url) =>
+			url.pathname.startsWith(OAUTH_CONFIGURATION_ENDPOINT) || url.pathname.endsWith(OIDC_CONFIGURATION_ENDPOINT),
+	);
+}
+
+function checkDiscoveryUrl(
+	c: Condition,
+	config: TestConfig,
+	configurationEndpoint: string,
+	isValidDiscoveryUrl: (url: URL) => boolean,
+): void {
 	const requiredProtocol = "https";
 	const configUrl = serverConfig(config)["discoveryUrl"];
 	if (configUrl == null) {
@@ -50,8 +84,8 @@ export function checkDiscEndpointDiscoveryUrl(config: TestConfig, ...requirement
 	} catch {
 		return c.failure("Invalid URL. Unable to parse.", { Failure: configUrl });
 	}
-	if (!url.pathname.endsWith("/.well-known/openid-configuration")) {
-		c.failure("discoveryUrl is missing '/.well-known/openid-configuration'", { actual: discoveryUrl });
+	if (!isValidDiscoveryUrl(url)) {
+		c.failure("discoveryUrl is missing '" + configurationEndpoint + "'", { actual: discoveryUrl });
 	}
 	// Java's URL.getProtocol() has no trailing colon
 	const protocol = url.protocol.replace(/:$/, "");
@@ -70,29 +104,78 @@ function removeSlash(url: string): string {
 
 /** upstream: condition/client/CheckDiscEndpointIssuer.java */
 export function checkDiscEndpointIssuer(metadata: ServerMetadata, config: TestConfig, ...requirements: string[]): void {
-	const c: Condition = condition("CheckDiscEndpointIssuer", ...requirements);
-	const issuerElement = metadata.issuer as unknown;
-	if (issuerElement == null || (typeof issuerElement === "object" && !Array.isArray(issuerElement))) {
-		c.failure("issuer is missing from discovery endpoint document");
-	}
-	if (typeof issuerElement !== "string") {
-		// UPSTREAM: OIDFJSON.getString throws for anything but a string
-		throw new TypeError("getString called on something that is not a string: " + JSON.stringify(issuerElement));
-	}
-	const issuerUrl = issuerElement;
-	let discoveryUrl = String(serverConfig(config)["discoveryUrl"]);
-	const removingPartInUrl = ".well-known/openid-configuration";
-	if (discoveryUrl.endsWith(removingPartInUrl)) {
-		discoveryUrl = discoveryUrl.substring(0, discoveryUrl.length - removingPartInUrl.length);
-	}
-	// Remove slash character endpoint url before comparing
-	if (removeSlash(issuerUrl) !== removeSlash(discoveryUrl)) {
-		c.failure(
-			"issuer listed in the discovery document is not consistent with the location the discovery document was retrieved from. These must match to prevent impersonation attacks.",
-			{ discovery_url: discoveryUrl, issuer: issuerUrl },
-		);
-	}
-	c.success("issuer is consistent with the discovery endpoint", { issuer: issuerUrl });
+	checkIssuer(condition("CheckDiscEndpointIssuer", ...requirements), metadata, (discoveryUrl) => {
+		const removingPartInUrl = ".well-known/openid-configuration";
+		return discoveryUrl.endsWith(removingPartInUrl)
+			? discoveryUrl.substring(0, discoveryUrl.length - removingPartInUrl.length)
+			: discoveryUrl;
+	})(String(serverConfig(config)["discoveryUrl"]));
+}
+
+/**
+ * CheckDiscEndpointIssuer for the OAuth 2.0 (RFC 8414) discovery URL: the issuer is the discovery URL without the
+ * /.well-known/oauth-authorization-server path component (or without the OpenID Connect suffix, the fallback).
+ *
+ * upstream: condition/client/CheckOauthDiscEndpointIssuer.java
+ */
+export function checkOauthDiscEndpointIssuer(
+	metadata: ServerMetadata,
+	config: TestConfig,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckOauthDiscEndpointIssuer", ...requirements);
+	checkIssuer(c, metadata, (discoveryUrl) => {
+		// OAuth discovery path must start with .well-known/oauth-authorization-server e.g.
+		// https://www.example.com/.well-known/oauth-authorization-server/issuerPath
+		if (discoveryUrl.includes(OAUTH_CONFIGURATION_ENDPOINT)) {
+			let url: URL;
+			try {
+				url = new URL(discoveryUrl);
+			} catch (e) {
+				return c.failureFrom("Malformed discovery URL", e, { url: discoveryUrl });
+			}
+			if (!url.pathname.startsWith(OAUTH_CONFIGURATION_ENDPOINT)) {
+				c.failure("Invalid OAuth discovery URl", { url: discoveryUrl });
+			}
+			const foundIndex = discoveryUrl.indexOf(OAUTH_CONFIGURATION_ENDPOINT);
+			return foundIndex === -1
+				? discoveryUrl
+				: discoveryUrl.substring(0, foundIndex) +
+						discoveryUrl.substring(foundIndex + OAUTH_CONFIGURATION_ENDPOINT.length);
+		}
+		// fallback on openid-configuration
+		const removingPartInUrl = ".well-known/openid-configuration";
+		return discoveryUrl.endsWith(removingPartInUrl)
+			? discoveryUrl.substring(0, discoveryUrl.length - removingPartInUrl.length)
+			: discoveryUrl;
+	})(String(serverConfig(config)["discoveryUrl"]));
+}
+
+function checkIssuer(
+	c: Condition,
+	metadata: ServerMetadata,
+	expectedIssuerUrl: (discoveryUrl: string) => string,
+): (configuredDiscoveryUrl: string) => void {
+	return (configuredDiscoveryUrl) => {
+		const issuerElement = metadata.issuer as unknown;
+		if (issuerElement == null || (typeof issuerElement === "object" && !Array.isArray(issuerElement))) {
+			c.failure("issuer is missing from discovery endpoint document");
+		}
+		if (typeof issuerElement !== "string") {
+			// UPSTREAM: OIDFJSON.getString throws for anything but a string
+			throw new TypeError("getString called on something that is not a string: " + JSON.stringify(issuerElement));
+		}
+		const issuerUrl = issuerElement;
+		const discoveryUrl = expectedIssuerUrl(configuredDiscoveryUrl);
+		// Remove slash character endpoint url before comparing
+		if (removeSlash(issuerUrl) !== removeSlash(discoveryUrl)) {
+			c.failure(
+				"issuer listed in the discovery document is not consistent with the location the discovery document was retrieved from. These must match to prevent impersonation attacks.",
+				{ discovery_url: discoveryUrl, issuer: issuerUrl },
+			);
+		}
+		c.success("issuer is consistent with the discovery endpoint", { issuer: issuerUrl });
+	};
 }
 
 // RFC 3986 appendix B
@@ -804,6 +887,437 @@ export async function performEndpointVerification(op: {
 	soft(() => checkDiscEndpointAllEndpointsAreHttps(metadata));
 
 	soft(() => ensureServerConfigurationCodeChallengeMethodsSupportedIsAnArray(metadata, "RFC8414-2", "RFC7636-4.3"));
+}
+
+// ---- FAPI 2.0 discovery endpoint verification (fapi2spfinal/FAPI2SPFinalDiscoveryEndpointVerification) ----
+
+/** The FAPI 2.0 signing algorithms (upstream FAPI2CheckDiscEndpointIdTokenSigningAlgValuesSupported.FAPI2_ALLOWED_ALGS) */
+const FAPI2_ALLOWED_ALGS = ["PS256", "ES256", "EdDSA", "Ed25519"];
+
+/** upstream: condition/client/CheckDiscEndpointResponseTypeCodeSupported.java (AbstractValidateJsonArray) */
+export function checkDiscEndpointResponseTypeCodeSupported(metadata: ServerMetadata, ...requirements: string[]): void {
+	validateJsonArray(
+		condition("CheckDiscEndpointResponseTypeCodeSupported", ...requirements),
+		metadata,
+		"response_types_supported",
+		["code"],
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointResponseModesSupportedContainsJwt.java (AbstractValidateJsonArray) */
+export function checkDiscEndpointResponseModesSupportedContainsJwt(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonArray(
+		condition("CheckDiscEndpointResponseModesSupportedContainsJwt", ...requirements),
+		metadata,
+		"response_modes_supported",
+		["jwt"],
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/AbstractEnsureJsonArray.java (`server.<path>`, may be absent, may not be JSON null) */
+function ensureJsonArray(c: Condition, metadata: ServerMetadata, path: string): void {
+	const key = "server";
+	const value = metadata[path];
+	if (value === undefined) {
+		c.success(key + "." + path + " is absent which is allowed");
+		return;
+	}
+	if (value === null) {
+		c.failure("'" + key + "." + path + "' is json 'null'.", { key, path });
+	}
+	if (!Array.isArray(value)) {
+		c.failure(key + "." + path + ": incorrect type, must be a json array.", { key, path });
+	}
+	c.success(key + "." + path + " is a json array");
+}
+
+/** upstream: condition/client/CheckDiscEndpointAuthSignAlgValuesIsJsonArray.java */
+export function checkDiscEndpointAuthSignAlgValuesIsJsonArray(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	ensureJsonArray(
+		condition("CheckDiscEndpointAuthSignAlgValuesIsJsonArray", ...requirements),
+		metadata,
+		"authorization_signing_alg_values_supported",
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointAuthEncryptAlgValuesIsJsonArray.java */
+export function checkDiscEndpointAuthEncryptAlgValuesIsJsonArray(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	ensureJsonArray(
+		condition("CheckDiscEndpointAuthEncryptAlgValuesIsJsonArray", ...requirements),
+		metadata,
+		"authorization_encryption_alg_values_supported",
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointAuthEncryptEncValuesIsJsonArray.java */
+export function checkDiscEndpointAuthEncryptEncValuesIsJsonArray(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	ensureJsonArray(
+		condition("CheckDiscEndpointAuthEncryptEncValuesIsJsonArray", ...requirements),
+		metadata,
+		"authorization_encryption_enc_values_supported",
+	);
+}
+
+/** upstream: ekyc/condition/client/EnsureAuthorizationResponseIssParameterSupportedIsTrue.java (AbstractValidateJsonBoolean) */
+export function ensureAuthorizationResponseIssParameterSupportedIsTrue(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonBoolean(
+		condition("EnsureAuthorizationResponseIssParameterSupportedIsTrue", ...requirements),
+		metadata,
+		"authorization_response_iss_parameter_supported",
+		false,
+		true,
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointPARSupported.java */
+export function checkDiscEndpointPARSupported(metadata: ServerMetadata, ...requirements: string[]): void {
+	const c: Condition = condition("CheckDiscEndpointPARSupported", ...requirements);
+	const key = "pushed_authorization_request_endpoint";
+	const parEndpoint = metadata[key];
+	if (parEndpoint == null || (typeof parEndpoint === "object" && !Array.isArray(parEndpoint))) {
+		c.failure("pushed_authorization_request_endpoint is missing from discovery endpoint document");
+	}
+	if (typeof parEndpoint !== "string") {
+		// UPSTREAM: OIDFJSON.getString throws for anything but a string
+		throw new TypeError("getString called on something that is not a string: " + JSON.stringify(parEndpoint));
+	}
+	// verify parEndpointUrl is a valid https URL
+	let url: URL;
+	try {
+		url = new URL(parEndpoint);
+	} catch {
+		return c.failure("pushed_authorization_request_endpoint URL is not a valid URL", { [key]: parEndpoint });
+	}
+	if (url.protocol.toLowerCase() !== "https:") {
+		c.failure("pushed_authorization_request_endpoint URL does not use https protocol", { [key]: parEndpoint });
+	}
+	c.success("pushed_authorization_request_endpoint defines a valid https URL");
+}
+
+/** upstream: condition/client/CheckDiscRequirePushedAuthorizationRequestsIsABoolean.java */
+export function checkDiscRequirePushedAuthorizationRequestsIsABoolean(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckDiscRequirePushedAuthorizationRequestsIsABoolean", ...requirements);
+	const discoveryKey = "require_pushed_authorization_requests";
+	const el = metadata[discoveryKey];
+	if (el === undefined) {
+		c.success(discoveryKey + " is not present in server configuration.");
+		return;
+	}
+	if (typeof el !== "boolean") {
+		c.failure(discoveryKey + " is not a boolean value.", { [discoveryKey]: el });
+	}
+	c.success(discoveryKey + " is a boolean value.");
+}
+
+/** upstream: condition/client/FAPI2CheckDiscEndpointRequestObjectSigningAlgValuesSupported.java */
+export function fapi2CheckDiscEndpointRequestObjectSigningAlgValuesSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonArray(
+		condition("FAPI2CheckDiscEndpointRequestObjectSigningAlgValuesSupported", ...requirements),
+		metadata,
+		"request_object_signing_alg_values_supported",
+		FAPI2_ALLOWED_ALGS,
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/FAPI2CheckDiscEndpointIdTokenSigningAlgValuesSupported.java */
+export function fapi2CheckDiscEndpointIdTokenSigningAlgValuesSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonArray(
+		condition("FAPI2CheckDiscEndpointIdTokenSigningAlgValuesSupported", ...requirements),
+		metadata,
+		"id_token_signing_alg_values_supported",
+		FAPI2_ALLOWED_ALGS,
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/FAPI2CheckDpopSigningAlgValuesSupported.java */
+export function fapi2CheckDpopSigningAlgValuesSupported(metadata: ServerMetadata, ...requirements: string[]): void {
+	validateJsonArray(
+		condition("FAPI2CheckDpopSigningAlgValuesSupported", ...requirements),
+		metadata,
+		"dpop_signing_alg_values_supported",
+		FAPI2_ALLOWED_ALGS,
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/FAPI2CheckDiscEndpointUserinfoSigningAlgValuesSupported.java */
+export function fapi2CheckDiscEndpointUserinfoSigningAlgValuesSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonArray(
+		condition("FAPI2CheckDiscEndpointUserinfoSigningAlgValuesSupported", ...requirements),
+		metadata,
+		"userinfo_signing_alg_values_supported",
+		FAPI2_ALLOWED_ALGS,
+		1,
+		"No matching value from server",
+	);
+}
+
+/**
+ * upstream: condition/client/CheckDiscEndpointTokenEndpointAuthMethodsSupportedContainsPrivateKeyOrTlsClient.java
+ * (AbstractCheckDiscEndpointTokenEndpointAuthMethodsSupported)
+ */
+export function checkDiscEndpointTokenEndpointAuthMethodsSupportedContainsPrivateKeyOrTlsClient(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonArray(
+		condition("CheckDiscEndpointTokenEndpointAuthMethodsSupportedContainsPrivateKeyOrTlsClient", ...requirements),
+		metadata,
+		"token_endpoint_auth_methods_supported",
+		["private_key_jwt", "tls_client_auth"],
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/FAPI2CheckDiscEndpointTokenEndpointAuthSigningAlgValuesSupported.java */
+export function fapi2CheckDiscEndpointTokenEndpointAuthSigningAlgValuesSupported(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("FAPI2CheckDiscEndpointTokenEndpointAuthSigningAlgValuesSupported", ...requirements);
+	const valuesRequired = ["private_key_jwt"];
+	const serverValues = metadata.token_endpoint_auth_methods_supported;
+	if (Array.isArray(serverValues) && serverValues.some((v) => valuesRequired.includes(v as string))) {
+		validateJsonArray(
+			c,
+			metadata,
+			"token_endpoint_auth_signing_alg_values_supported",
+			FAPI2_ALLOWED_ALGS,
+			1,
+			"No matching value from server",
+		);
+		return;
+	}
+	c.success(
+		"Not checking token_endpoint_auth_signing_alg_values_supported as token_endpoint_auth_methods_supported does not contain the method (private_key_jwt ) that requires signing",
+		{ actual: serverValues ?? null, expected: valuesRequired },
+	);
+}
+
+/** upstream: condition/client/EnsureServerConfigurationSupportsCodeChallengeMethodS256.java */
+export function ensureServerConfigurationSupportsCodeChallengeMethodS256(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	validateJsonArray(
+		condition("EnsureServerConfigurationSupportsCodeChallengeMethodS256", ...requirements),
+		metadata,
+		"code_challenge_methods_supported",
+		["S256"],
+		1,
+		"No matching value from server",
+	);
+}
+
+/** upstream: condition/client/CheckDiscEndpointGrantTypesSupportedContainsAuthorizationCode.java */
+export function checkDiscEndpointGrantTypesSupportedContainsAuthorizationCode(
+	metadata: ServerMetadata,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckDiscEndpointGrantTypesSupportedContainsAuthorizationCode", ...requirements);
+	const discoveryKey = "grant_types_supported";
+	if (metadata[discoveryKey] == null) {
+		c.success(
+			"server discovery document does not contain " + discoveryKey + ", so by default authorization_code is supported",
+		);
+		return;
+	}
+	validateJsonArray(
+		c,
+		metadata,
+		discoveryKey,
+		["authorization_code"],
+		1,
+		"The server does not support the required grant types.",
+	);
+}
+
+/**
+ * Every scope the test is about to request (the clients' `scope`) is in scopes_supported. scopes_supported is only
+ * RECOMMENDED, so callers treat a failure as a warning.
+ *
+ * upstream: condition/client/CheckDiscEndpointScopesSupportedContainsRequestedScopes.java
+ */
+export function checkDiscEndpointScopesSupportedContainsRequestedScopes(
+	metadata: ServerMetadata,
+	clients: { key: string; scope: unknown }[],
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckDiscEndpointScopesSupportedContainsRequestedScopes", ...requirements);
+	const scopesSupported = metadata["scopes_supported"];
+	if (!Array.isArray(scopesSupported)) {
+		c.failure("'scopes_supported' in the server's discovery document is not an array", {
+			scopes_supported: scopesSupported ?? null,
+		});
+	}
+	const requested = new Set<string>();
+	for (const { key, scope } of clients) {
+		if (scope == null) {
+			continue;
+		}
+		if (typeof scope !== "string") {
+			c.failure("The 'scope' field in the client section of the test configuration is not a string", {
+				client: key,
+				scope,
+			});
+		}
+		for (const s of scope.split(/\s+/)) {
+			if (s !== "") {
+				requested.add(s);
+			}
+		}
+	}
+	if (requested.size === 0) {
+		c.success("Neither client has a scope to request yet, so there is nothing to check");
+		return;
+	}
+	const missing = [...requested].filter((s) => !scopesSupported.includes(s));
+	if (missing.length > 0) {
+		c.failure(
+			"The scope the test will request contains scopes the server does not list in the 'scopes_supported' of its discovery document. The server is permitted to not advertise scopes it supports, but this may also mean the 'scope' set in the test configuration is incorrect.",
+			{ missing, requested: [...requested], scopes_supported: scopesSupported },
+		);
+	}
+	c.success("The server's 'scopes_supported' contains all the scopes the test will request", {
+		requested: [...requested],
+		scopes_supported: scopesSupported,
+	});
+}
+
+/**
+ * The checks of the FAPI 2.0 discovery endpoint verification, in upstream's order and severities, for the ported
+ * variants (plain_fapi, DPoP, private_key_jwt; mTLS and client attestation are not ported). `metadata` is the
+ * discovery document (an OpenID Connect or OAuth 2.0 one, per the `openid` variant).
+ *
+ * upstream: fapi2spfinal/FAPI2SPFinalDiscoveryEndpointVerification.java +
+ * fapi2spfinal/AbstractFAPI2SPFinalDiscoveryEndpointVerification.java (performEndpointVerification) with
+ * fapi2spfinal/FAPI2ProfileBehavior.java (PlainFAPIDiscoveryEndpointChecks)
+ */
+export function performFapi2EndpointVerification(op: {
+	metadata: ServerMetadata;
+	config: TestConfig;
+	variant: Pick<Fapi2Variant, "openid" | "fapi_response_mode" | "fapi_request_method" | "sender_constrain">;
+}): void {
+	const { metadata, config, variant } = op;
+	const isOpenId = variant.openid === "openid_connect";
+	const jarm = variant.fapi_response_mode === "jarm";
+	const signedRequest = variant.fapi_request_method === "signed_non_repudiation";
+
+	// FAPI2SPFinalDiscoveryEndpointVerification.performEndpointVerification (not the client credentials grant)
+	soft(() => checkDiscEndpointResponseTypeCodeSupported(metadata, "FAPI2-SP-FINAL-5.3.2.2-1"));
+	if (jarm) {
+		soft(() => checkDiscEndpointResponseModesSupportedContainsJwt(metadata, "JARM-2.3.4"));
+		soft(() => checkDiscEndpointAuthSignAlgValuesIsJsonArray(metadata, "JARM-4"));
+		soft(() => checkDiscEndpointAuthEncryptAlgValuesIsJsonArray(metadata, "JARM-4"));
+		soft(() => checkDiscEndpointAuthEncryptEncValuesIsJsonArray(metadata, "JARM-4"));
+	} else {
+		// https://bitbucket.org/openid/fapi/issues/478/fapi2-baseline-jarm-iss-draft
+		soft(() =>
+			ensureAuthorizationResponseIssParameterSupportedIsTrue(metadata, "OAuth2-iss-3", "FAPI2-SP-FINAL-5.3.2.2-7"),
+		);
+	}
+	soft(() => checkDiscEndpointPARSupported(metadata, "PAR-5", "FAPI2-SP-FINAL-5.3.2.2-2"));
+
+	// AbstractFAPI2SPFinalDiscoveryEndpointVerification.performEndpointVerification
+	if (isOpenId) {
+		soft(() => checkDiscEndpointDiscoveryUrl(config));
+		soft(() => checkDiscEndpointIssuer(metadata, config, "OIDCD-4.3", "OIDCD-7.2"));
+	} else {
+		soft(() => checkOauthDiscEndpointDiscoveryUrl(config));
+		soft(() => checkOauthDiscEndpointIssuer(metadata, config, "RFC8414-3.3", "RFC8414-6.2"));
+	}
+	soft(() => checkDiscEndpointIssuerIsValidUrl(metadata, "RFC8414-2"));
+	soft(() => validateServerMetadataAgainstSchema(metadata, "RFC8414-2"));
+	soft(() => checkForUnexpectedParametersInServerMetadata(metadata, config, "RFC8414-2"), "warning");
+	// sender_constrain=dpop (CheckTLSClientCertificateBoundAccessTokensTrue for mtls is not ported)
+	soft(() => fapi2CheckDpopSigningAlgValuesSupported(metadata, "FAPI2-SP-FINAL-5.4-1"));
+	if (isOpenId) {
+		soft(() => fapi2CheckDiscEndpointIdTokenSigningAlgValuesSupported(metadata, "FAPI2-SP-FINAL-5.4-1"));
+	}
+	soft(() =>
+		checkDiscEndpointTokenEndpointAuthMethodsSupportedContainsPrivateKeyOrTlsClient(
+			metadata,
+			"FAPI2-SP-FINAL-5.3.2.1-6",
+		),
+	);
+	soft(() => fapi2CheckDiscEndpointTokenEndpointAuthSigningAlgValuesSupported(metadata, "FAPI2-SP-FINAL-5.4-1"));
+	if (metadata["userinfo_signing_alg_values_supported"] == null) {
+		skipped(
+			"FAPI2CheckDiscEndpointUserinfoSigningAlgValuesSupported",
+			{ element: ["server", "userinfo_signing_alg_values_supported"] },
+			"FAPI2-SP-FINAL-5.4",
+		);
+	} else {
+		soft(() => fapi2CheckDiscEndpointUserinfoSigningAlgValuesSupported(metadata, "FAPI2-SP-FINAL-5.4"));
+	}
+	soft(() => checkDiscEndpointTokenEndpoint(metadata, "OIDCD-3"));
+	if (metadata.registration_endpoint == null) {
+		skipped("CheckDiscEndpointRegistrationEndpoint", { element: ["server", "registration_endpoint"] }, "OIDCD-3");
+	} else {
+		soft(() => checkDiscEndpointRegistrationEndpoint(metadata, "OIDCD-3"));
+	}
+	if (jarm || isOpenId) {
+		soft(() => checkJwksUri(metadata, "OIDCD-3"));
+	}
+	soft(() => ensureServerConfigurationSupportsCodeChallengeMethodS256(metadata, "FAPI2-SP-FINAL-5.3.2.2-5"));
+	soft(() => checkDiscEndpointScopesSupportedSyntax(metadata, "RFC6749-3.3"));
+	soft(() => checkDiscEndpointLocalesSyntax(metadata, "RFC8414-2"));
+	soft(() => checkDiscEndpointLocalesCanonicalCasing(metadata, "RFC8414-2"), "warning");
+	// client_auth_type=private_key_jwt (PrivateKeyJWTChecks)
+	soft(() => ensureServerConfigurationSupportsPrivateKeyJwt(metadata, "FAPI2-SP-FINAL-5.3.2.1-6"));
+
+	// FAPI2SPFinalDiscoveryEndpointVerification.performEndpointVerification, after super
+	// although PAR is required by FAPI2, the server may support non-FAPI2-use-cases, so we can't require this to be
+	// 'true'
+	soft(() => checkDiscRequirePushedAuthorizationRequestsIsABoolean(metadata, "PAR-5"));
+	if (signedRequest) {
+		soft(() => fapi2CheckDiscEndpointRequestObjectSigningAlgValuesSupported(metadata));
+	}
+	soft(() => checkDiscEndpointAuthorizationEndpoint(metadata));
+	// plain_fapi: PlainFAPIDiscoveryEndpointChecks
+	soft(() => checkDiscEndpointGrantTypesSupportedContainsAuthorizationCode(metadata));
+	if (isOpenId) {
+		// OidcDiscoveryEndpointChecks
+		soft(() => checkDiscEndpointScopesSupportedContainsOpenId(metadata));
+		soft(() => checkDiscEndpointSubjectTypesSupported(metadata, "OIDCD-3"));
+	}
 }
 
 /** upstream: condition/client/CheckDiscEndpointRequestObjectSigningAlgValuesSupportedContainsRS256.java */

@@ -165,6 +165,37 @@ export function ensureHttpStatusCodeIs4xx(res: EndpointResponse, ...requirements
 	});
 }
 
+/** upstream: condition/client/EnsureHttpStatusCodeIs200or201.java */
+export function ensureHttpStatusCodeIs200or201(res: EndpointResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureHttpStatusCodeIs200or201", ...requirements);
+	if (res.status == null) {
+		c.failure("Http status can not be null.");
+	}
+	if (res.status >= 200 && res.status <= 201) {
+		c.success(res.endpoint_name + " endpoint http status code was " + res.status);
+		return;
+	}
+	c.failure(res.endpoint_name + " endpoint returned a different http status than expected", {
+		actual: res.status,
+		expected: "200 or 201",
+	});
+}
+
+/** upstream: condition/client/EnsureHttpStatusCodeIs400or401.java */
+export function ensureHttpStatusCodeIs400or401(res: EndpointResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureHttpStatusCodeIs400or401", ...requirements);
+	if (res.status == null) {
+		c.failure("Http status can not be null.");
+	}
+	if (res.status !== 400 && res.status !== 401) {
+		c.failure(res.endpoint_name + " endpoint returned a different http status than expected", {
+			actual: res.status,
+			expected: "400 or 401",
+		});
+	}
+	c.success(res.endpoint_name + " endpoint http status code was " + res.status);
+}
+
 /** upstream: condition/client/EnsureContentTypeApplicationJwt.java */
 export function ensureContentTypeApplicationJwt(res: EndpointResponse, ...requirements: string[]): void {
 	checkContentType(

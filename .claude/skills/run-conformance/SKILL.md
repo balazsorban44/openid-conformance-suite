@@ -17,6 +17,9 @@ node bin/cli.ts projects       # the CI projects: name, plan, variant, config
 node bin/cli.ts ci --project op-basic-dynamic
 # RP plan: the suite emulates the OP, the bundled openid-client RP is driven through it
 node bin/cli.ts ci --project rp-basic
+# FAPI 2.0 OP plans against oidc-provider in its FAPI 2.0 profile (OIDC_PROVIDER_PROFILE=fapi2: PAR, DPoP, PKCE,
+# private_key_jwt; fapi2-message-signing = signed request objects, fapi2-message-signing-jarm = JARM)
+node bin/cli.ts ci --project fapi2-security-profile
 # extra Playwright args after `--`, e.g. one module
 node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
 # another browser: chromium (default) | firefox | webkit | chrome-mobile
@@ -51,6 +54,22 @@ Test outcome (`src/suite/expected.ts`, a port of upstream's `run-test-plan.py` a
 when its log has no FAILURE or WARNING entry that is not in the config's expected-failures list, every listed
 expected failure/warning did happen, the module was not SKIPPED unless the expected-skips list says so (then the
 Playwright test is reported skipped), and it was not INTERRUPTED. Expected failures and warnings are annotated.
+
+## FAPI 2.0
+
+The FAPI 2.0 plans (`fapi2-security-profile-final-test-plan`, `fapi2-message-signing-final-test-plan`;
+tests/fapi2/_.spec.ts) run the ported variant `[client_auth_type=private_key_jwt][sender_constrain=dpop]
+[fapi_profile=plain_fapi][openid=openid_connect][authorization_request_type=simple][grant_management=disabled]`
+(the message signing plan adds `fapi_request_method` and `fapi_response_mode`; `openid=plain_oauth` works too).
+mTLS, client attestation, RAR, grant management and the ecosystem profiles are not ported. The configuration needs
+static clients (`client`, `client2` with `client_id`, `scope`, a private `jwks` with `kid` and a FAPI 2.0 `alg`,
+optionally `dpop_signing_alg`), `resource.resourceUrl` (the protected resource; `resourceMethod` optional), and the
+browser tasks of the authorization endpoint. The second client's redirect_uri is the first one's plus
+`?dummy1=lorem&dummy2=ipsum` (both must be registered). The bundled target: `OIDC_PROVIDER_PROFILE=fapi2` in the
+config's `target.env` starts oidc-provider with its FAPI 2.0 profile, PAR required, DPoP with nonces required,
+JARM and the two private_key_jwt clients of targets/oidc-provider/clients-fapi2.json (their private keys are in
+configs/oidc-provider/fapi2-_.json). The DPoP nonce retries (`use_dpop_nonce` at the PAR, token and resource
+endpoints) are exercised because the target requires nonces.
 
 ## Environment variables
 
