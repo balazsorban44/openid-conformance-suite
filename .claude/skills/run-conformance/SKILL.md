@@ -54,23 +54,24 @@ Playwright test is reported skipped), and it was not INTERRUPTED. Expected failu
 
 ## Environment variables
 
-| Variable                                                        | Effect                                                                                  |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `CONFORMANCE_PROJECT`                                           | select a project from `src/runner/projects.ts` (plan, variant, config, skipped modules) |
-| `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG` | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)       |
-| `CONFORMANCE_MODULE`                                            | only modules whose `testName` matches this glob                                         |
-| `CONFORMANCE_BROWSER` (`ci`/`run --browser`)                    | browser the suite drives: `chromium` (default), `firefox`, `webkit`, `chrome-mobile`    |
-| `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`              | serve the suite over https (default: the bundled `configs/certs/localhost.*`)           |
-| `CONFORMANCE_CWD`                                               | directory the config's `target.command` runs in (the CLI sets the caller's cwd)         |
-| `CONFORMANCE_TEST_TIMEOUT` (ms, 240000)                         | Playwright test timeout                                                                 |
-| `CONFORMANCE_WORKERS`                                           | Playwright workers (default 1)                                                          |
-| `CONFORMANCE_VERBOSE=1`                                         | stream the event log to the console                                                     |
-| `CONFORMANCE_TARGET_OUTPUT=1`                                   | echo the target's stdout/stderr                                                         |
-| `CONFORMANCE_KEEP_SERVER=1`                                     | do not stop the `target` process after the plan                                         |
-| `CONFORMANCE_VIDEO=off`, `CONFORMANCE_TRACE=on`                 | skip video recording / record a trace for every test                                    |
-| `CONFORMANCE_REPORT_DIR`, `CONFORMANCE_SUMMARY_TITLE`           | where/with which title the summary is written (`conformance-report/`)                   |
-| `CONFORMANCE_ARTIFACT`                                          | name of the uploaded artifact with the logs (named next to failures in the summary)     |
-| `CONFORMANCE_ANNOTATIONS=1`                                     | on a GitHub runner: one `::error` per failed module (`ci` sets it)                      |
+| Variable                                                        | Effect                                                                                                                                                                                                                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONFORMANCE_PROJECT`                                           | select a project from `src/runner/projects.ts` (plan, variant, config, skipped modules)                                                                                                                                   |
+| `CONFORMANCE_PLAN`, `CONFORMANCE_VARIANT`, `CONFORMANCE_CONFIG` | plan name, `[k=v][k2=v2]` variant selection, config path (override the project's)                                                                                                                                         |
+| `CONFORMANCE_MODULE`                                            | only modules whose `testName` matches this glob                                                                                                                                                                           |
+| `server.code_reuse_delay`, `server.jwks_refresh_delay` (config) | shorten upstream's 30 s wait before reusing a code and 60 s wait before the OP refetches rotated keys (the bundled OP configs set the first to 1; oidc-provider caches a client's jwks_uri for 60 s, so the second stays) |
+| `CONFORMANCE_BROWSER` (`ci`/`run --browser`)                    | browser the suite drives: `chromium` (default), `firefox`, `webkit`, `chrome-mobile`                                                                                                                                      |
+| `CONFORMANCE_TLS=1`, `CONFORMANCE_TLS_CERT`/`_KEY`              | serve the suite over https (default: the bundled `configs/certs/localhost.*`)                                                                                                                                             |
+| `CONFORMANCE_CWD`                                               | directory the config's `target.command` runs in (the CLI sets the caller's cwd)                                                                                                                                           |
+| `CONFORMANCE_TEST_TIMEOUT` (ms, 240000)                         | Playwright test timeout                                                                                                                                                                                                   |
+| `CONFORMANCE_WORKERS`                                           | Playwright workers (default 1)                                                                                                                                                                                            |
+| `CONFORMANCE_VERBOSE=1`                                         | stream the event log to the console                                                                                                                                                                                       |
+| `CONFORMANCE_TARGET_OUTPUT=1`                                   | echo the target's stdout/stderr                                                                                                                                                                                           |
+| `CONFORMANCE_KEEP_SERVER=1`                                     | do not stop the `target` process after the plan                                                                                                                                                                           |
+| `CONFORMANCE_VIDEO=off`, `CONFORMANCE_TRACE=on`                 | skip video recording / record a trace for every test                                                                                                                                                                      |
+| `CONFORMANCE_REPORT_DIR`, `CONFORMANCE_SUMMARY_TITLE`           | where/with which title the summary is written (`conformance-report/`)                                                                                                                                                     |
+| `CONFORMANCE_ARTIFACT`                                          | name of the uploaded artifact with the logs (named next to failures in the summary)                                                                                                                                       |
+| `CONFORMANCE_ANNOTATIONS=1`                                     | on a GitHub runner: one `::error` per failed module (`ci` sets it)                                                                                                                                                        |
 
 ## Configuration file
 
@@ -128,8 +129,10 @@ prints the pairs) and has one job per browser (`chromium`, `firefox`, `webkit`, 
 `.github/workflows/conformance.yml` with that browser's projects as its own matrix, so the workflow graph shows a
 column of browsers, each expanding to its projects (`firefox / op-session-management`). Without `browsers` a project runs
 on chromium only; the projects where the implementation under test sees the suite's browser list all four. Adding
-a project there adds the CI jobs. The setup job installs and caches every browser once (one cache per browser,
-keyed on the Playwright version); each job restores only its own (an RP project on firefox or webkit also gets the
+a project there adds the CI jobs; `workers` (default 1) runs that many modules at once (the OP projects use 3; each
+worker starts its own target). Nothing waits for an install: a tiny matrix job prints the project lists, and every
+job restores its own caches (node_modules keyed on the lockfile, one browser cache per browser keyed on the
+Playwright version; after a bump the first job downloads and saves it) (an RP project on firefox or webkit also gets the
 Chromium headless shell, which the bundled RP target drives to log in), and runs `playwright install-deps` only when
 Playwright reports missing system libraries (WebKit on the ubuntu images).
 

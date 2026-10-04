@@ -134,6 +134,7 @@ program
 				CONFORMANCE_VARIANT: p.variant,
 				CONFORMANCE_CONFIG: resolve(root, p.config),
 				CONFORMANCE_BROWSER: opts.browser,
+				CONFORMANCE_WORKERS: String(p.workers ?? 1),
 				// on GitHub Actions: one ::error annotation per unexpectedly failed module
 				CONFORMANCE_ANNOTATIONS: "1",
 				CONFORMANCE_TLS: process.env["CONFORMANCE_TLS"] ?? "1",

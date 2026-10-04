@@ -7,7 +7,8 @@
 		"client_registration": "dynamic_client"
 	},
 	"server": {
-		"discoveryUrl": "${TARGET_URL}/.well-known/openid-configuration"
+		"discoveryUrl": "${TARGET_URL}/.well-known/openid-configuration",
+		"code_reuse_delay": 1
 	},
 	"client": {
 		"client_name": "first-openid-client"

@@ -13,6 +13,12 @@ inputs:
       (none). Each browser is cached on its own, keyed on the Playwright version in pnpm-lock.yaml.
     required: false
     default: chromium
+  workspace:
+    description: >-
+      Install the whole pnpm workspace (the web UI's dependencies too). The default installs the root package only,
+      which is all the conformance tests need.
+    required: false
+    default: "false"
   with-chromium:
     description: >-
       Also install the Chromium headless shell next to a firefox or webkit `browser`: the bundled RP target
@@ -28,9 +34,21 @@ runs:
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
-        cache: pnpm
-    - run: pnpm install --frozen-lockfile
+    # node_modules itself is cached (pnpm's virtual store lives inside it), keyed on the lockfile, the Node version and
+    # whether the workspace is installed, so a hit skips the install altogether
+    - id: node-modules
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          ui/node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ inputs.workspace }}
+    - if: ${{ steps.node-modules.outputs.cache-hit != 'true' }}
       shell: bash
+      env:
+        WORKSPACE: ${{ inputs.workspace }}
+      run: |
+        if [ "$WORKSPACE" = true ]; then pnpm install --frozen-lockfile; else pnpm install --frozen-lockfile --filter '!ui'; fi
 
     - if: ${{ inputs.browser != 'false' }}
       id: playwright

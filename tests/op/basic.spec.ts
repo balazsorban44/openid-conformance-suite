@@ -1038,8 +1038,8 @@ test.describe("oidcc-basic-certification-test-plan", () => {
 			soft(() => ensureHttpStatusCodeIs200(res));
 		});
 
-		// the real 30 second wait, as upstream
-		await waitFor30Seconds();
+		// upstream's 30 second wait; `server.code_reuse_delay` shortens it for an OP that rejects a reused code at once
+		await waitFor30Seconds(op.config);
 		await block("Attempting reuse of authorization code", async () => {
 			const second = await token.callTokenEndpoint(op, tokenRequest);
 			// UPSTREAM: unlike oidcc-codereuse, a 200 response is not accepted with a warning here

@@ -25,6 +25,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           browser: "false"
+          workspace: "true"
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm fmt:check
@@ -32,11 +33,11 @@ jobs:
         run: node scripts/upstream-lock-symbols.ts --check
       - run: pnpm test:unit
 
-  # Installs the dependencies and every browser once, so the pnpm store (setup-node) and each browser's cache
-  # (actions/cache) are saved before the conformance jobs start and every one of them restores them. Also the
-  # matrix: {browser: [projects]} from src/runner/projects.ts (no imports, so it is read without the CLI).
-  setup:
-    name: dependencies, browsers, matrix
+  # The matrix: {browser: [projects]} from src/runner/projects.ts (no imports, so no install is needed). Nothing
+  # waits for an install or a browser download: every job restores its own caches, and after a Playwright bump the
+  # first job on each browser downloads it and saves the cache for the others.
+  matrix:
+    name: matrix
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -44,9 +45,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          browser: all
+          node-version: 24
       - id: matrix
         run: |
           matrix=$(node --input-type=module -e 'const { matrixByBrowser } = await import("./src/runner/projects.ts"); console.log(JSON.stringify(matrixByBrowser()))')
@@ -58,37 +59,36 @@ jobs:
   # firefox, webkit and chrome-mobile. Four explicit jobs, not a browser matrix, so the workflow graph shows a
   # column with one node per browser, each expanding to its projects.
   chromium:
-    needs: setup
+    needs: matrix
     uses: ./.github/workflows/conformance.yml
     with:
       browser: chromium
-      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).chromium) }}
+      projects: ${{ toJSON(fromJSON(needs.matrix.outputs.matrix).chromium) }}
 
   firefox:
-    needs: setup
+    needs: matrix
     uses: ./.github/workflows/conformance.yml
     with:
       browser: firefox
-      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).firefox) }}
+      projects: ${{ toJSON(fromJSON(needs.matrix.outputs.matrix).firefox) }}
 
   webkit:
-    needs: setup
+    needs: matrix
     uses: ./.github/workflows/conformance.yml
     with:
       browser: webkit
-      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).webkit) }}
+      projects: ${{ toJSON(fromJSON(needs.matrix.outputs.matrix).webkit) }}
 
   chrome-mobile:
-    needs: setup
+    needs: matrix
     uses: ./.github/workflows/conformance.yml
     with:
       browser: chrome-mobile
-      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix)['chrome-mobile']) }}
+      projects: ${{ toJSON(fromJSON(needs.matrix.outputs.matrix)['chrome-mobile']) }}
 
   node-latest:
     name: smoke on latest Node
     runs-on: ubuntu-latest
-    needs: setup
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

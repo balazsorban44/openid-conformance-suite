@@ -48,7 +48,7 @@ const BROWSER_USE: Record<BrowserName, Partial<PlaywrightTestOptions & Playwrigh
 export default defineConfig({
 	testDir: "./tests",
 	// modules of one plan run serially (they share the implementation under test); projects can run in parallel
-	fullyParallel: false,
+	fullyParallel: Number(process.env["CONFORMANCE_WORKERS"] ?? 1) > 1,
 	workers: Number(process.env["CONFORMANCE_WORKERS"] ?? 1),
 	retries: 0,
 	timeout: Number(process.env["CONFORMANCE_TEST_TIMEOUT"] ?? 240_000),

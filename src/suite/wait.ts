@@ -24,9 +24,21 @@ export function waitFor2Seconds(): Promise<void> {
 	return waitForSpecifiedSeconds("WaitFor2Seconds", 2);
 }
 
-/** upstream: condition/client/WaitFor30Seconds.java */
-export function waitFor30Seconds(): Promise<void> {
-	return waitForSpecifiedSeconds("WaitFor30Seconds", 30);
+/**
+ * The 30 seconds before an authorization code is used a second time (oidcc-codereuse-30seconds), shortened by
+ * `server.code_reuse_delay` in the configuration (1..30; a suite-only property for implementations under test that
+ * reject a reused code at once, like the bundled one).
+ *
+ * upstream: condition/client/WaitFor30Seconds.java
+ */
+export function waitFor30Seconds(config?: TestConfig): Promise<void> {
+	return waitForSpecifiedSeconds("WaitFor30Seconds", configuredDelay(config, "code_reuse_delay", 30));
+}
+
+/** `server.<key>` of the configuration as a number of seconds, clamped to 1..`max`; `max` when absent */
+function configuredDelay(config: TestConfig | undefined, key: string, max: number): number {
+	const custom = (config?.server as Record<string, unknown> | undefined)?.[key];
+	return typeof custom === "number" ? Math.min(Math.max(1, Math.trunc(custom)), max) : max;
 }
 
 /**
@@ -36,9 +48,5 @@ export function waitFor30Seconds(): Promise<void> {
  * upstream: condition/client/WaitForJWKSRefreshDelay.java
  */
 export function waitForJWKSRefreshDelay(config: TestConfig): Promise<void> {
-	const defaultRefreshDelay = 60;
-	const custom = (config.server as Record<string, unknown> | undefined)?.["jwks_refresh_delay"];
-	const seconds =
-		typeof custom === "number" ? Math.min(Math.max(1, Math.trunc(custom)), defaultRefreshDelay) : defaultRefreshDelay;
-	return waitForSpecifiedSeconds("WaitForJWKSRefreshDelay", seconds);
+	return waitForSpecifiedSeconds("WaitForJWKSRefreshDelay", configuredDelay(config, "jwks_refresh_delay", 60));
 }

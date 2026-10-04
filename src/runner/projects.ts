@@ -318,6 +318,12 @@ export interface ConformanceProject {
 	 * only see the RP's own HTTP client.
 	 */
 	browsers?: readonly BrowserName[];
+	/**
+	 * Playwright workers for the project (default 1). Modules are independent (each test has its own suite server,
+	 * each worker its own target), so the OP projects run several at once; the bundled RP target serves one login
+	 * at a time, so the RP projects stay at one.
+	 */
+	workers?: number;
 }
 
 const DISCOVERY_DYNAMIC = "[server_metadata=discovery][client_registration=dynamic_client]";
@@ -341,6 +347,7 @@ export const projects: ConformanceProject[] = [
 		variant: "[server_metadata=discovery][client_registration=static_client]",
 		config: "configs/oidc-provider/oidcc-basic-static.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-basic-dynamic",
@@ -348,6 +355,7 @@ export const projects: ConformanceProject[] = [
 		variant: DISCOVERY_DYNAMIC,
 		config: "configs/oidc-provider/oidcc-basic-dynamic.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-config",
@@ -362,6 +370,7 @@ export const projects: ConformanceProject[] = [
 		variant: "[response_type=code][client_auth_type=client_secret_basic][response_mode=default]",
 		config: "configs/oidc-provider/oidcc-dynamic.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-rp-initiated-logout",
@@ -369,6 +378,7 @@ export const projects: ConformanceProject[] = [
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-rp-initiated-logout.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-backchannel-logout",
@@ -376,6 +386,7 @@ export const projects: ConformanceProject[] = [
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-backchannel-logout.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-frontchannel-logout",
@@ -383,6 +394,7 @@ export const projects: ConformanceProject[] = [
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-frontchannel-logout.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-session-management",
@@ -390,6 +402,7 @@ export const projects: ConformanceProject[] = [
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-session-management.json",
 		browsers,
+		workers: 3,
 	},
 	{
 		name: "op-3rdparty-init-login",
@@ -397,6 +410,7 @@ export const projects: ConformanceProject[] = [
 		variant: OP_CODE_BASIC,
 		config: "configs/oidc-provider/oidcc-3rdparty-init-login.json",
 		browsers,
+		workers: 3,
 	},
 	// ---- RP plans against the openid-client based RP ----
 	{
@@ -451,6 +465,7 @@ export const projects: ConformanceProject[] = [
 		variant: DISCOVERY_DYNAMIC,
 		config: "configs/suite-vs-suite/oidcc-basic.json",
 		browsers,
+		workers: 3,
 		// the emulated OP is the RP tests' OP with oidcc-client-test's options (tests/suite-target.ts); what it cannot
 		// do is skipped here, what it does differently is in configs/expected-failures/suite-vs-suite.json
 		skipModules: {
