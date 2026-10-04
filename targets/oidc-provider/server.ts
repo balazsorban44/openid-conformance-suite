@@ -500,7 +500,8 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 
 	const server: Server = await new Promise((resolve, reject) => {
 		const s = TLS ? createHttpsServer(TLS, provider.callback()) : createServer(provider.callback());
-		s.once("error", reject).listen(PORT, "localhost", () => resolve(s));
+		// all interfaces (dual-stack): `localhost` resolves to ::1 on some hosts and 127.0.0.1 on others
+		s.once("error", reject).listen(PORT, () => resolve(s));
 	});
 	return {
 		issuer: ISSUER,

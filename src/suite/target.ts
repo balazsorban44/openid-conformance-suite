@@ -36,7 +36,8 @@ export interface RunningTarget {
 /** A port that is free right now (the OS picks it) */
 export async function freePort(): Promise<number> {
 	const server = createServer();
-	await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+	// the dual-stack wildcard (see startServer): free on ::1 and 127.0.0.1 alike
+	await new Promise<void>((r) => server.listen(0, () => r()));
 	const port = (server.address() as AddressInfo).port;
 	await new Promise<void>((r) => server.close(() => r()));
 	return port;

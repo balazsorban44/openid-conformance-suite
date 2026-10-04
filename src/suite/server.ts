@@ -113,9 +113,13 @@ export async function startServer(opts: ServerOptions): Promise<TestServer> {
 				listener,
 			)
 		: createServer(listener);
+	// Without a host Node binds the dual-stack wildcard (`::`, or 0.0.0.0 without IPv6): a browser's `localhost`
+	// reaches the server whether it resolves to ::1 or 127.0.0.1, and a port the OS hands out here is taken on both
+	// stacks, so a target bound to the other loopback address can never share it (that showed up as the callback
+	// page of another worker's OP on CI runners, where localhost is ::1 first).
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", () => resolve());
+		server.listen(opts.port ?? 0, opts.host, () => resolve());
 	});
 	const port = (server.address() as AddressInfo).port;
 	const origin = opts.externalUrl?.replace(/\/$/, "") ?? `${opts.tls ? "https" : "http"}://localhost:${port}`;

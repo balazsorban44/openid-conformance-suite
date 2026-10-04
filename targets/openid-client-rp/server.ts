@@ -1382,7 +1382,8 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
 
 function listen(server: Server, port: number): Promise<Server> {
 	return new Promise((resolve, reject) => {
-		server.once("error", reject).listen(port, "localhost", () => resolve(server));
+		// all interfaces (dual-stack): `localhost` resolves to ::1 on some hosts and 127.0.0.1 on others
+		server.once("error", reject).listen(port, () => resolve(server));
 	});
 }
 
