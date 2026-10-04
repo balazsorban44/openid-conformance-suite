@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 import { emptyAnalysis, type ConditionRef, type ModuleAnalysis } from "./expected.ts";
 import {
 	countOutcomes,
+	displayName,
+	duplicateNames,
 	formatDuration,
 	githubErrorAnnotation,
 	outcomeOf,
@@ -229,4 +231,27 @@ test("durations", () => {
 		"1m05s",
 		"60m00s",
 	]);
+});
+
+test("a module a plan runs for several variants is named with its instance in the console and the summary", () => {
+	const hybrid = (responseType: string, ok: boolean) =>
+		report(
+			"oidcc-server",
+			ok ? "PASSED" : "FAILED",
+			{ ok },
+			{ instance: `response_type=${responseType}`, variant: { ...base, response_type: responseType } },
+		);
+	const codeIdToken = hybrid("code id_token", true);
+	const codeToken = hybrid("code token", false);
+	const alone = report("oidcc-codereuse", "PASSED", { ok: true }, { instance: "response_type=code token" });
+	const duplicates = duplicateNames([codeIdToken, codeToken, alone].map((r) => r.testName));
+	expect(displayName(codeIdToken, duplicates)).toBe("oidcc-server (response_type=code id_token)");
+	expect(displayName(alone, duplicates)).toBe("oidcc-codereuse");
+	expect(renderConsoleLine(codeIdToken, 0, false, displayName(codeIdToken, duplicates))).toBe(
+		"✓ oidcc-server (response_type=code id_token)    0.8s",
+	);
+	const md = renderSummaryMarkdown([codeIdToken, codeToken, alone]);
+	expect(md).toContain("- **`oidcc-server (response_type=code token)`**");
+	expect(md).toContain("`oidcc-server (response_type=code id_token)`, `oidcc-codereuse`");
+	expect(renderConsoleSummary([codeIdToken, codeToken], 1000)).toContain("✗ oidcc-server (response_type=code token)");
 });

@@ -12,7 +12,7 @@ import type { AuthorizationRequest } from "./authorization.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import {
 	objectValidator,
-	SCOPE_STANDARD_CLAIMS,
+	verifyScopesInClaims,
 	VALIDATE_BIRTHDATE,
 	VALIDATE_BOOLEAN,
 	VALIDATE_JSON_OBJECT,
@@ -321,14 +321,61 @@ export function ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSource
 }
 
 /**
- * The checks upstream's AbstractOIDCCUserInfoTest.validateExtractedUserInfoResponse runs for a code flow (the checks
- * for an id_token from the authorization endpoint only apply to the other response types).
+ * The id_tokens of a flow (upstream env "authorization_endpoint_id_token" / "token_endpoint_id_token"): from the
+ * authorization endpoint when the response type includes id_token, from the token endpoint when it includes code.
  */
-export function validateExtractedUserInfoResponse(userinfo: UserInfo): void {
+export interface FlowIdTokens {
+	authorizationEndpointIdToken: ParsedJwt | null;
+	tokenEndpointIdToken: ParsedJwt | null;
+}
+
+/**
+ * The checks on the userinfo response of the userinfo modules: the generic ones and, when the response type includes
+ * id_token, the same sub as in the authorization endpoint's id_token (and, with code too, the token endpoint's).
+ *
+ * upstream: AbstractOIDCCUserInfoTest.validateExtractedUserInfoResponse
+ */
+export function validateExtractedUserInfoResponse(userinfo: UserInfo, idTokens: FlowIdTokens): void {
 	soft(() => validateUserInfoStandardClaims(userinfo, "OIDCC-5.1"));
 	soft(() => ensureUserInfoContainsSub(userinfo, "OIDCC-5.3.2"));
 	soft(() => ensureUserInfoUpdatedAtValid(userinfo, "OIDCC-5.1"));
 	soft(() => ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources(userinfo, "OIDCC-5.6.2"));
+	const { authorizationEndpointIdToken, tokenEndpointIdToken } = idTokens;
+	if (authorizationEndpointIdToken != null) {
+		soft(() =>
+			verifyUserInfoAndIdTokenInAuthorizationEndpointSameSub(userinfo, authorizationEndpointIdToken, "OIDCC-5.3.2"),
+		);
+		if (tokenEndpointIdToken != null) {
+			soft(() => verifyUserInfoAndIdTokenInTokenEndpointSameSub(userinfo, tokenEndpointIdToken, "OIDCC-5.3.2"));
+		}
+	}
+}
+
+/** upstream: condition/client/AbstractVerifyUserInfoAndIdTokenSameSub.java (`idTokenKey`: getIdTokenKey()) */
+function verifyUserInfoAndIdTokenSameSub(
+	c: Condition,
+	userinfo: UserInfo,
+	idToken: ParsedJwt,
+	idTokenKey: string,
+): void {
+	const subUserInfo = userinfo["sub"];
+	const subIdToken = idToken.claims["sub"];
+	if (typeof subUserInfo !== "string" || subUserInfo === "") {
+		c.failure('"sub" not found in UserInfo response ');
+	}
+	if (typeof subIdToken !== "string" || subIdToken === "") {
+		c.failure('"sub" not found in ' + idTokenKey);
+	}
+	if (subUserInfo !== subIdToken) {
+		c.failure('"sub" in user info response doesn\'t match with "sub" in ' + idTokenKey, {
+			sub_user_info: subUserInfo,
+			sub_id_token: subIdToken,
+		});
+	}
+	c.success("userinfo response and id_token sub are the same", {
+		sub_user_info: subUserInfo,
+		sub_id_token: subIdToken,
+	});
 }
 
 /** upstream: condition/client/VerifyUserInfoAndIdTokenInTokenEndpointSameSub.java (AbstractVerifyUserInfoAndIdTokenSameSub) */
@@ -338,24 +385,20 @@ export function verifyUserInfoAndIdTokenInTokenEndpointSameSub(
 	...requirements: string[]
 ): void {
 	const c: Condition = condition("VerifyUserInfoAndIdTokenInTokenEndpointSameSub", ...requirements);
-	const subUserInfo = userinfo["sub"];
-	const subIdToken = tokenEndpointIdToken.claims["sub"];
-	if (typeof subUserInfo !== "string" || subUserInfo === "") {
-		c.failure('"sub" not found in UserInfo response ');
-	}
-	if (typeof subIdToken !== "string" || subIdToken === "") {
-		c.failure('"sub" not found in token_endpoint_id_token');
-	}
-	if (subUserInfo !== subIdToken) {
-		c.failure('"sub" in user info response doesn\'t match with "sub" in token_endpoint_id_token', {
-			sub_user_info: subUserInfo,
-			sub_id_token: subIdToken,
-		});
-	}
-	c.success("userinfo response and id_token sub are the same", {
-		sub_user_info: subUserInfo,
-		sub_id_token: subIdToken,
-	});
+	verifyUserInfoAndIdTokenSameSub(c, userinfo, tokenEndpointIdToken, "token_endpoint_id_token");
+}
+
+/**
+ * upstream: condition/client/VerifyUserInfoAndIdTokenInAuthorizationEndpointSameSub.java
+ * (AbstractVerifyUserInfoAndIdTokenSameSub)
+ */
+export function verifyUserInfoAndIdTokenInAuthorizationEndpointSameSub(
+	userinfo: UserInfo,
+	authorizationEndpointIdToken: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("VerifyUserInfoAndIdTokenInAuthorizationEndpointSameSub", ...requirements);
+	verifyUserInfoAndIdTokenSameSub(c, userinfo, authorizationEndpointIdToken, "authorization_endpoint_id_token");
 }
 
 /**
@@ -369,28 +412,7 @@ export function verifyScopesReturnedInUserInfoClaims(
 	...requirements: string[]
 ): void {
 	const c: Condition = condition("VerifyScopesReturnedInUserInfoClaims", ...requirements);
-	const scope = authorizationRequest.params["scope"];
-	if (typeof scope !== "string" || scope === "") {
-		c.failure("'scope' not found in authorization endpoint request");
-	}
-	const claimsSet = Object.keys(userinfo);
-	const expectedScopeItems: string[] = [];
-	for (const s of scope.split(" ")) {
-		const items = SCOPE_STANDARD_CLAIMS.get(s);
-		// UPSTREAM: an unknown scope makes Java throw a NullPointerException (addAll(null)); here a TypeError
-		expectedScopeItems.push(...(items as string[]));
-	}
-	const missing = [...new Set(expectedScopeItems)].filter((item) => !claimsSet.includes(item));
-	if (missing.length > 0) {
-		c.failure(
-			"'claims' in userinfo doesn't contain all scope items of scope in authorization request(corresponds to scope standard claims)",
-			{ actual_scope_items: claimsSet, expected_scope_items: expectedScopeItems, missing_items: missing },
-		);
-	}
-	c.success(
-		"'claims' in userinfo contains all scope items of scope in authorization request (corresponds to scope standard claims)",
-		{ actual_scope_items: claimsSet, expected_scope_items: expectedScopeItems },
-	);
+	verifyScopesInClaims(c, userinfo, "userinfo", authorizationRequest);
 }
 
 /** upstream: condition/client/EnsureUserInfoContainsName.java */
@@ -420,18 +442,30 @@ export function ensureUserInfoDoesNotContainName(userinfo: UserInfo, ...requirem
 }
 
 /**
- * The checks on the userinfo response of the modules that request particular claims, for a code flow: the generic
- * ones, the same sub as in the token endpoint's id_token, and the scopes' claims being returned (warning).
+ * The checks on the userinfo response of the modules that request particular claims: the generic ones, the same sub
+ * as in the authorization endpoint's id_token (response types with id_token) and in the token endpoint's (response
+ * types with code), and the scopes' claims being returned (warning).
  *
  * upstream: AbstractOIDCCReturnedClaimsServerTest.validateUserInfoResponse
  */
 export function validateReturnedClaimsUserInfoResponse(
 	userinfo: UserInfo,
-	tokenEndpointIdToken: ParsedJwt,
+	idTokens: FlowIdTokens,
 	authorizationRequest: Pick<AuthorizationRequest, "params">,
 ): void {
-	validateExtractedUserInfoResponse(userinfo);
-	soft(() => verifyUserInfoAndIdTokenInTokenEndpointSameSub(userinfo, tokenEndpointIdToken, "OIDCC-5.3.2"));
+	soft(() => validateUserInfoStandardClaims(userinfo, "OIDCC-5.1"));
+	soft(() => ensureUserInfoContainsSub(userinfo, "OIDCC-5.3.2"));
+	soft(() => ensureUserInfoUpdatedAtValid(userinfo, "OIDCC-5.1"));
+	soft(() => ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources(userinfo, "OIDCC-5.6.2"));
+	const { authorizationEndpointIdToken, tokenEndpointIdToken } = idTokens;
+	if (authorizationEndpointIdToken != null) {
+		soft(() =>
+			verifyUserInfoAndIdTokenInAuthorizationEndpointSameSub(userinfo, authorizationEndpointIdToken, "OIDCC-5.3.2"),
+		);
+	}
+	if (tokenEndpointIdToken != null) {
+		soft(() => verifyUserInfoAndIdTokenInTokenEndpointSameSub(userinfo, tokenEndpointIdToken, "OIDCC-5.3.2"));
+	}
 	soft(() => verifyScopesReturnedInUserInfoClaims(userinfo, authorizationRequest, "OIDCC-5.4"), "warning");
 }
 

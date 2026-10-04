@@ -7,6 +7,8 @@ import {
 	callUserInfoEndpoint,
 	callUserInfoEndpointWithBearerTokenInBody,
 	ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources,
+	validateExtractedUserInfoResponse,
+	validateReturnedClaimsUserInfoResponse,
 	verifyScopesReturnedInUserInfoClaims,
 } from "./userinfo.ts";
 
@@ -80,6 +82,56 @@ describe("verifyScopesReturnedInUserInfoClaims", () => {
 			result: "SUCCESS",
 			expected_scope_items: ["sub", "email", "email_verified"],
 		});
+	});
+});
+
+const idToken = (sub: string) => ({ value: "x", header: {}, claims: { sub } });
+
+describe("the userinfo's sub and the flow's id_tokens", () => {
+	const userinfo = { sub: "foo", name: "Jane", email: "a@b", email_verified: true };
+
+	test("the userinfo modules compare with the token endpoint's id_token only when there is an authorization endpoint one", () => {
+		validateExtractedUserInfoResponse(userinfo, {
+			authorizationEndpointIdToken: null,
+			tokenEndpointIdToken: idToken("x"),
+		});
+		expect(t.entries().filter((e) => String(e.src).startsWith("VerifyUserInfoAndIdToken"))).toEqual([]);
+
+		validateExtractedUserInfoResponse(userinfo, {
+			authorizationEndpointIdToken: idToken("foo"),
+			tokenEndpointIdToken: idToken("bar"),
+		});
+		expect(
+			t
+				.entries()
+				.filter((e) => String(e.src).startsWith("VerifyUserInfoAndIdToken"))
+				.map((e) => [e.src, e["result"], e["msg"]]),
+		).toEqual([
+			[
+				"VerifyUserInfoAndIdTokenInAuthorizationEndpointSameSub",
+				"SUCCESS",
+				"userinfo response and id_token sub are the same",
+			],
+			[
+				"VerifyUserInfoAndIdTokenInTokenEndpointSameSub",
+				"FAILURE",
+				'"sub" in user info response doesn\'t match with "sub" in token_endpoint_id_token',
+			],
+		]);
+	});
+
+	test("the returned claims modules compare with every id_token of the flow", () => {
+		validateReturnedClaimsUserInfoResponse(
+			userinfo,
+			{ authorizationEndpointIdToken: idToken("bar"), tokenEndpointIdToken: null },
+			{ params: { scope: "openid email" } },
+		);
+		expect(t.entries().find((e) => e.src === "VerifyUserInfoAndIdTokenInAuthorizationEndpointSameSub")).toMatchObject({
+			result: "FAILURE",
+			msg: '"sub" in user info response doesn\'t match with "sub" in authorization_endpoint_id_token',
+			requirements: ["OIDCC-5.3.2"],
+		});
+		expect(t.entries().at(-1)).toMatchObject({ src: "VerifyScopesReturnedInUserInfoClaims", result: "SUCCESS" });
 	});
 });
 

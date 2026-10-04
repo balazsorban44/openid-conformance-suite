@@ -42,6 +42,11 @@ export interface ModuleReport {
 	analysis: ModuleAnalysis;
 	/** Playwright test title, for cross-referencing the HTML report */
 	title: string;
+	/**
+	 * The nested describe of the plan the test is in: the variant one of the plan's module lists fixes (upstream
+	 * ModuleListEntry, e.g. "response_type=code token"), which tells apart a module the plan runs more than once
+	 */
+	instance?: string;
 	/** The browser the suite drove (CONFORMANCE_BROWSER: chromium, firefox, webkit, chrome-mobile) */
 	browser?: string;
 	/** Paths of the attached log files (`log.html`, `log.json`) relative to the working directory, when known */
@@ -157,6 +162,17 @@ function truncate(s: string, n: number): string {
 	return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+/** The module names that occur more than once (a plan that runs a module for several variants) */
+export function duplicateNames(names: string[]): Set<string> {
+	const seen = new Set<string>();
+	return new Set(names.filter((n) => seen.has(n) || !seen.add(n)));
+}
+
+/** The module name, followed by its instance (the variant of its module list) when the run has it more than once */
+export function displayName(r: Pick<ModuleReport, "testName" | "instance">, duplicates: ReadonlySet<string>): string {
+	return r.instance && duplicates.has(r.testName) ? `${r.testName} (${r.instance})` : r.testName;
+}
+
 function cell(s: string): string {
 	return s.replace(/\|/g, "\\|");
 }
@@ -208,6 +224,8 @@ export function renderSummaryMarkdown(
 	opts: { title?: string; reportUrl?: string; artifact?: string; durationMs?: number } = {},
 ): string {
 	const failed = reports.filter((r) => r.outcome === "failed");
+	const duplicates = duplicateNames(reports.map((r) => r.testName));
+	const label = (r: ModuleReport) => displayName(r, duplicates);
 	const duration = opts.durationMs ?? reports.reduce((sum, r) => sum + r.durationMs, 0);
 	const counts = countOutcomes(reports, " · ").replace(/^(\d+ failed)/, "**$1**");
 	const title = opts.title ?? "OpenID conformance results";
@@ -218,7 +236,7 @@ export function renderSummaryMarkdown(
 
 	for (const r of failed) {
 		const reasons = failureReasons(r, "`");
-		lines.push(`- **\`${r.testName}\`**${reasons.length === 1 ? ` — ${reasons[0]}` : ""}`);
+		lines.push(`- **\`${label(r)}\`**${reasons.length === 1 ? ` — ${reasons[0]}` : ""}`);
 		if (reasons.length > 1) {
 			lines.push(...reasons.slice(0, 5).map((t) => `  - ${t}`));
 			if (reasons.length > 5) {
@@ -255,14 +273,14 @@ export function renderSummaryMarkdown(
 				);
 				for (const r of notedHere) {
 					lines.push(
-						`| \`${r.testName}\` | ${ICON[r.outcome]} ${r.outcome} |${variantColumn ? ` ${cell(deviations(r))} |` : ""} ${cell(noteOf(r, "`"))} |`,
+						`| \`${label(r)}\` | ${ICON[r.outcome]} ${r.outcome} |${variantColumn ? ` ${cell(deviations(r))} |` : ""} ${cell(noteOf(r, "`"))} |`,
 					);
 				}
 				lines.push("");
 			}
 			const passed = rs.filter((r) => r.outcome === "passed");
 			if (passed.length > 0) {
-				lines.push(`${ICON.passed} ${passed.map((r) => `\`${r.testName}\``).join(", ")}`, "");
+				lines.push(`${ICON.passed} ${passed.map((r) => `\`${label(r)}\``).join(", ")}`, "");
 			}
 		}
 		lines.push("</details>", "");
@@ -279,11 +297,14 @@ function artifactNote(opts: { reportUrl?: string; artifact?: string }): string {
 		: ` in the artifact \`${opts.artifact}\``;
 }
 
-/** The console line of a module: `<glyph> <module>  <duration>  <what is noteworthy>` (name padded to `width`) */
-export function renderConsoleLine(r: ModuleReport, width: number, colors = false): string {
+/**
+ * The console line of a module: `<glyph> <module>  <duration>  <what is noteworthy>` (`name`, the module name or its
+ * {@link displayName}, padded to `width`)
+ */
+export function renderConsoleLine(r: ModuleReport, width: number, colors = false, name = r.testName): string {
 	const { glyph, color } = GLYPH[r.outcome];
 	const note = consoleNote(r);
-	return `${colors ? styleText(color, glyph) : glyph} ${r.testName.padEnd(width)}  ${formatDuration(r.durationMs).padStart(6)}${note ? `  ${note}` : ""}`;
+	return `${colors ? styleText(color, glyph) : glyph} ${name.padEnd(width)}  ${formatDuration(r.durationMs).padStart(6)}${note ? `  ${note}` : ""}`;
 }
 
 function consoleNote(r: ModuleReport): string {
@@ -306,12 +327,13 @@ function consoleNote(r: ModuleReport): string {
  */
 export function renderConsoleSummary(reports: ModuleReport[], durationMs: number): string {
 	const failed = reports.filter((r) => r.outcome === "failed");
+	const duplicates = duplicateNames(reports.map((r) => r.testName));
 	const lines = [
 		"",
 		`${failed.length > 0 ? "FAILED" : "OK"}: ${countOutcomes(reports) || "no modules ran"} (${formatDuration(durationMs)})`,
 	];
 	for (const r of failed) {
-		lines.push("", `✗ ${r.testName}`, ...failureReasons(r).map((t) => `    ${t}`));
+		lines.push("", `✗ ${displayName(r, duplicates)}`, ...failureReasons(r).map((t) => `    ${t}`));
 		const log = r.attachments?.["log.html"];
 		if (log) {
 			lines.push(`    log: ${log}`);
@@ -356,6 +378,8 @@ export default class ConformanceReporter implements Reporter {
 	private title = "OpenID conformance";
 	private browser = "chromium";
 	private width = 0;
+	/** The module names the run has more than once (shown with their instance) */
+	private duplicates: ReadonlySet<string> = new Set();
 	private colors = false;
 	private annotate = false;
 	private workspace = process.cwd();
@@ -373,7 +397,11 @@ export default class ConformanceReporter implements Reporter {
 		this.annotate = env["GITHUB_ACTIONS"] === "true" && env["CONFORMANCE_ANNOTATIONS"] === "1";
 		this.workspace = env["GITHUB_WORKSPACE"] ?? process.cwd();
 		const tests = suite.allTests();
-		this.width = Math.max(0, ...tests.map((t) => moduleName(t).length));
+		this.duplicates = duplicateNames(tests.map((t) => moduleName(t)));
+		this.width = Math.max(
+			0,
+			...tests.map((t) => displayName({ testName: moduleName(t), instance: instanceOf(t) }, this.duplicates).length),
+		);
 		process.stdout.write(`${this.title}: ${tests.length} module${tests.length === 1 ? "" : "s"}\n`);
 	}
 
@@ -383,7 +411,7 @@ export default class ConformanceReporter implements Reporter {
 			return;
 		}
 		this.reports.push(r);
-		process.stdout.write(renderConsoleLine(r, this.width, this.colors) + "\n");
+		process.stdout.write(renderConsoleLine(r, this.width, this.colors, displayName(r, this.duplicates)) + "\n");
 		if (r.outcome === "failed" && this.annotate) {
 			const file = relative(this.workspace, test.location.file).split(sep).join("/");
 			// a file outside the workspace (the suite used as an action) cannot be annotated
@@ -444,6 +472,10 @@ export default class ConformanceReporter implements Reporter {
 			return undefined;
 		}
 		r.browser = this.browser;
+		const instance = instanceOf(test);
+		if (instance) {
+			r.instance = instance;
+		}
 		const skip = test.annotations.find((a) => a.type === "skip" && a.description);
 		if (r.outcome === "skipped" && skip?.description) {
 			r.skipReason = skip.description;
@@ -513,4 +545,15 @@ export default class ConformanceReporter implements Reporter {
 /** Test titles are "<module>: <what the OP/RP must do>" */
 function moduleName(test: TestCase): string {
 	return test.title.split(":")[0] ?? test.title;
+}
+
+/** The titles of the describes between the plan's describe and the test (["", project, file, plan, ..., title]) */
+function instanceOf(test: TestCase): string | undefined {
+	return (
+		test
+			.titlePath()
+			.slice(4, -1)
+			.filter((t) => t !== "")
+			.join(" › ") || undefined
+	);
 }

@@ -73,10 +73,13 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
 tests/fixtures.ts     the `test` with the `op`, `registrationOp`, `client`, `client2`, `configureClient`, `rp`, `variant`,
                       `plan` fixtures, and `skipTest(reason)`
 tests/suite-target.ts suite-vs-suite: the emulated OP the `suiteTarget` fixture starts for an OP test (`suite_target`)
-tests/op/*.spec.ts    one file per OP plan (basic, config, dynamic, rp-initiated-logout, backchannel-logout,
-                      frontchannel-logout, session-management, 3rdparty-init-login); tests/op/shared.ts: the
-                      bodies of modules that are in several plans (oidcc-server, oidcc-refresh-token, ...) and the
-                      code flow pieces of AbstractOIDCCServerTest (completeCodeFlow, userinfoEndpointTests)
+tests/op/*.spec.ts    one file per OP plan (basic, implicit, hybrid, formpost-basic, formpost-implicit,
+                      formpost-hybrid, config, dynamic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
+                      session-management, 3rdparty-init-login); tests/op/shared.ts: the bodies of modules that are in
+                      several plans (oidcc-server, the scope, userinfo and prompt modules, oidcc-refresh-token, ...)
+                      and the pieces of AbstractOIDCCServerTest's flow for every response type
+                      (completeAuthorizationFlow = handleAuthorizationEndpointResponse + exchangeAuthorizationCode +
+                      userinfoEndpointTests)
 tests/rp/*.spec.ts    one file per RP plan (basic, dynamic, rp-initiated-logout, backchannel-logout,
                       frontchannel-logout, session-management, 3rdparty-init-login); tests/rp/shared.ts: the bodies
                       of modules that are in several plans (each spec registers them with its title and upstream
@@ -109,7 +112,7 @@ Functions, not classes with static methods; a class only where something has sta
    explicit (`authorize()` waits 120 s for the redirect back).
 6. **One behaviour per test, named after it.**
 
-## Anatomy of an OP test (from tests/op/basic.spec.ts)
+## Anatomy of an OP test (the code flow written out; tests/op/shared.ts has it for every response type)
 
 ```ts
 import * as authz from "../../src/op/authorization.ts";
@@ -168,8 +171,24 @@ test.describe("oidcc-basic-certification-test-plan", () => {
   directly above the `test(` (scripts/upstream-lock-symbols.ts reads it).
 - **Plan**: one `test.describe("<plan name>")` with `test.use({ plan: { name, variant } })`: the variant values the
   plan fixes. The user's selection (CONFORMANCE_VARIANT or the CI project) fills in the rest (`variant` fixture).
-- **Not applicable** (upstream `@VariantNotApplicable`): a nested `test.describe` with
-  `test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients")`.
+- **Not applicable** (upstream `@VariantNotApplicable`): the module is left out of the spec at collection time, as
+  upstream's plan does not list it for that variant:
+  `if (!variantNotApplicable(plan, { client_registration: ["static_client"] })) { test(...) }` (`selectedVariant(plan)`
+  is the variant the spec runs with). A module list that fixes a response type upstream's annotation excludes simply
+  does not register the module.
+- **Response types** (upstream `responseType.includesCode()` / `includesIdToken()` / `includesToken()`):
+  `completeAuthorizationFlow(op, client, request, response, opts)` (tests/op/shared.ts) runs AbstractOIDCCServerTest's
+  flow for the variant's response_type: the authorization response from the query (code), the fragment (implicit,
+  hybrid) or the form post (form_post), the code / access token / id_token it returns (the access token used at
+  userinfo right away, in a "Userinfo endpoint tests" block that ends the "Verify authorization endpoint response"
+  one as upstream's does), the token endpoint for the response types with code (with
+  VerifyIdTokenSubConsistentHybridFlow when the authorization endpoint returned an id_token), and the userinfo request
+  with the token endpoint's access token. It returns a `Flow` (`idToken`/`accessToken`: upstream env "id_token" /
+  "access_token", the last ones received; `authorizationEndpointIdToken`, `tokenEndpointIdToken`, `tokens`,
+  `tokenRequest`). A module's overrides are its options (`performIdTokenValidation`,
+  `performAuthorizationEndpointIdTokenValidation`, `performAuthorizationCodeValidation`, `tokenRequest`,
+  `additionalTokenEndpointResponseValidation`, `afterCallbackLocation`); a module body branches on the response type
+  only where upstream's does (`responseTypeIncludes(op, "code")`).
 - **Skipped at run time** (upstream `fireTestSkipped(msg)`): `skipTest(msg)` from tests/fixtures.ts logs the SKIPPED
   entry and ends the test (Playwright's skip); the expected skips of the configuration list such modules
   (`rp.skipTest(msg)` in RP tests).
@@ -292,7 +311,11 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `skipTest(reason)`. Uses the same per-test setup and after-test analysis as `op` (the `conformance` fixture);
   a client driver call still running when the test ends is aborted.
 - `variant: OpVariant`, `plan: { name, variant }` (option). A plan whose module lists fix different variants
-  (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list.
+  (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list, titled after
+  the variant it fixes (`"response_type=code token"`). A module the plan lists for several variants (oidcc-server
+  for each hybrid response type) is registered in each describe; its module name is the same, the variant (and
+  `module-report.json`'s `instance`, the describe's title) tells them apart: the console and the summary show such a
+  module as `oidcc-server (response_type=code token)`, and expected failures / skips match on the variant.
 - Worker scope: the config is loaded and `target` started once per worker, on a free port. Per test: a fresh log,
   a suite server on a free port (https with CONFORMANCE_TLS=1), the browser automation on Playwright's `context`.
 - After the test the fixture attaches `log.json`, `log.html`, `module-report.json`, `target-output.txt`,
@@ -408,8 +431,9 @@ export function validateIdTokenNonce(
 
 An upstream test module becomes a `test()` the same way: read the Java module and its base classes (what
 `configure` / `start` / `performAuthorizationFlow` / `onPostAuthorizationFlowComplete` call, in which blocks), write
-the flow in the test body with the helpers, keep the block names; `@VariantNotApplicable` is a nested describe with
-`test.skip`, `fireTestSkipped` is `skipTest`, `@PublishTestModule(testName)` is the title before the `:`.
+the flow in the test body with the helpers, keep the block names; `@VariantNotApplicable` leaves the module out of
+the spec (`variantNotApplicable(plan, {...})`), `fireTestSkipped` is `skipTest`, `@PublishTestModule(testName)` is the
+title before the `:`.
 
 ## Porting rules
 
@@ -521,7 +545,9 @@ code site):
   `{ params, query, fragment, form, method, headers }`. The config's automation must end with the "Verify
   Complete" task waiting for `#submission_complete`, as upstream's configs do. `authorizeExpectingErrorPageOrRedirect`
   is the variant for requests the OP may answer with an error page (a REVIEW placeholder filled by
-  `update-image-placeholder`).
+  `update-image-placeholder`). With response_mode=form_post the OP's page posts the response with JavaScript; the
+  form post plans' configs have an optional task that waits for the redirect_uri before "Verify Complete" (a fast
+  browser is there already, Firefox may still be on the OP's page).
 - `op.browser.visit(url, { method: "POST" })` drives any other front-channel URL (logout, 3rd-party login). To
   capture what the browser's trip causes, register the waits first and await them together:
   `const [redirect] = await Promise.all([op.server.waitFor("post_logout_redirect", page), op.browser.visit(url)])`
