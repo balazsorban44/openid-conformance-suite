@@ -5,7 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { condition, ConditionFailed, skipped, type Condition } from "../suite/conditions.ts";
-import type { Jwks } from "../suite/jose.ts";
+import { getSigningKey, signJwt, type Jwks } from "../suite/jose.ts";
 import {
 	InvalidAlgorithmException,
 	getDigestAlgorithmForSigAlg,
@@ -15,9 +15,10 @@ import {
 	JWS_FAMILY_RSA,
 } from "../suite/jose-algorithms.ts";
 import { parseJWKSet, parseJWK, selectAsymmetricJWSKey, toPublicJWK, type JWK } from "../suite/jose-jwk.ts";
-import { parseJWT, parseClaimsSet } from "../suite/jose-jwt.ts";
+import { jwtClaimsSetAsJsonObject, parseJWT, parseClaimsSet, parseSignedJWT } from "../suite/jose-jwt.ts";
+import { javaHashMapOf } from "../suite/json.ts";
 import { isJOSEException, ParseException } from "../suite/errors.ts";
-import { rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
+import { createJWSSigner, rsaSigner, ecSigner, macSigner, ed25519Signer } from "../suite/jose-jws.ts";
 import type { EmulatedOp, RefreshOptions } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 import type { UserInfo } from "./userinfo.ts";
@@ -591,4 +592,270 @@ export async function createIdTokenForRefreshRequest(op: EmulatedOp, refresh: Re
 		throw new Error("TODO(port): encrypted id_tokens (EncryptIdToken)");
 	}
 	return idToken;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// the FAPI 2 authorization server's id_tokens (upstream AbstractFAPI2SPFinalClientTest.issueIdToken)
+
+/**
+ * The signing algorithm of the server's single signing key (its `alg`).
+ *
+ * upstream: condition/as/ExtractServerSigningAlg.java
+ */
+export function extractServerSigningAlg(serverJwks: Jwks): string {
+	const c: Condition = condition("ExtractServerSigningAlg");
+	let keys: JWK[];
+	try {
+		keys = parseJWKSet(JSON.stringify(serverJwks)).keys;
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom(e.message, e);
+		}
+		throw e;
+	}
+	if (keys.length !== 1) {
+		c.failure("Expected only one JWK in the set. Please ensure the JWKS contains only the signing key to be used.", {
+			found: keys.length,
+		});
+	}
+	const jwk = keys[0];
+	const alg = jwk["alg"];
+	if (alg == null) {
+		c.failure("No algorithm specified for key", { jwk: JSON.stringify(jwk) });
+	}
+	c.success("Successfully extracted algorithm", { signing_algorithm: String(alg) });
+	return String(alg);
+}
+
+/**
+ * Signs the id_token claims with the server's single signing key.
+ *
+ * upstream: condition/as/SignIdToken.java (AbstractSignJWT.signJWT)
+ */
+export async function signIdToken(claims: IdTokenClaims, serverJwks: Jwks): Promise<string> {
+	const c: Condition = condition("SignIdToken");
+	const { jws, verifiable } = await signJwt(c, claims, serverJwks);
+	c.success("Signed the ID token", { id_token: verifiable });
+	return jws;
+}
+
+/**
+ * Signs the claims as they are (the payload is the claims JSON, not Nimbus' claims set: a single-valued `aud` array
+ * stays an array).
+ *
+ * upstream: condition/as/SignIdTokenBypassingNimbusChecks.java
+ */
+export async function signIdTokenBypassingNimbusChecks(claims: IdTokenClaims, serverJwks: Jwks): Promise<string> {
+	const c: Condition = condition("SignIdTokenBypassingNimbusChecks");
+	try {
+		const signingJwk = getSigningKey(c, "signing", serverJwks);
+		if (signingJwk["alg"] == null) {
+			c.failure("No 'alg' field specified in key; please add 'alg' field in the configuration", { jwk: signingJwk });
+		}
+		const alg = String(signingJwk["alg"]);
+		const signer = createJWSSigner(signingJwk, alg);
+		const header: Record<string, unknown> = { alg };
+		if (signingJwk["kid"] != null) {
+			header["kid"] = signingJwk["kid"];
+		}
+		const jws = await signer.sign(header as never, JSON.stringify(claims));
+		const publicJwk = toPublicJWK(signingJwk);
+		c.success("Signed the ID token", {
+			id_token: { verifiable_jws: jws, public_jwk: publicJwk != null ? JSON.stringify(publicJwk) : null },
+		});
+		return jws;
+	} catch (e) {
+		if (e instanceof ConditionFailed) {
+			throw e;
+		}
+		if (e instanceof ParseException) {
+			c.failureFrom(e.message, e);
+		}
+		if (isJOSEException(e)) {
+			c.failureFrom(e.message, e);
+		}
+		throw e;
+	}
+}
+
+/**
+ * An unsigned JWT (alg none) of the claims: what Nimbus' PlainJWT serializes.
+ *
+ * upstream: condition/common/AbstractSignClaimsWithNullAlgorithm.java (signWithNullAlgorithm)
+ */
+export function signClaimsWithNullAlgorithm(
+	c: Condition,
+	claims: Record<string, unknown> | null,
+	jwtTargetKey: string,
+	messages: { claimsNotFound: string; success: string },
+): string {
+	if (claims == null) {
+		c.failure(messages.claimsNotFound);
+	}
+	try {
+		const claimSet = parseClaimsSet(claims as never);
+		const header = { alg: "none" };
+		const jwt = ALG_NONE_HEADER + "." + Buffer.from(JSON.stringify(claimSet), "utf8").toString("base64url") + ".";
+		c.success(messages.success, { header, claims: claimSet, [jwtTargetKey + "_serialized"]: jwt });
+		return jwt;
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom(e.message, e);
+		}
+		throw e;
+	}
+}
+
+/** upstream: condition/as/SignIdTokenWithNullAlgorithm.java */
+export function signIdTokenWithNullAlgorithm(claims: IdTokenClaims, ...requirements: string[]): string {
+	return signClaimsWithNullAlgorithm(condition("SignIdTokenWithNullAlgorithm", ...requirements), claims, "id_token", {
+		claimsNotFound: "ID Token claims not found",
+		success: "Signed the id_token with null algorithm",
+	});
+}
+
+/**
+ * Signs the id_token's claims again with the alternate RSA key, as RS256 (which a FAPI 2 client must not accept).
+ *
+ * upstream: condition/as/ForceIdTokenToBeSignedWithAltRS256.java
+ */
+export async function forceIdTokenToBeSignedWithAltRS256(
+	idToken: string,
+	altJwks: Jwks,
+	...requirements: string[]
+): Promise<string> {
+	const c: Condition = condition("ForceIdTokenToBeSignedWithAltRS256", ...requirements);
+	try {
+		const parsed = parseSignedJWT(idToken);
+		// Rebuild new token
+		const jwk = parseJWKSet(JSON.stringify(altJwks)).keys[0];
+		// Rebuild new header with alternated algorithm
+		if (jwk["kty"] !== "RSA") {
+			c.failure("Invalid key type for RS256 signature.");
+		}
+		const header = javaHashMapOf([
+			["alg", "RS256"],
+			["typ", "JWT"],
+			["kid", (jwk["kid"] as string | undefined) ?? null],
+		]);
+		const claims = parseClaimsSet(jwtClaimsSetAsJsonObject(parsed));
+		const jws = await rsaSigner(jwk).sign(header.toJsonObject() as never, JSON.stringify(claims));
+		c.success("Signed the ID token with alg of RS256", {
+			id_token_header: header.toJsonObject(),
+			id_token_claims: claims,
+			"id_token serialized": jws,
+		});
+		return jws;
+	} catch (e) {
+		if (e instanceof ConditionFailed) {
+			throw e;
+		}
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse JWT", e, { id_token: idToken });
+		}
+		if (isJOSEException(e)) {
+			c.failureFrom(e.message, e);
+		}
+		throw e;
+	}
+}
+
+/** upstream: condition/as/AddUntrustedSecondAudValueToIdToken.java */
+export function addUntrustedSecondAudValueToIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	const aud = String(claims["aud"]);
+	const audArray = [aud, aud + "1"];
+	claims["aud"] = audArray;
+	condition("AddUntrustedSecondAudValueToIdToken", ...requirements).success(
+		"Added a second, invalid aud value in ID token claims",
+		{ id_token_claims: claims, aud: audArray },
+	);
+}
+
+/** upstream: condition/as/AddAudValueAsArrayToIdToken.java */
+export function addAudValueAsArrayToIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	const audArray = [String(claims["aud"])];
+	claims["aud"] = audArray;
+	condition("AddAudValueAsArrayToIdToken", ...requirements).success(
+		"Added the aud value as an array to ID token claims",
+		{ id_token_claims: claims, aud: audArray },
+	);
+}
+
+/** upstream: condition/as/AddInvalidExpiredExpValueToIdToken.java */
+export function addInvalidExpiredExpValueToIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	const exp = Math.floor(Date.now() / 1000) - 60 * 6;
+	claims["exp"] = exp;
+	condition("AddInvalidExpiredExpValueToIdToken", ...requirements).success(
+		"Added expired exp value to ID token claims",
+		{ id_token_claims: claims, exp: new Date(exp * 1000).toISOString() },
+	);
+}
+
+/** upstream: condition/as/RemoveExpFromIdToken.java */
+export function removeExpFromIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	delete claims["exp"];
+	condition("RemoveExpFromIdToken", ...requirements).success("Removed exp value from ID token claims", {
+		id_token_claims: claims,
+	});
+}
+
+/** upstream: condition/as/RemoveAudFromIdToken.java */
+export function removeAudFromIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	delete claims["aud"];
+	condition("RemoveAudFromIdToken", ...requirements).success("Removed aud value from ID token claims", {
+		id_token_claims: claims,
+	});
+}
+
+/** upstream: condition/as/RemoveIssFromIdToken.java */
+export function removeIssFromIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	delete claims["iss"];
+	condition("RemoveIssFromIdToken", ...requirements).success("Removed iss value from ID token claims", {
+		id_token_claims: claims,
+	});
+}
+
+/** upstream: condition/as/RemoveNonceFromIdToken.java */
+export function removeNonceFromIdToken(claims: IdTokenClaims, ...requirements: string[]): void {
+	delete claims["nonce"];
+	condition("RemoveNonceFromIdToken", ...requirements).success("Removed nonce value from ID token claims", {
+		id_token_claims: claims,
+	});
+}
+
+/**
+ * The acr the request object asked for (`requestedAcrValues`: the JSON array FAPIValidateRequestObjectIdTokenACRClaims
+ * stored), one of the Open Banking UK values.
+ *
+ * upstream: condition/as/AddACRClaimToIdTokenClaims.java
+ */
+export function addACRClaimToIdTokenClaims(
+	claims: IdTokenClaims,
+	requestedAcrValues: string,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddACRClaimToIdTokenClaims", ...requirements);
+	const acrValues: unknown = JSON.parse(requestedAcrValues);
+	if (!Array.isArray(acrValues)) {
+		// UPSTREAM: the cast to JsonArray throws a ClassCastException for anything else
+		throw new TypeError("requested_id_token_acr_values is not a JSON array");
+	}
+	const requestedACRs = acrValues.map(String);
+	const acceptableAcrValues = ["urn:openbanking:psd2:sca", "urn:openbanking:psd2:ca"];
+	let acrValue: string | null = null;
+	for (const singleACRValue of requestedACRs) {
+		if (singleACRValue.includes(acceptableAcrValues[0])) {
+			acrValue = singleACRValue;
+			break;
+		} else if (singleACRValue.includes(acceptableAcrValues[1])) {
+			acrValue = singleACRValue;
+		} else {
+			c.failure("Unsupported acr value in id_token_claims", {
+				supported_acr_values: acceptableAcrValues,
+				received_value: requestedACRs,
+			});
+		}
+	}
+	claims["acr"] = acrValue;
+	c.success("Added acr value to id_token_claims", { claims, acr_value: acrValue });
 }

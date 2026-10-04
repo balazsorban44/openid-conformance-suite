@@ -385,6 +385,59 @@ const HYBRID_MODULES = [
 	"oidcc-ensure-request-with-valid-pkce-succeeds",
 ];
 
+/**
+ * The modules of upstream FAPI2MessageSigningFinalClientTestPlan.testModules, in its order; the security profile
+ * client plan is this list without the eight JARM modules
+ */
+const FAPI2_CLIENT_MESSAGE_SIGNING_MODULES = [
+	"fapi2-security-profile-final-client-test-happy-path",
+	"fapi2-security-profile-final-client-test-discovery-issuer-mismatch",
+	"fapi2-security-profile-final-client-test-invalid-iss",
+	"fapi2-security-profile-final-client-test-invalid-aud",
+	"fapi2-security-profile-final-client-test-invalid-secondary-aud",
+	"fapi2-security-profile-final-client-test-invalid-null-alg",
+	"fapi2-security-profile-final-client-test-invalid-alternate-alg",
+	"fapi2-security-profile-final-client-test-invalid-expired-exp",
+	"fapi2-security-profile-final-client-test-invalid-missing-exp",
+	"fapi2-security-profile-final-client-test-invalid-missing-aud",
+	"fapi2-security-profile-final-client-test-invalid-missing-iss",
+	"fapi2-security-profile-final-client-test-valid-aud-as-array",
+	"fapi2-security-profile-final-client-test-invalid-nonce",
+	"fapi2-security-profile-final-client-test-invalid-missing-nonce",
+	"fapi2-security-profile-final-client-test-invalid-authorization-response-iss",
+	"fapi2-security-profile-final-client-test-remove-authorization-response-iss",
+	"fapi2-security-profile-final-client-test-ensure-authorization-response-with-invalid-state-fails",
+	"fapi2-security-profile-final-client-test-ensure-authorization-response-with-invalid-missing-state-fails",
+	"fapi2-security-profile-final-client-test-token-endpoint-response-without-expires_in",
+	"fapi2-security-profile-final-client-test-token-type-case-insensitivity",
+	"fapi2-security-profile-final-client-test-rs-dpop-auth-scheme-case-insensitivity",
+	// Happy path for DPoP sender constrained without DPoP nonce
+	"fapi2-security-profile-final-client-test-happy-path-no-dpop-nonce",
+	// Happy path where the server does not publish mtls_endpoint_aliases
+	"fapi2-security-profile-final-client-test-happy-path-no-mtls-endpoint-aliases",
+	// JARM tests
+	"fapi2-security-profile-final-client-test-ensure-jarm-without-iss-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-with-invalid-iss-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-without-aud-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-with-invalid-aud-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-without-exp-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-with-expired-exp-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-with-invalid-sig-fails",
+	"fapi2-security-profile-final-client-test-ensure-jarm-signature-is-not-none",
+	// Brazil specific
+	"fapi2-security-profile-final-client-refresh-token-test",
+	// Grant Management tests
+	"fapi2-security-profile-final-client-test-grant-management-happy-path",
+	"fapi2-security-profile-final-client-test-grant-management-query-and-revoke",
+	"fapi2-security-profile-final-client-test-grant-management-invalid-grant-id-fails",
+];
+
+/** The JARM modules the security profile client plan leaves out (FAPI2SPFinalClientTestPlan.testModulesWithVariants) */
+const FAPI2_CLIENT_JARM_MODULES = FAPI2_CLIENT_MESSAGE_SIGNING_MODULES.filter((m) => m.includes("-ensure-jarm-"));
+
+/** upstream FAPIClientType (the FAPI 2 client plans) */
+const FAPI2_CLIENT_TYPE = ["oidc", "plain_oauth"];
+
 export const plans: Record<string, Plan> = {
 	"oidcc-basic-certification-test-plan": {
 		title: "OpenID Connect Core: Basic Certification Profile Authorization server test",
@@ -692,6 +745,34 @@ export const plans: Record<string, Plan> = {
 			request_type: REQUEST_TYPE,
 		},
 	},
+	"fapi2-security-profile-final-client-test-plan": {
+		title: "FAPI2-Security-Profile-Final: Relying Party (client) test",
+		spec: "tests/rp/fapi2-security-profile.spec.ts",
+		modules: FAPI2_CLIENT_MESSAGE_SIGNING_MODULES.filter((m) => !FAPI2_CLIENT_JARM_MODULES.includes(m)),
+		variants: {
+			client_auth_type: FAPI2_CLIENT_AUTH_TYPE,
+			sender_constrain: FAPI2_SENDER_CONSTRAIN,
+			fapi_profile: FAPI2_PROFILE,
+			fapi_client_type: FAPI2_CLIENT_TYPE,
+			authorization_request_type: FAPI2_AUTHORIZATION_REQUEST_TYPE,
+			grant_management: FAPI2_GRANT_MANAGEMENT,
+		},
+	},
+	"fapi2-message-signing-final-client-test-plan": {
+		title: "FAPI2-Message-Signing-Final: Relying Party (client) test",
+		spec: "tests/rp/fapi2-message-signing.spec.ts",
+		modules: FAPI2_CLIENT_MESSAGE_SIGNING_MODULES,
+		variants: {
+			client_auth_type: FAPI2_CLIENT_AUTH_TYPE,
+			sender_constrain: FAPI2_SENDER_CONSTRAIN,
+			fapi_profile: FAPI2_PROFILE,
+			fapi_client_type: FAPI2_CLIENT_TYPE,
+			fapi_request_method: FAPI2_REQUEST_METHOD,
+			fapi_response_mode: FAPI2_RESPONSE_MODE,
+			authorization_request_type: FAPI2_AUTHORIZATION_REQUEST_TYPE,
+			grant_management: FAPI2_GRANT_MANAGEMENT,
+		},
+	},
 };
 
 export interface ConformanceProject {
@@ -730,6 +811,10 @@ const OP_CODE_BASIC =
 /** the variant the RP dynamic / logout / session management / 3rd-party-initiated login plans run with */
 const RP_CODE_BASIC =
 	"[client_auth_type=client_secret_basic][response_type=code][response_mode=default][request_type=plain_http_request][client_registration=dynamic_client]";
+
+/** the variant the FAPI 2 RP plans run with: the ported one, with an OpenID Connect client */
+const RP_FAPI2_PRIVATE_KEY_DPOP =
+	"[client_auth_type=private_key_jwt][sender_constrain=dpop][fapi_profile=plain_fapi][fapi_client_type=oidc][authorization_request_type=simple][grant_management=disabled]";
 
 export const projects: ConformanceProject[] = [
 	// ---- OP plans against panva oidc-provider ----
@@ -967,6 +1052,33 @@ export const projects: ConformanceProject[] = [
 		workers: 3,
 		// the emulated OP is the RP tests' OP with oidcc-client-test's options, answering as an OP under test
 		// (tests/suite-target.ts); what it does differently is in configs/expected-failures/suite-vs-suite.json
+	},
+	// ---- FAPI 2 RP plans against the openid-client based RP (private_key_jwt + DPoP, no mTLS) ----
+	{
+		name: "rp-fapi2-security-profile",
+		plan: "fapi2-security-profile-final-client-test-plan",
+		variant: RP_FAPI2_PRIVATE_KEY_DPOP,
+		config: "configs/openid-client-rp/fapi2-security-profile.json",
+	},
+	{
+		name: "rp-fapi2-message-signing",
+		plan: "fapi2-message-signing-final-client-test-plan",
+		variant:
+			RP_FAPI2_PRIVATE_KEY_DPOP + "[fapi_request_method=signed_non_repudiation][fapi_response_mode=plain_response]",
+		config: "configs/openid-client-rp/fapi2-message-signing.json",
+	},
+	{
+		name: "rp-fapi2-message-signing-jarm",
+		plan: "fapi2-message-signing-final-client-test-plan",
+		variant: RP_FAPI2_PRIVATE_KEY_DPOP + "[fapi_request_method=unsigned][fapi_response_mode=jarm]",
+		config: "configs/openid-client-rp/fapi2-message-signing.json",
+	},
+	{
+		// the RP as a plain OAuth 2.0 client: no openid scope, no id_token (the id_token modules are not applicable)
+		name: "rp-fapi2-security-profile-plain-oauth",
+		plan: "fapi2-security-profile-final-client-test-plan",
+		variant: RP_FAPI2_PRIVATE_KEY_DPOP.replace("[fapi_client_type=oidc]", "[fapi_client_type=plain_oauth]"),
+		config: "configs/openid-client-rp/fapi2-plain-oauth.json",
 	},
 ];
 

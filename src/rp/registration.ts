@@ -92,6 +92,30 @@ export function generateVSChar(alphaCount: number, numberCount: number, punctuat
 	);
 }
 
+/**
+ * Random NQCHARs (RFC 6749 Appendix A: %x21 / %x23-5B / %x5D-7E): letters, then digits, then punctuation (upstream
+ * RFC6749AppendixASyntaxUtils.generateNQChar: the DPoP nonces)
+ */
+export function generateNQChar(alphaCount: number, numberCount: number, punctuationCount: number): string {
+	const letters = charRange([
+		["a", "z"],
+		["A", "Z"],
+	]);
+	const punctuation = charRange([
+		["!", "!"],
+		["#", "/"],
+		[":", "@"],
+		["[", "["],
+		["]", "`"],
+		["{", "~"],
+	]);
+	return (
+		pickRandom(letters, alphaCount) +
+		pickRandom(charRange([["0", "9"]]), numberCount) +
+		pickRandom(punctuation, punctuationCount)
+	);
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // the registration request
 

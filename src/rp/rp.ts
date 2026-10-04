@@ -3,6 +3,7 @@
  * the client driver that makes the RP under test log in against it.
  *
  *   const op = await rp.start({ ...module options });   // the emulated OP is set up (upstream configure)
+ *   const as = await rp.startFapi2({ ...module options }); // or the FAPI 2 authorization server (src/rp/fapi2.ts)
  *   const client = rp.driveClient();                    // GET client_driver.startUrl: the RP logs in against op.issuer
  *   await op.expect("authorization"); ...
  *   await client;                                       // the RP under test reports it finished
@@ -15,6 +16,7 @@ import { logTestSkipped } from "../suite/conditions.ts";
 import type { ClientDriverConfig, TestConfig } from "../suite/config.ts";
 import type { EventLog } from "../suite/log.ts";
 import type { TestServer } from "../suite/server.ts";
+import { startEmulatedFapi2As, type Fapi2As, type Fapi2AsOptions, type Fapi2RpVariant } from "./fapi2.ts";
 import { startEmulatedOp, type EmulatedOp, type EmulatedOpOptions, type RpVariant } from "./op.ts";
 
 export interface ClientDriverResult {
@@ -34,6 +36,8 @@ export interface Rp {
 	readonly op: EmulatedOp;
 	/** Sets up and serves the emulated OP with the module's options */
 	start(options?: EmulatedOpOptions): Promise<EmulatedOp>;
+	/** Sets up and serves the emulated FAPI 2 authorization server with the module's options (the FAPI 2 client plans) */
+	startFapi2(options?: Fapi2AsOptions): Promise<Fapi2As>;
 	/** Makes the RP under test start its flow against the emulated OP; resolves when the RP reports it finished */
 	driveClient(): Promise<ClientDriverResult>;
 	/** Ends the test as skipped (upstream fireTestSkipped): logs "The test was skipped: <reason>" */
@@ -59,6 +63,8 @@ export function createRp(ctx: {
 	browser: Browser;
 }): Rp {
 	let op: EmulatedOp | null = null;
+	/** Whichever server the test started: the client driver tells it when the RP finished */
+	let started: { issuer: string; rpFinished(): void } | null = null;
 	let driving: Promise<ClientDriverResult> | null = null;
 	const abort = new AbortController();
 	const waitTimeoutSeconds =
@@ -76,26 +82,36 @@ export function createRp(ctx: {
 		},
 		async start(options = {}) {
 			op = await startEmulatedOp(ctx.server, ctx, options);
+			started = op;
 			return op;
 		},
+		async startFapi2(options = {}) {
+			const as = await startEmulatedFapi2As(
+				ctx.server,
+				{ testName: ctx.testName, variant: ctx.variant as unknown as Fapi2RpVariant, config: ctx.config },
+				options,
+			);
+			started = as;
+			return as;
+		},
 		driveClient() {
-			if (op == null) {
-				throw new Error("rp.start() must be called before rp.driveClient()");
+			if (started == null) {
+				throw new Error("rp.start() or rp.startFapi2() must be called before rp.driveClient()");
 			}
 			if (ctx.clientDriver == null) {
 				throw new Error("The configuration has no client_driver to start the relying party under test");
 			}
-			const started = op;
+			const running = started;
 			driving = driveClient(
 				ctx.clientDriver,
-				started.issuer,
+				running.issuer,
 				ctx.testName,
 				ctx.variant,
 				ctx.config,
 				ctx.log,
 				abort.signal,
 			);
-			return driving.finally(() => started.rpFinished());
+			return driving.finally(() => running.rpFinished());
 		},
 		skipTest(reason) {
 			logTestSkipped(reason);
@@ -111,8 +127,9 @@ export function createRp(ctx: {
 
 /**
  * Kicks off the RP under test for one module: GET `client_driver.startUrl` with issuer, module, variant,
- * client_metadata_defaults, alias and the static client's credentials (see targets/openid-client-rp/README.md),
- * logged under TEST-RUNNER. Never throws: a failing driver call is logged as a WARNING.
+ * client_metadata_defaults, alias and the static client's credentials (client_id, client_secret, jwks, scope; see
+ * targets/openid-client-rp/README.md), logged under TEST-RUNNER. Never throws: a failing driver call is logged as a
+ * WARNING.
  *
  * upstream: scripts/run-test-plan.py running the RP for a client test module
  */
@@ -136,7 +153,7 @@ export async function driveClient(
 	if (typeof config["alias"] === "string") {
 		params["alias"] = config["alias"];
 	}
-	for (const k of ["client_id", "client_secret", "jwks"]) {
+	for (const k of ["client_id", "client_secret", "jwks", "scope"]) {
 		const v = client[k];
 		if (v != null) {
 			params[k] = typeof v === "string" ? v : JSON.stringify(v);

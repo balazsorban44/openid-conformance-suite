@@ -9,6 +9,7 @@ import { condition, skipped, soft, type Condition } from "../suite/conditions.ts
 import { HttpError, request } from "../suite/http.ts";
 import { parseJwksLenientlyLoggingSkips, parseJwt, type Jwks, type ParsedJwt } from "../suite/jose.ts";
 import { currentLog } from "../suite/log.ts";
+import { getString } from "../suite/json.ts";
 import { isSymmetricJWEAlgorithm } from "../suite/jose-jwe.ts";
 import { getPublicJwksAsJsonObject, toPublicJWK, importKey, type JWK } from "../suite/jose-jwk.ts";
 import { EC_CURVE_ALGORITHM } from "../suite/jose-algorithms.ts";
@@ -16,7 +17,7 @@ import { isJOSEException, JOSEException, ParseException } from "../suite/errors.
 import { selectJWSJwks, verifySignedJWT, type JWSVerifier } from "../suite/jose-jws.ts";
 import { parseSignedJWT } from "../suite/jose-jwt.ts";
 import type { AuthorizationParams } from "./authorization.ts";
-import type { ServerMetadata } from "./discovery.ts";
+import { FAPI2_ALLOWED_ALGS, type ServerMetadata } from "./discovery.ts";
 import type { EmulatedOp, RpVariant } from "./op.ts";
 import type { RpClient } from "./registration.ts";
 
@@ -143,7 +144,7 @@ export function ensureRequestObjectSigningAlgIsRS256InClientMetadata(
  *
  * upstream: condition/as/AbstractExtractRequestObject.java (processRequestObjectString)
  */
-async function processRequestObjectString(
+export async function processRequestObjectString(
 	c: Condition,
 	requestObjectString: string | null,
 	client: RpClient | null,
@@ -816,4 +817,234 @@ export async function checkRequestObject(
 			ensureOptionalAuthorizationRequestParametersMatchRequestObject(params, requestObject, "OIDCC-6.1", "OIDCC-6.2"),
 		"warning",
 	);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// the FAPI 2 checks on a signed request object (upstream AbstractFAPI2SPFinalClientTest.validateRequestObjectCommonChecks)
+
+/** upstream: condition/as/FAPI2ValidateRequestObjectSigningAlg.java */
+export function fapi2ValidateRequestObjectSigningAlg(requestObject: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("FAPI2ValidateRequestObjectSigningAlg", ...requirements);
+	const alg = str(requestObject.header, "alg");
+	if (alg != null && FAPI2_ALLOWED_ALGS.includes(alg)) {
+		c.success("Request object was signed with a permitted algorithm", { alg });
+		return;
+	}
+	c.failure("Request object must be signed with PS256, ES256, EdDSA, or Ed25519", { alg });
+}
+
+/** upstream: condition/as/FAPIValidateRequestObjectMediaType.java */
+export function fapiValidateRequestObjectMediaType(requestObject: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("FAPIValidateRequestObjectMediaType", ...requirements);
+	const typ = str(requestObject.header, "typ");
+	if (typ == null) {
+		c.success("Request object media type was not specified");
+		return;
+	}
+	if (typ.toLowerCase() === "oauth-authz-req+jwt") {
+		c.success("Request object media type is valid", { typ });
+		return;
+	}
+	c.failure("Request object media type is not as expected", { expected: "oauth-authz-req+jwt", typ });
+}
+
+/**
+ * The acr values the request object's claims parameter asks for in the id_token (claims.id_token.acr): the ones
+ * among the Open Banking UK values, as a JSON array string (upstream "requested_id_token_acr_values"), or null when
+ * none is requested.
+ *
+ * upstream: condition/client/FAPIValidateRequestObjectIdTokenACRClaims.java
+ */
+export function fapiValidateRequestObjectIdTokenACRClaims(
+	requestObject: ParsedJwt,
+	...requirements: string[]
+): string | null {
+	const c: Condition = condition("FAPIValidateRequestObjectIdTokenACRClaims", ...requirements);
+	const claimsParam = requestObject.claims["claims"];
+	const idTokenClaims =
+		claimsParam != null && typeof claimsParam === "object" && !Array.isArray(claimsParam)
+			? (claimsParam as Record<string, unknown>)["id_token"]
+			: null;
+	const acrClaim =
+		idTokenClaims != null && typeof idTokenClaims === "object" && !Array.isArray(idTokenClaims)
+			? (idTokenClaims as Record<string, unknown>)["acr"]
+			: null;
+	if (acrClaim == null) {
+		c.success("acr claim not requested");
+		return null;
+	}
+	if (typeof acrClaim !== "object" || Array.isArray(acrClaim)) {
+		c.failure("The acr claim is not a JsonObject", { acrClaim });
+	}
+	const acr = acrClaim as Record<string, unknown>;
+	if (Object.hasOwn(acr, "essential") && typeof acr["essential"] !== "boolean") {
+		c.failure("the 'essential' value is not a boolean", { essential: acr["essential"] });
+	}
+	// https://openid.net/specs/openid-connect-core-1_0.html#acrSemantics
+	let receivedValues: string[];
+	if (Object.hasOwn(acr, "values")) {
+		const acrValues = acr["values"];
+		if (acrValues == null || !Array.isArray(acrValues)) {
+			c.failure("Acr values is missing or is not an array in request object", { received: acrValues ?? null });
+		}
+		receivedValues = acrValues.map(String);
+	} else if (Object.hasOwn(acr, "value")) {
+		const acrValue = acr["value"];
+		if (acrValue == null) {
+			c.failure("Acr values is null in request object", { acrClaim });
+		}
+		receivedValues = [getString(acrValue)];
+	} else {
+		c.success("acr claim does not request any values");
+		return null;
+	}
+	const expectedValues = ["urn:openbanking:psd2:sca", "urn:openbanking:psd2:ca"];
+	const matchedAcrValues = receivedValues.filter((v) => expectedValues.includes(v));
+	if (matchedAcrValues.length > 0) {
+		c.success("Acr value in request object is as expected", { received: matchedAcrValues });
+		return JSON.stringify(matchedAcrValues);
+	}
+	c.failure("An acr value in the request object does not match one of the expected values", {
+		received: matchedAcrValues,
+		expected: expectedValues,
+	});
+}
+
+/** upstream: condition/as/FAPIValidateRequestObjectExp.java */
+export function fapiValidateRequestObjectExp(requestObject: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("FAPIValidateRequestObjectExp", ...requirements);
+	const now = Date.now();
+	const sixtyMinutesMillis = 60 * 60 * 1000;
+	const exp = long(requestObject.claims, "exp");
+	if (exp == null) {
+		c.failure("Missing exp, request object does not contain an 'exp' claim");
+	}
+	if (now - TIME_SKEW_MILLIS > exp * 1000) {
+		c.failure("Token expired", { exp: new Date(exp * 1000).toISOString(), now: new Date(now).toISOString() });
+	}
+	if (now + sixtyMinutesMillis < exp * 1000) {
+		c.failure("Request object expires unreasonably far in the future", {
+			exp: new Date(exp * 1000).toISOString(),
+			now: new Date(now).toISOString(),
+		});
+	}
+	c.success("Request object contains a valid exp claim, expiry time", { exp: new Date(exp * 1000).toISOString() });
+}
+
+/** The nbf claim is present and not more than 60 minutes in the past. upstream: condition/as/FAPI1AdvancedValidateRequestObjectNBFClaim.java */
+export function fapi1AdvancedValidateRequestObjectNBFClaim(requestObject: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("FAPI1AdvancedValidateRequestObjectNBFClaim", ...requirements);
+	const sixtyMinutes = 60 * 60 * 1000;
+	const now = Date.now();
+	const nbf = long(requestObject.claims, "nbf");
+	if (nbf == null) {
+		c.failure("Missing nbf claim in request object");
+	}
+	const nbfMillis = nbf * 1000;
+	if (nbfMillis < now - sixtyMinutes) {
+		c.failure("nbf claim is more than 60 minutes in the past", {
+			nbf: new Date(nbfMillis).toISOString(),
+			now: new Date(now).toISOString(),
+		});
+	}
+	if (nbfMillis > now + TIME_SKEW_MILLIS) {
+		c.failure("nbf claim is in the future", {
+			nbf: new Date(nbfMillis).toISOString(),
+			now: new Date(now).toISOString(),
+			time_skew: TIME_SKEW_MILLIS,
+		});
+	}
+	c.success("nbf claim is valid", { nbf: new Date(nbfMillis).toISOString(), now: new Date(now).toISOString() });
+}
+
+/**
+ * iss is the client_id, aud the issuer, exp / iat / nbf plausible, jti a string when present.
+ *
+ * upstream: condition/as/ValidateRequestObjectClaims.java
+ */
+export function validateRequestObjectClaims(requestObject: ParsedJwt, client: RpClient, issuer: string): void {
+	const c: Condition = condition("ValidateRequestObjectClaims");
+	const clientId = client.client_id;
+	const now = Date.now();
+	// check all our testable values
+	if (!clientId || !issuer) {
+		c.failure("Couldn't find values to test request object against");
+	}
+	const iss = str(requestObject.claims, "iss");
+	if (iss == null) {
+		c.failure("Missing issuer");
+	}
+	if (clientId !== iss) {
+		c.failure("Issuer mismatch", { expected: clientId, actual: iss });
+	}
+	// validateAud
+	const aud = requestObject.claims["aud"];
+	if (aud == null) {
+		c.failure("Missing audience");
+	}
+	if (Array.isArray(aud)) {
+		if (!aud.includes(issuer)) {
+			c.failure("Audience not found", { expected: issuer, actual: aud });
+		}
+	} else if (issuer !== getString(aud)) {
+		c.failure("Audience mismatch", { expected: issuer, actual: aud });
+	}
+	const exp = long(requestObject.claims, "exp");
+	if (exp == null) {
+		c.log({ msg: "Missing expiration", result: "INFO" });
+	} else {
+		if (now - TIME_SKEW_MILLIS > exp * 1000) {
+			c.failure("Token expired", { expiration: new Date(exp * 1000).toISOString(), now: new Date(now).toISOString() });
+		}
+		if (exp * 1000 > now + 50 * 365 * 24 * 60 * 60 * 1000) {
+			c.failure(
+				"'exp' is unreasonably far in the future (more than 50 years), this may indicate the value was incorrectly specified in milliseconds instead of seconds",
+				{ exp: new Date(exp * 1000).toISOString(), now: new Date(now).toISOString() },
+			);
+		}
+	}
+	// validateIat
+	const iat = long(requestObject.claims, "iat");
+	if (iat == null) {
+		c.log({ msg: "Missing issuance time", result: "INFO" });
+	} else {
+		if (now + TIME_SKEW_MILLIS < iat * 1000) {
+			c.failure("Token issued in the future", {
+				"issued-at": new Date(iat * 1000).toISOString(),
+				now: new Date(now).toISOString(),
+			});
+		}
+		if (now - 24 * 60 * 60 * 1000 > iat * 1000) {
+			c.failure("'iat' is more than 1 day in the past", {
+				"issued-at": new Date(iat * 1000).toISOString(),
+				now: new Date(now).toISOString(),
+			});
+		}
+	}
+	const nbf = long(requestObject.claims, "nbf");
+	if (nbf != null && now + TIME_SKEW_MILLIS < nbf * 1000) {
+		// this is just something to log, it doesn't make the token invalid
+		c.log("Token has future not-before", {
+			"not-before": new Date(nbf * 1000).toISOString(),
+			now: new Date(now).toISOString(),
+		});
+	}
+	// validateJti
+	const jti = requestObject.claims["jti"];
+	if (jti != null && typeof jti !== "string") {
+		c.failure("jti must be a string when present", { jti });
+	}
+	c.success("Request object claims passed all validation checks");
+}
+
+/** The request object's redirect_uri is the configured client's. upstream: condition/as/EnsureMatchingRedirectUriInRequestObject.java */
+export function ensureMatchingRedirectUriInRequestObject(requestObject: ParsedJwt, client: RpClient): void {
+	const c: Condition = condition("EnsureMatchingRedirectUriInRequestObject");
+	const expected = typeof client["redirect_uri"] === "string" ? client["redirect_uri"] : null;
+	const actual = str(requestObject.claims, "redirect_uri");
+	if (expected && expected === actual) {
+		c.success("Redirect URI matched", { actual: actual ?? "" });
+		return;
+	}
+	c.failure("Mismatch between redirect URI", { expected: expected ?? "", actual: actual ?? "" });
 }

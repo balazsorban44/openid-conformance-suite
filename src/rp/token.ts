@@ -2,18 +2,21 @@
  * The emulated OP's token endpoint: the client authentication and code exchange checks upstream runs on the RP's
  * token request, and the token response (access token, id_token).
  */
+import { createHash } from "node:crypto";
+import { shannonEntropy } from "../op/authorization.ts";
 import { block, condition, soft, type Condition } from "../suite/conditions.ts";
 import { currentLog } from "../suite/log.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import type { IncomingRequest } from "../suite/server.ts";
-import { calculateAtHash, createIdToken, createIdTokenForRefreshRequest } from "./id-token.ts";
+import { calculateAtHash, createIdToken, createIdTokenForRefreshRequest, toUsAscii } from "./id-token.ts";
 import { failTest, OAuthError, type EmulatedOp, type RefreshOptions } from "./op.ts";
 import { generateVSChar, type RpClient } from "./registration.ts";
 
 /** The access token the OP issued (upstream env "access_token", "token_type", "at_hash") */
 export interface IssuedTokens {
 	accessToken: string;
-	tokenType: "Bearer";
+	/** "Bearer", or "DPoP" at the FAPI 2 authorization server */
+	tokenType: string;
 	/** null when the id_token is not signed (alg none) */
 	atHash: string | null;
 }
@@ -229,13 +232,18 @@ export function generateAccessToken(op: EmulatedOp): IssuedTokens {
 	return op.tokens;
 }
 
-/** upstream: condition/as/CreateTokenEndpointResponse.java */
+/**
+ * `headers`: the response headers (upstream "token_endpoint_response_headers": x-fapi-interaction-id when known).
+ *
+ * upstream: condition/as/CreateTokenEndpointResponse.java
+ */
 export function createTokenEndpointResponse(
 	tokens: IssuedTokens,
 	idToken: string | null,
 	scope: string | null,
 	refreshToken: string | null = null,
 	expiresIn: number | null = null,
+	headers: Record<string, string> = {},
 	...requirements: string[]
 ): Record<string, unknown> {
 	const response: Record<string, unknown> = { access_token: tokens.accessToken, token_type: tokens.tokenType };
@@ -254,7 +262,7 @@ export function createTokenEndpointResponse(
 	// upstream logs the response without a message (logSuccess(args(...)))
 	currentLog().log("CreateTokenEndpointResponse", {
 		"Created token endpoint response": response,
-		token_endpoint_response_headers: {},
+		token_endpoint_response_headers: headers,
 		result: "SUCCESS",
 		...(requirements.length > 0 ? { requirements } : {}),
 	});
@@ -321,6 +329,7 @@ export async function handleTokenRequest(
 			op.authorization?.scope ?? null,
 			op.refreshToken,
 			accessTokenExpiration(op),
+			{},
 			"OIDCC-3.1.3.3",
 		);
 		return { response: tokenResponse(op, response), tokens: response };
@@ -377,7 +386,7 @@ async function refreshTokenGrant(
 }
 
 /** upstream: condition/as/CreateRefreshToken.java */
-export function createRefreshToken(op: EmulatedOp, ...requirements: string[]): string {
+export function createRefreshToken(op: { refreshToken: string | null }, ...requirements: string[]): string {
 	const refreshToken = generateVSChar(50, 10, 5);
 	op.refreshToken = refreshToken;
 	condition("CreateRefreshToken", ...requirements).log("Created refresh token", { refresh_token: refreshToken });
@@ -438,4 +447,168 @@ export function extractScopeFromTokenEndpointRequest(req: IncomingRequest): stri
 	}
 	c.log("Scopes requested in refresh request", { scope });
 	return scope;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// the FAPI 2 authorization server's token endpoint (upstream AbstractFAPI2SPFinalClientTest.authorizationCodeGrantType)
+
+/** upstream: condition/as/ValidateRedirectUri.java */
+export function validateRedirectUri(
+	req: IncomingRequest,
+	client: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateRedirectUri", ...requirements);
+	const expected = typeof client["redirect_uri"] === "string" ? client["redirect_uri"] : null;
+	const actual = formParam(req, "redirect_uri");
+	if (!expected) {
+		c.failure("Couldn't find redirect uri to compare");
+	}
+	if (expected === actual) {
+		c.success("Found redirect uri", { redirect_uri: actual });
+		return;
+	}
+	c.failure("Didn't find matching redirect uri", { expected, actual });
+}
+
+/** The PKCE values of the authorization request (upstream "code_challenge" / "code_challenge_method") */
+export interface CodeChallenge {
+	code_challenge: string;
+	code_challenge_method: string;
+}
+
+/** upstream: condition/as/ValidateCodeVerifierWithS256.java */
+export function validateCodeVerifierWithS256(
+	req: IncomingRequest,
+	challenge: CodeChallenge,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateCodeVerifierWithS256", ...requirements);
+	const codeVerifier = formParam(req, "code_verifier");
+	if (!codeVerifier) {
+		c.failure("Couldn't find code_verifier in token request");
+	}
+	const { code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod } = challenge;
+	if (codeChallengeMethod !== "S256") {
+		c.failure("Unexpected code_challenge_method", { code_challenge_method: codeChallengeMethod });
+	}
+	const calculatedChallenge = createHash("sha256")
+		.update(Buffer.from(toUsAscii(codeVerifier), "latin1"))
+		.digest()
+		.toString("base64url");
+	if (codeChallenge === calculatedChallenge) {
+		c.success("Validated code_verifier successfully", {
+			code_verifier: codeVerifier,
+			code_challenge: codeChallenge,
+			code_challenge_method: codeChallengeMethod,
+		});
+		return;
+	}
+	c.failure("PKCE validation failed", {
+		expected_code_challenge: calculatedChallenge,
+		code_verifier: codeVerifier,
+		code_challenge: codeChallenge,
+		code_challenge_method: codeChallengeMethod,
+	});
+}
+
+/**
+ * RFC 7636 7.1 asks for 256 bits of entropy; it cannot be measured accurately, so 180 are required.
+ *
+ * upstream: condition/client/EnsureMinimumPkceCodeVerifierEntropy.java (AbstractEnsureMinimumEntropy)
+ */
+export function ensureMinimumPkceCodeVerifierEntropy(req: IncomingRequest, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureMinimumPkceCodeVerifierEntropy", ...requirements);
+	const requiredEntropy = 180;
+	const codeVerifier = formParam(req, "code_verifier");
+	if (!codeVerifier) {
+		c.failure("Couldn't find code_verifier in token request");
+	}
+	const entropy = shannonEntropy(codeVerifier) * codeVerifier.length;
+	const fields = { value: codeVerifier, expected: requiredEntropy, actual: entropy };
+	if (entropy <= requiredEntropy) {
+		c.failure(
+			"Calculated shannon entropy does not seem to meet minimum required entropy (i.e. item is too short, or not random enough)",
+			fields,
+		);
+	}
+	c.success("Calculated shannon entropy seems sufficient", fields);
+}
+
+/** upstream: condition/client/EnsureMinimumPkceCodeVerifierLength.java */
+export function ensureMinimumPkceCodeVerifierLength(req: IncomingRequest, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureMinimumPkceCodeVerifierLength", ...requirements);
+	// 43 * 8: at least 43 characters (RFC 7636 7.3)
+	const requiredLength = 344;
+	const codeVerifier = formParam(req, "code_verifier");
+	if (!codeVerifier) {
+		c.failure("Couldn't find code_verifier in token request");
+	}
+	const bitLength = Buffer.byteLength(codeVerifier, "utf8") * 8;
+	if (bitLength >= requiredLength) {
+		c.success("PKCE code verifier is of sufficient length", { required: requiredLength, actual: bitLength });
+		return;
+	}
+	c.failure("PKCE code verifier is not of sufficient length", { required: requiredLength, actual: bitLength });
+}
+
+/**
+ * `used`: the code verifiers already presented (upstream keeps a process-wide cache of 256; this one is per test).
+ *
+ * upstream: condition/client/EnsurePkceCodeVerifierNotUsed.java
+ */
+export function ensurePkceCodeVerifierNotUsed(
+	req: IncomingRequest,
+	used: Set<string>,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsurePkceCodeVerifierNotUsed", ...requirements);
+	const codeVerifier = formParam(req, "code_verifier");
+	if (!codeVerifier) {
+		c.failure("Code Verifier not found in request");
+	}
+	if (used.has(codeVerifier)) {
+		c.failure("code verifier has been used", { "code verifier": codeVerifier });
+	}
+	used.add(codeVerifier);
+	c.success("Code verifier has not been used", { code_verifier: codeVerifier });
+}
+
+/**
+ * The code_verifier of the token request matches the code_challenge of the authorization request, is long and
+ * random enough, and was not presented before.
+ *
+ * upstream: condition/as/CheckPkceCodeVerifier.java with condition/as/ValidateCodeVerifierWithS256.java,
+ * condition/client/EnsureMinimumPkceCodeVerifierEntropy.java, EnsureMinimumPkceCodeVerifierLength.java,
+ * EnsurePkceCodeVerifierNotUsed.java
+ */
+export function checkPkceCodeVerifier(req: IncomingRequest, challenge: CodeChallenge, used: Set<string>): void {
+	validateCodeVerifierWithS256(req, challenge, "RFC7636-4.6");
+	soft(() => ensureMinimumPkceCodeVerifierEntropy(req, "RFC7636-7.1"), "warning");
+	soft(() => ensureMinimumPkceCodeVerifierLength(req, "RFC7636-7.1"), "warning");
+	soft(() => ensurePkceCodeVerifierNotUsed(req, used, "RFC7636-4.1"));
+}
+
+/** The expires_in of the token response (upstream "access_token_expiration"). upstream: condition/as/GenerateAccessTokenExpiration.java */
+export function generateAccessTokenExpiration(): string {
+	condition("GenerateAccessTokenExpiration").log("Set access_token_expiration to 900");
+	return "900";
+}
+
+/** upstream: condition/as/RemoveAccessTokenExpiration.java */
+export function removeAccessTokenExpiration(): void {
+	condition("RemoveAccessTokenExpiration").log("Removed access_token_expiration");
+}
+
+/** The token_type with every letter's case inverted ("DPoP" -> "dpOp"). upstream: condition/as/SetTokenResponseTokenTypeToInvertedCase.java */
+export function setTokenResponseTokenTypeToInvertedCase(tokenType: string | null): string {
+	const c: Condition = condition("SetTokenResponseTokenTypeToInvertedCase");
+	if (!tokenType) {
+		c.failure("token_type not available");
+	}
+	const inverted = Array.from(tokenType, (ch) =>
+		/\p{Alphabetic}/u.test(ch) ? (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()) : ch,
+	).join("");
+	c.success("Set token endpoint response 'token_type' to inverted case letters", { token_type: inverted });
+	return inverted;
 }

@@ -5,8 +5,10 @@
 import { generateKeyPairSync, randomInt, randomUUID, type KeyObject } from "node:crypto";
 import { checkDistinctKeyIdValueInServerJWKs, validateJwks } from "../op/jwks.ts";
 import { condition, soft, type Condition } from "../suite/conditions.ts";
-import { privateJwks, publicJwks, type JWK, type Jwks } from "../suite/jose.ts";
-import { parseJWK } from "../suite/jose-jwk.ts";
+import type { TestConfig } from "../suite/config.ts";
+import { ParseException } from "../suite/errors.ts";
+import { generateJwkForAlg, privateJwks, publicJwks, type JWK, type Jwks } from "../suite/jose.ts";
+import { getPublicJwksAsJsonObject, parseJWK, parseJWKSet, toPublicJWK } from "../suite/jose-jwk.ts";
 
 /** upstream env "server_jwks" (the signing keys in use), "server_public_jwks" (published), "server_encryption_keys" */
 export interface ServerKeys {
@@ -285,4 +287,211 @@ export function regenerateServerJwks(): ServerKeys {
 	const keys = oidccGenerateServerJWKs();
 	addUnusableKeysToServerPublicJwks(keys, "RFC7517-5");
 	return keys;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// the FAPI 2 authorization server's keys (upstream AbstractFAPI2SPFinalClientTest.configureServerJWKS)
+
+/**
+ * The keys of the configuration (`server.jwks`), split into the private set, the public set and the encryption
+ * keys (the keys without `use` or with use=enc).
+ *
+ * upstream: condition/as/LoadServerJWKs.java
+ */
+export function loadServerJWKs(config: TestConfig): ServerKeys {
+	const c: Condition = condition("LoadServerJWKs");
+	const server = config["server"];
+	const configured =
+		server != null && typeof server === "object" && !Array.isArray(server)
+			? (server as Record<string, unknown>)["jwks"]
+			: undefined;
+	if (configured == null) {
+		c.failure("Couldn't find a JWK set in configuration");
+	}
+	// parse the JWKS to make sure it's valid
+	try {
+		const jwks = parseJWKSet(JSON.stringify(configured));
+		const publicKeys = publicJwks(jwks);
+		const privateKeys = privateJwks(jwks);
+		const foundEncKeys = (privateKeys.keys as JWK[]).filter((key) => key["use"] == null || key["use"] === "enc");
+		const encKeysJwks: Record<string, unknown> = foundEncKeys.length > 0 ? { keys: foundEncKeys } : {};
+		c.success("Parsed public and private JWK sets", {
+			server_public_jwks: publicKeys,
+			server_jwks: privateKeys,
+			server_encryption_keys: encKeysJwks,
+		});
+		return { publicJwks: publicKeys, jwks: privateKeys, encryptionKeys: { keys: foundEncKeys } as Jwks };
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Failure parsing JWK Set", e, { jwk_string: configured });
+		}
+		throw e;
+	}
+}
+
+/**
+ * A minimal FAPI 2 server JWKS: one PS256 RSA signing key with an explicit alg (so ExtractServerSigningAlg works
+ * and AugmentRealJwksWithDecoys can generate decoys around it), and one RSA encryption key.
+ *
+ * upstream: condition/as/FAPI2GenerateServerJWKs.java
+ */
+export function fapi2GenerateServerJWKs(...requirements: string[]): ServerKeys {
+	return generateServerJwks(
+		"FAPI2GenerateServerJWKs",
+		{
+			numberOfRSASigningKeysWithNoAlg: 0,
+			numberOfECCurveP256SigningKeysWithNoAlg: 0,
+			numberOfECCurveSECP256KSigningKeysWithNoAlg: 0,
+			numberOfOKPSigningKeysWithNoAlg: 0,
+			numberOfPSSigningKeys: 1,
+			numberOfRSAEncKeys: 1,
+			numberOfECEncKeys: 0,
+		},
+		requirements,
+	);
+}
+
+/** The FAPI algorithms a decoy is generated for (upstream AugmentRealJwksWithDecoys.FAPI_JWK_ALGORITHMS) */
+const FAPI_JWK_ALGORITHMS = ["EdDSA", "PS256", "ES256"];
+
+/** A fresh key for `alg` with the given kid (upstream AbstractGenerateKey.createJwkForAlg with keyID(kid)) */
+async function decoyKey(alg: string, kid: string): Promise<JWK> {
+	const key = await generateJwkForAlg(alg);
+	key["kid"] = kid;
+	return key;
+}
+
+/**
+ * Adds "decoy" public keys with the real signing key's kid but the other FAPI algorithms to the published JWKS,
+ * so a client must look keys up by kid, alg and kty together. The published set is the real key and its decoys
+ * only; the keys with another `use` are left out (upstream rebuilds server_public_jwks from them).
+ *
+ * upstream: condition/client/AugmentRealJwksWithDecoys.java
+ */
+export async function augmentRealJwksWithDecoys(keys: ServerKeys, ...requirements: string[]): Promise<void> {
+	const c: Condition = condition("AugmentRealJwksWithDecoys", ...requirements);
+	let publicKeys: JWK[];
+	try {
+		// extract the real public JWKSet
+		publicKeys = parseJWKSet(JSON.stringify(keys.jwks))
+			.keys.map((k) => toPublicJWK(k))
+			.filter((k): k is JWK => k != null);
+	} catch (e) {
+		c.failureFrom("Failed to parse server_jwks", e);
+	}
+	if (publicKeys.length === 0) {
+		c.success("Skipping JWKS decoy generation for server_jwks with missing public keys.");
+		return;
+	}
+	// try to find the public JWK used for signing
+	const publicKeysForSigning = publicKeys.filter((k) => k["use"] === "sig");
+	if (publicKeysForSigning.length === 0) {
+		c.success("Skipping JWKS decoy generation for server_jwks with missing public keys of use=sig.");
+		return;
+	}
+	const existingJwks = { keys: publicKeys };
+	if (publicKeysForSigning.length !== 1) {
+		// several keys: the JWKS must already contain keys with the same kid for all desired "decoy" algorithms
+		const idToAlgs = new Map<string, Set<string>>();
+		for (const key of publicKeysForSigning) {
+			let algName = String(key["alg"]);
+			if (algName === "Ed25519") {
+				algName = "EdDSA";
+			}
+			const kid = String(key["kid"]);
+			(idToAlgs.get(kid) ?? idToAlgs.set(kid, new Set()).get(kid))?.add(algName);
+		}
+		const kidsWithMissingFapiAlgorithms: Record<string, string[]> = {};
+		for (const [kid, algs] of idToAlgs) {
+			const missing = FAPI_JWK_ALGORITHMS.filter((a) => !algs.has(a));
+			if (missing.length > 0) {
+				kidsWithMissingFapiAlgorithms[kid] = missing;
+			}
+		}
+		if (Object.keys(kidsWithMissingFapiAlgorithms).length > 0) {
+			// UPSTREAM: logs a failure without throwing (the framework then fails the condition for not throwing)
+			c.logFailure("Existing server_jwks contains multiple keys for use=sig, but desired JWK variant is missing", {
+				jwks_ids_with_missing_fapi_algorithms: kidsWithMissingFapiAlgorithms,
+			});
+			return;
+		}
+		c.success(
+			"Existing server_jwks already contains JWKs with the desired algorithm variants. Skipping generation of additional decoy JWKs.",
+		);
+		return;
+	}
+	// a single public key with use=sig: decoy keys with the same kid for the missing algorithms
+	const publicKey = publicKeysForSigning[0];
+	if (publicKey["alg"] == null) {
+		c.logFailure("Public JWK with use=sig is missing alg information.", { kid: publicKey["kid"] ?? null, alg: null });
+		return;
+	}
+	const kid = String(publicKey["kid"]);
+	let keysWithDecoys: JWK[];
+	switch (String(publicKey["alg"])) {
+		case "ES256":
+			keysWithDecoys = [await decoyKey("EdDSA", kid), publicKey, await decoyKey("PS256", kid)];
+			break;
+		case "EdDSA":
+		case "Ed25519":
+			// EdDSA and Ed25519 are the same curve/kty, so they're treated as the same "family" here
+			keysWithDecoys = [await decoyKey("ES256", kid), publicKey, await decoyKey("PS256", kid)];
+			break;
+		case "PS256":
+			keysWithDecoys = [await decoyKey("EdDSA", kid), publicKey, await decoyKey("ES256", kid)];
+			break;
+		default:
+			c.failure("Invalid FAPI alg detected in JWK", { alg: publicKey["alg"] });
+	}
+	const publicJwksWithDecoys = getPublicJwksAsJsonObject({ keys: keysWithDecoys }) as Jwks;
+	keys.publicJwks = publicJwksWithDecoys;
+	c.success("Augmented JWKS with decoy keys.", { existingJwks, jwksWithDecoys: publicJwksWithDecoys });
+}
+
+/** An RSA key with no alg that signs the id_token of the alternate-alg module (upstream SetRsaAltServerJwks.altRsaKey) */
+const ALT_RSA_KEY = {
+	p: "vTcrfPZ9eZjIXN4LZYyKMXG1lvH5UJukZgQQ1UQYENHPoJWIvi9JD7MPMjjEwpvZcD6YGzaczxboEiihlHPiqM6Dw9yTMbX4Bw-GgyFhgkYrOd8fPgMAFZXI4zl5G6aSTsRHolAMVXvuKGBD7QV1LnU7ZZ9hv0XZOeLDCaVzpm8",
+	kty: "RSA",
+	q: "6VHXO7lyTJcniJGAPJ_5H2UHrknODXun-bKTelxWZcEvw8t2gJDvia5mbmor7RLbdg4c4BojdflvhJJVXlxOsgxHMJiFP2cjVoNktHkEmgHCqCplJUD98ZCK7hfC5LwJLQwszMCpDbYAlVSUAsWFyWczo0hC4Kv0QCwluqm9uEc",
+	d: "Cldd48WZrS2FWFm1KpmKp73z_1HNwp2Y0UnLBhuTekuQ72UR5KsYZ0w3YtD5Kj2a8TukNvJTOhkqvT2i_y7ZN6FK5o5CBL6z5LNzuzNhIYQNqypBkVxTdfTD3ghqFCbpVHPwPgl_M1HheipjLCbsP8UuwJEWEHKPtI_0ZqrAQjdwk32LvF9kahhdaGpMeNoOcRM1BQxURrsLUjJm8fOZcz6gfjItd-8m6-VXoXDPDjCKnePi6Wh6QLbpDnuefPWrKLyo_p4EaZK_hCWWZFk0XeoEWgsVcG7piMae2mpesimiWeA1ncqkbfQNdI4bYIUt31iFDz-XBG0osSH8GoGHCQ",
+	e: "AQAB",
+	use: "sig",
+	kid: "rsa-none-alt-arg",
+	qi: "VzPxjxy_hoMSgrGMWYQLmPg0OT0gLbvyRDwFKLIPU_-pt4CKZBzzhk5NtQ9SpnPiWQ-z0D1TjHAV53CO5sJZEfevKXoTwsnBLmJwnFBq4BInXcl8PGt_5p_nx9HYxc3Lo0NU0oDSID-B3rh2fjXt3NvHJbbAHZZuaRdsw5PM1ZU",
+	dp: "H_X3tI32N9nkzjr7ddW9agipAawxzrnblRfOuBdecUjfZ2KazHU0RCCcyoDoS28D1X_dNYuOBTT7UkXmtSq1-ImZnDXf7x-rm5W1xOSYkebEWmwj3Neo5fx9CFSm7lK-l-tzpikbTD04xz0rfBfV6VkIBWxcmHB19t8kzrZRyKU",
+	dq: "DejOHwZgNQax2adq8LJMxL1eJtrJiO49RlqKBjppACnzMgX4K5P4Y8nc22pC8iA0qyYOPKHyST80kb-zjSuNmXm36MK-9tesOKUepM-uIYxHUYUtgHoOaY9HaQhLmx1GosPeC9rUeTfHcx-Wr0-dOTOI1YwiSIiXyBeZrDYgVFM",
+	n: "rHO0Hvkwg8p9MMsTK9H2cWIVcuTXgqD9MQZnb48FM-tdmoMlPjU5WUg4N8h_4jdQ1ADgQACppuoJiXhDidN4aOiVjSso-SRjwWxKbq4TVvlNdzOCH-ligo4ftcJBLUWJJLD3I64BGG7KMoovEPFN89jR3VXD6RyKj4vaY706CaCkxZlGS9Mp8sGdT7zv5UjGKhh4-KRolRq9mId2mnleIvZBYyANxd0Rb861RY7g3O4DxWEA3xtxkSJrcBkDyY8IrKl0mxKldaR9rll4FmYoNZWzZqFoDfLzt7rYSiYOfXdt-QIlMlZthqVa3RJMM8L5MrRevoRVKjmulH1_KaXwyQ",
+};
+
+/**
+ * An RSA key with no alg is added to the published keys as the alternate signing key (the id_token signed with
+ * RS256 of the alternate-alg module). Returns the alternate key's private JWK set (upstream "server_alt_jwks").
+ * UPSTREAM: the published set is rebuilt from the signing keys, so the decoys of AugmentRealJwksWithDecoys are lost.
+ *
+ * upstream: condition/as/SetRsaAltServerJwks.java
+ */
+export function setRsaAltServerJwks(keys: ServerKeys): Jwks {
+	const c: Condition = condition("SetRsaAltServerJwks");
+	// parse the JWKS to make sure it's valid
+	try {
+		const jwks = parseJWKSet(JSON.stringify(keys.jwks));
+		const privateKeys = privateJwks(jwks);
+		// Alt RSA signing key with alg NONE.
+		const altPrivateKey = parseJWK(JSON.stringify(ALT_RSA_KEY));
+		const publicKeys = getPublicJwksAsJsonObject({ keys: [...jwks.keys, altPrivateKey] }) as Jwks;
+		keys.publicJwks = publicKeys;
+		c.log("generated new alt RSA key configuration");
+		const altJwks = privateJwks({ keys: [altPrivateKey] });
+		c.success("Set alt server key", {
+			server_public_jwks: publicKeys,
+			server_jwks: privateKeys,
+			server_alt_jwks: altJwks,
+		});
+		return altJwks;
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Failure parsing server_jwks JWK Set", e, { jwk_string: keys.jwks });
+		}
+		throw e;
+	}
 }

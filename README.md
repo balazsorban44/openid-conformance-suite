@@ -17,6 +17,10 @@ The [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-
 - [ ] FAPI 2 Security Profile and Message Signing, OpenID Provider (in progress: the discovery, happy flow,
       refresh token, PAR / PKCE, client assertion, DPoP binding, code binding and signed request object / JARM
       modules; client_auth_type=private_key_jwt and sender_constrain=dpop only, mTLS is not covered)
+- [ ] FAPI 2 Security Profile and Message Signing, Relying Party (in progress: the happy path, discovery, id_token,
+      authorization response, token endpoint, DPoP nonce and JARM modules; client_auth_type=private_key_jwt and
+      sender_constrain=dpop only, mTLS is not covered; the ecosystem-only refresh token module and grant
+      management are not ported)
 - [ ] FAPI 1 Advanced, FAPI-CIBA
 - [ ] OpenID Federation, Shared Signals Framework, OpenID4VC issuer / wallet / verifier, eKYC, AuthZEN
 
