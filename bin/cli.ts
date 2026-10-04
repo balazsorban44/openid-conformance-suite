@@ -6,6 +6,7 @@
  *   openid-conformance run --plan <name> --config <file> [--variant k=v]... [--module <glob>] [--browser <name>] [--tls] [--headed] [--report-dir <dir>] [-- <playwright args>]
  *   openid-conformance ci --project <name> [--browser <name>] [-- <playwright args>]
  *   openid-conformance projects [--json]
+ *   openid-conformance ui [--port 3000] [--report-dir <dir>] [--results-dir <dir>]
  *
  * `run` and `ci` execute Playwright with the matching CONFORMANCE_* environment; playwright.config.ts picks the
  * plan's spec file (`plans` in src/runner/projects.ts: tests/op/*.spec.ts, tests/rp/*.spec.ts).
@@ -139,6 +140,32 @@ program
 			},
 			extra,
 		);
+	});
+
+program
+	.command("ui")
+	.description("start the web UI (ui/, Next.js): plans, runs with live progress, module logs (needs a checkout)")
+	.option("--port <port>", "port", "3000")
+	.option("--host <host>", "address to listen on (it starts runs: keep it local)", "127.0.0.1")
+	.option("--report-dir <dir>", "results.json / summary.md", "conformance-report")
+	.option("--results-dir <dir>", "Playwright's output directory (log.json, screenshots)", "test-results")
+	.action((opts: { port: string; host: string; reportDir: string; resultsDir: string }) => {
+		const next = join(root, "ui", "node_modules", "next", "dist", "bin", "next");
+		if (!existsSync(next)) {
+			program.error("the UI runs from a checkout of this repository: run `pnpm install` there, then `pnpm ui`");
+		}
+		const r = spawnSync(process.execPath, [next, "dev", "--hostname", opts.host, "--port", opts.port], {
+			stdio: "inherit",
+			cwd: join(root, "ui"),
+			env: {
+				...process.env,
+				CONFORMANCE_UI_ROOT: root,
+				CONFORMANCE_UI_CWD: process.cwd(),
+				CONFORMANCE_REPORT_DIR: resolve(process.cwd(), opts.reportDir),
+				CONFORMANCE_RESULTS_DIR: resolve(process.cwd(), opts.resultsDir),
+			},
+		});
+		process.exitCode = r.status ?? 1;
 	});
 
 program

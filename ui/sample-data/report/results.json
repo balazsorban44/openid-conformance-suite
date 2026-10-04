@@ -1,0 +1,1528 @@
+[
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "89735a8dd0d3",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 1025,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 55,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test: the RP logs in with the code flow and calls the userinfo endpoint",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-cb225-calls-the-userinfo-endpoint-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-cb225-calls-the-userinfo-endpoint-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-invalid-iss",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "77160bf8355d",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 135,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 51,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-invalid-iss: the RP rejects an id_token whose iss is not the issuer",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-02ba3-whose-iss-is-not-the-issuer-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-02ba3-whose-iss-is-not-the-issuer-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-missing-sub",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "aae60b424ec5",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 111,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 50,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-missing-sub: the RP rejects an id_token without sub",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-21599-cts-an-id-token-without-sub-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-21599-cts-an-id-token-without-sub-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-invalid-aud",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "82a361f1cf1a",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 113,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 51,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not its client_id",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-36ede-se-aud-is-not-its-client-id-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-36ede-se-aud-is-not-its-client-id-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-missing-iat",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "02a09284d79a",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 120,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 51,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-missing-iat: the RP rejects an id_token without iat",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-3c4e2-cts-an-id-token-without-iat-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-3c4e2-cts-an-id-token-without-iat-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-kid-absent-single-jwks",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "689d2e26a44f",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 119,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 51,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-kid-absent-single-jwks: the RP verifies an id_token without kid with the only matching key",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-f6fcd--with-the-only-matching-key-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-f6fcd--with-the-only-matching-key-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-kid-absent-multiple-jwks",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "4d5a2c041dbd",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 204,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 48,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-kid-absent-multiple-jwks: the RP rejects an id_token without kid or finds the key among several",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-d1439-finds-the-key-among-several-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-d1439-finds-the-key-among-several-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-idtoken-sig-rs256",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "20e15a8daf99",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 145,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 53,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-idtoken-sig-rs256: the RP accepts an id_token signed with RS256",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-d8c38--id-token-signed-with-RS256-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-d8c38--id-token-signed-with-RS256-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-idtoken-sig-none",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "aa2e7e6e0dd7",
+    "status": "FINISHED",
+    "result": "SKIPPED",
+    "ok": true,
+    "outcome": "skipped",
+    "durationMs": 144,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": true,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 47,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › code flow only › oidcc-client-test-idtoken-sig-none: the RP accepts an unsigned id_token from the token endpoint, or stops",
+    "skipReason": "Client did not send a userinfo request after receiving an unsigned id_token. As clients are not required to support unsigned (alg: none) id_tokens this is okay.",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-8f3a3-the-token-endpoint-or-stops-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-8f3a3-the-token-endpoint-or-stops-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-invalid-sig-rs256",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "06d18d153411",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 105,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 50,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-invalid-sig-rs256: the RP rejects an id_token with an invalid RS256 signature",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-bdb5b--an-invalid-RS256-signature-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-bdb5b--an-invalid-RS256-signature-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-userinfo-invalid-sub",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "cef7f43dc553",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 117,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 53,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › with an access token › oidcc-client-test-userinfo-invalid-sub: the RP gets a userinfo response whose sub is not the id_token's (it must reject it)",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-51bc7--token-s-it-must-reject-it--rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-51bc7--token-s-it-must-reject-it--rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-nonce-invalid",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "0279c702309a",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 153,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 51,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-nonce-invalid: the RP rejects an id_token whose nonce is not the one it sent",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-6816f-once-is-not-the-one-it-sent-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-6816f-once-is-not-the-one-it-sent-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-scope-userinfo-claims",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "17a86a95aec6",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 109,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 54,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › oidcc-client-test-scope-userinfo-claims: the RP requests claims with the profile, email, phone or address scope",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-6d373-mail-phone-or-address-scope-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-6d373-mail-phone-or-address-scope-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-client-basic-certification-test-plan",
+    "testName": "oidcc-client-test-client-secret-basic",
+    "variant": {
+      "client_registration": "dynamic_client",
+      "request_type": "plain_http_request",
+      "response_type": "code",
+      "response_mode": "default",
+      "client_auth_type": "client_secret_basic"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][request_type=plain_http_request][response_mode=default][response_type=code]",
+    "testId": "d6be1b28b3de",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 96,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 53,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "rp-basic › rp/basic.spec.ts › oidcc-client-basic-certification-test-plan › with a token endpoint › oidcc-client-test-client-secret-basic: the RP authenticates at the token endpoint with client_secret_basic",
+    "attachments": {
+      "log.json": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-d3e02-nt-with-client-secret-basic-rp-basic/log.json",
+      "log.html": "test-results/rp-basic/sample/rp-basic-oidcc-client-basi-d3e02-nt-with-client-secret-basic-rp-basic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-idtoken-rs256",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "386242d01b95",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 13669,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 57,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-idtoken-rs256: an id_token requested with RS256 is signed with RS256 and names its key",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-f22d1-ith-RS256-and-names-its-key-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-f22d1-ith-RS256-and-names-its-key-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-idtoken-unsigned",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "bd98561f10be",
+    "status": "FINISHED",
+    "result": "SKIPPED",
+    "ok": true,
+    "outcome": "skipped",
+    "durationMs": 32,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": true,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 13,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-idtoken-unsigned: an id_token requested with alg none is returned unsigned, or the test is skipped when the OP does not support none",
+    "skipReason": "The discovery endpoint 'id_token_signing_alg_values_supported' doesn't support 'none' algorithm; this cannot be tested (which is acceptable for certification, servers are not required to support 'none'",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-9475d-he-OP-does-not-support-none-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-9475d-he-OP-does-not-support-none-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-userinfo-rs256",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "0122878888a9",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 14565,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 66,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-userinfo-rs256: the userinfo response is a JWT signed with RS256 when the client registered for it",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-f2ffe-he-client-registered-for-it-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-f2ffe-he-client-registered-for-it-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-ensure-redirect-uri-in-authorization-request",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "bbc0c7a41509",
+    "status": "FINISHED",
+    "result": "REVIEW",
+    "ok": true,
+    "outcome": "review",
+    "durationMs": 6741,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 28,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-ensure-redirect-uri-in-authorization-request: a request without redirect_uri is answered with an error page, not a redirect",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-bf563-n-error-page-not-a-redirect-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-bf563-n-error-page-not-a-redirect-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-redirect-uri-query-OK",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "ad8a18316833",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 7890,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 55,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-redirect-uri-query-OK: a redirect_uri with the registered query component completes the authorization",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-36f55-completes-the-authorization-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-36f55-completes-the-authorization-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-redirect-uri-query-mismatch",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "d514b1735679",
+    "status": "FINISHED",
+    "result": "REVIEW",
+    "ok": true,
+    "outcome": "review",
+    "durationMs": 6476,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 28,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-redirect-uri-query-mismatch: a redirect_uri whose query differs from the registered one is rejected with an error page",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-bc56b-rejected-with-an-error-page-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-bc56b-rejected-with-an-error-page-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-redirect-uri-query-added",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "4ff44e957cfd",
+    "status": "FINISHED",
+    "result": "REVIEW",
+    "ok": true,
+    "outcome": "review",
+    "durationMs": 10406,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 28,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-redirect-uri-query-added: a redirect_uri with a query when none is registered is rejected with an error page",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-5e2a7-rejected-with-an-error-page-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-5e2a7-rejected-with-an-error-page-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-redirect-uri-regfrag",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "81aa00007d8b",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 40,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 8,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-redirect-uri-regfrag: a registration with a redirect_uri containing a fragment is rejected",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-c7370-ning-a-fragment-is-rejected-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-c7370-ning-a-fragment-is-rejected-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-discovery-endpoint-verification",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "client_secret_basic",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "0f2cf96ae84f",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 30,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 42,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-discovery-endpoint-verification: the discovery document is served as JSON and has the metadata the specifications require",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-4f811--the-specifications-require-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-4f811--the-specifications-require-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-server",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "a293cd540591",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 5041,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 60,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-server: the code flow returns a valid code, tokens and id_token, and the access token works at userinfo",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-0a176-ess-token-works-at-userinfo-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-0a176-ess-token-works-at-userinfo-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-registration-logo-uri",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "9cb5ed0bdd29",
+    "status": "FINISHED",
+    "result": "REVIEW",
+    "ok": true,
+    "outcome": "review",
+    "durationMs": 8125,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 16,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-registration-logo-uri: a client registered with a logo_uri gets a login page showing the logo",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-ae863-login-page-showing-the-logo-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-ae863-login-page-showing-the-logo-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-registration-policy-uri",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "09fac28fc952",
+    "status": "FINISHED",
+    "result": "REVIEW",
+    "ok": true,
+    "outcome": "review",
+    "durationMs": 5448,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 16,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-registration-policy-uri: a client registered with a policy_uri gets a login page linking to the policy",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-41d90--page-linking-to-the-policy-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-41d90--page-linking-to-the-policy-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-registration-tos-uri",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "8148cb31167c",
+    "status": "FINISHED",
+    "result": "REVIEW",
+    "ok": true,
+    "outcome": "review",
+    "durationMs": 10179,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 16,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-registration-tos-uri: a client registered with a tos_uri gets a login page linking to the terms of service",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-e67e9-ing-to-the-terms-of-service-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-e67e9-ing-to-the-terms-of-service-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-registration-jwks-uri",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "0e6b1c255374",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 15372,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 56,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-registration-jwks-uri: a client registered with a jwks_uri authenticates with keys the OP fetches from it",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-bf360-keys-the-OP-fetches-from-it-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-bf360-keys-the-OP-fetches-from-it-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-registration-sector-uri",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "fe433590582a",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 126,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 11,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-registration-sector-uri: a registration with a sector_identifier_uri listing the redirect_uri is accepted",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-71f0d-he-redirect-uri-is-accepted-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-71f0d-he-redirect-uri-is-accepted-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-registration-sector-bad",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "4d0d26acaa20",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 126,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 8,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-registration-sector-bad: a registration whose sector_identifier_uri does not list the redirect_uri is rejected",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-2dac5-he-redirect-uri-is-rejected-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-2dac5-he-redirect-uri-is-rejected-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-server-rotate-keys",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "client_secret_basic",
+      "response_mode": "default",
+      "server_metadata": "discovery"
+    },
+    "variantString": "[client_auth_type=client_secret_basic][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "8b864ef5aaee",
+    "status": "FINISHED",
+    "result": "FAILED",
+    "ok": true,
+    "outcome": "expected failure",
+    "durationMs": 97,
+    "analysis": {
+      "expected_failures": [
+        {
+          "current_block": "",
+          "src": "VerifyNewJwksHasNewSigningKey",
+          "msg": "No new keys with 'use':'sig' (or no 'use') found"
+        }
+      ],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 21,
+        "WARNING": 0,
+        "FAILURE": 1
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-server-rotate-keys: the OP's jwks_uri has a new signing key after a rotation and still has the old one",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-72eaf-n-and-still-has-the-old-one-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-72eaf-n-and-still-has-the-old-one-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-refresh-token-rp-key-rotation",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "8b00dd2749d4",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 66825,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 88,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-refresh-token-rp-key-rotation: a refresh token is accepted with a client assertion signed by a rotated RP key",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-8097b--signed-by-a-rotated-RP-key-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-8097b--signed-by-a-rotated-RP-key-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-request-uri-unsigned",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "a81d3b78d8e7",
+    "status": "FINISHED",
+    "result": "SKIPPED",
+    "ok": true,
+    "outcome": "skipped",
+    "durationMs": 69,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": true,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 23,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-request-uri-unsigned: an authorization request passing an unsigned request object by reference completes",
+    "skipReason": "'none' is not listed in request_object_signing_alg_values_supported - assuming it is not supported.",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-a4f47-ject-by-reference-completes-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-a4f47-ject-by-reference-completes-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-request-uri-signed-rs256",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "903bb31c3db7",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 9480,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 61,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-request-uri-signed-rs256: an authorization request passing an RS256 signed request object by reference completes",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-3a5d1-ject-by-reference-completes-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-3a5d1-ject-by-reference-completes-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-ensure-request-object-with-redirect-uri",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "050e1fcca2cf",
+    "status": "FINISHED",
+    "result": "SKIPPED",
+    "ok": true,
+    "outcome": "skipped",
+    "durationMs": 116,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": true,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 22,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-ensure-request-object-with-redirect-uri: the redirect_uri in the request object takes precedence over an invalid redirect_uri parameter",
+    "skipReason": "'none' is not listed in request_object_signing_alg_values_supported - assuming it is not supported.",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-3268c-alid-redirect-uri-parameter-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-3268c-alid-redirect-uri-parameter-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-refresh-token",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "c02b83e6ade8",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 12338,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 163,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-refresh-token: refresh tokens are issued to and usable by their client only, and refresh the tokens",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-fc607-only-and-refresh-the-tokens-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-fc607-only-and-refresh-the-tokens-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-dynamic-certification-test-plan",
+    "testName": "oidcc-ensure-client-assertion-with-iss-aud-succeeds",
+    "variant": {
+      "response_type": "code",
+      "client_auth_type": "private_key_jwt",
+      "response_mode": "default",
+      "server_metadata": "discovery",
+      "client_registration": "dynamic_client"
+    },
+    "variantString": "[client_auth_type=private_key_jwt][client_registration=dynamic_client][response_mode=default][response_type=code][server_metadata=discovery]",
+    "testId": "539a9bca88ba",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 7216,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 53,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-dynamic › op/dynamic.spec.ts › oidcc-dynamic-certification-test-plan › oidcc-ensure-client-assertion-with-iss-aud-succeeds: a client assertion with the issuer as audience is accepted at the token endpoint, or rejected with invalid_client",
+    "attachments": {
+      "log.json": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-b148d-ejected-with-invalid-client-op-dynamic/log.json",
+      "log.html": "test-results/op-dynamic/sample/op-dynamic-oidcc-dynamic-c-b148d-ejected-with-invalid-client-op-dynamic/log.html"
+    }
+  },
+  {
+    "plan": "oidcc-config-certification-test-plan",
+    "testName": "oidcc-discovery-endpoint-verification",
+    "variant": {
+      "server_metadata": "discovery",
+      "client_registration": "static_client"
+    },
+    "variantString": "[client_registration=static_client][server_metadata=discovery]",
+    "testId": "d3671059028e",
+    "status": "FINISHED",
+    "result": "PASSED",
+    "ok": true,
+    "outcome": "passed",
+    "durationMs": 97,
+    "analysis": {
+      "expected_failures": [],
+      "unexpected_failures": [],
+      "expected_failures_did_not_happen": [],
+      "expected_warnings": [],
+      "unexpected_warnings": [],
+      "expected_warnings_did_not_happen": [],
+      "expected_skip": false,
+      "unexpected_skip": false,
+      "expected_skip_did_not_happen": false,
+      "counts": {
+        "SUCCESS": 42,
+        "WARNING": 0,
+        "FAILURE": 0
+      },
+      "ok": true
+    },
+    "title": "op-config › op/config.spec.ts › oidcc-config-certification-test-plan › oidcc-discovery-endpoint-verification: the discovery document is served as JSON and has the metadata the specifications require",
+    "attachments": {
+      "log.json": "test-results/op-config/sample/op-config-oidcc-config-cer-4046f--the-specifications-require-op-config/log.json",
+      "log.html": "test-results/op-config/sample/op-config-oidcc-config-cer-4046f--the-specifications-require-op-config/log.html"
+    }
+  }
+]

@@ -1,0 +1,11 @@
+oidc-provider WARNING: a quick start development-only in-memory adapter is used, you MUST change it in order to not lose all stateful provider data upon restart and to be able to share these between processes
+oidc-provider WARNING: a quick start development-only feature devInteractions is enabled, you are expected to disable these interactions and provide your own
+oidc-provider listening, issuer https://localhost:33475, discovery https://localhost:33475/.well-known/openid-configuration
+ready
+oidc-provider NOTICE: default ttl.Interaction function called, you SHOULD change it in order to define the expiration for Interaction artifacts.
+oidc-provider NOTICE: default ttl.Session function called, you SHOULD change it in order to define the expiration for Session artifacts.
+oidc-provider NOTICE: default ttl.Grant function called, you SHOULD change it in order to define the expiration for Grant artifacts.
+oidc-provider NOTICE: default ttl.AccessToken function called, you SHOULD change it in order to define the expiration for AccessToken artifacts.
+oidc-provider NOTICE: default ttl.IdToken function called, you SHOULD change it in order to define the expiration for IdToken artifacts.
+oidc-provider NOTICE: default renderError function called, you SHOULD change it in order to customize the look of the error page.
+oidc-provider NOTICE: default ttl.RefreshToken function called, you SHOULD change it in order to define the expiration for RefreshToken artifacts.

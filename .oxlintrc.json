@@ -31,5 +31,14 @@
 		"unicorn/no-array-sort": "off",
 		"no-useless-concat": "off"
 	},
-	"ignorePatterns": ["node_modules", "test-results", "playwright-report", "conformance-report", ".upstream"]
+	"ignorePatterns": [
+		"node_modules",
+		"test-results",
+		"playwright-report",
+		"conformance-report",
+		"ui/sample-data",
+		".upstream",
+		".next",
+		"next-env.d.ts"
+	]
 }

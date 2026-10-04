@@ -8,3 +8,11 @@ conformance-report/
 
 # agent worktrees
 .claude/worktrees/
+
+# Vercel CLI (`vercel pull` / `vercel build`, .github/workflows/deploy-ui.yml)
+.vercel/
+
+# ui (Next.js)
+.next/
+next-env.d.ts
+*.tsbuildinfo
