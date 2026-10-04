@@ -82,6 +82,52 @@
 			]
 		}
 	],
+	"override": {
+		"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds": {
+			"browser": [
+				{
+					"comment": "first visit: the login page is shown and the user takes no action",
+					"match": "${TARGET_URL}/auth*",
+					"match-limit": 1,
+					"tasks": [
+						{
+							"task": "Login page",
+							"match": "${TARGET_URL}/interaction*",
+							"commands": [["wait", "class", "login-submit", 10]]
+						}
+					]
+				},
+				{
+					"comment": "second visit with the same request_uri: log in (a screenshot of the login page fills the placeholder)",
+					"match": "${TARGET_URL}/auth*",
+					"tasks": [
+						{
+							"task": "Login",
+							"optional": true,
+							"match": "${TARGET_URL}/interaction*",
+							"commands": [
+								["wait", "xpath", "//*", 10, "Sign-in", "update-image-placeholder-optional"],
+								["text", "name", "login", "foo", "optional"],
+								["text", "name", "password", "bar", "optional"],
+								["click", "class", "login-submit"]
+							]
+						},
+						{
+							"task": "Consent",
+							"optional": true,
+							"match": "${TARGET_URL}/interaction*",
+							"commands": [["click", "class", "login-submit"]]
+						},
+						{
+							"task": "Verify Complete",
+							"match": "*/test/*/callback*",
+							"commands": [["wait", "id", "submission_complete", 10]]
+						}
+					]
+				}
+			]
+		}
+	},
 	"target": {
 		"command": "node targets/oidc-provider/server.ts",
 		"url": "https://localhost:${PORT}",

@@ -19,14 +19,27 @@ import {
 	fapi2EnsureAuthorizationRequestWithoutStateSuccess,
 	fapi2EnsureClientAssertionInTokenEndpoint,
 	fapi2EnsureClientIdInTokenEndpoint,
+	fapi2EnsureDifferentNonceInsideAndOutsideRequestObject,
+	fapi2EnsureDifferentStateInsideAndOutsideRequestObject,
 	fapi2EnsureHolderOfKeyRequired,
 	fapi2EnsureInvalidClientAssertionsFail,
 	fapi2EnsureMismatchedDpopJktFails,
 	fapi2EnsureOtherScopeOrderSucceeds,
+	fapi2EnsureRequestObjectWithoutRedirectUriFails,
 	fapi2HappyFlow,
+	fapi2PARAttemptReuseRequestUri,
+	fapi2PARAttemptToUseExpiredRequestUri,
+	fapi2PAREnsurePKCECodeVerifierRequired,
 	fapi2PAREnsurePKCERequired,
+	fapi2PAREnsurePlainPKCERejected,
+	fapi2PAREnsureRequestUriIsBoundToClient,
+	fapi2PAREnsureServerAcceptsReusedRequestUriBeforeAuthenticationCompletion,
+	fapi2PARIncorrectPKCECodeVerifierRejected,
+	fapi2PARRejectInvalidHttpVerb,
+	fapi2PARRejectRequestUriInParAuthorizationFormParams,
 	fapi2ParWithoutDuplicateParameters,
 	fapi2RefreshToken,
+	fapi2StateOnlyOutsideRequestObjectNotUsed,
 } from "./shared.ts";
 
 test.describe("fapi2-security-profile-final-test-plan", () => {
@@ -145,6 +158,86 @@ test.describe("fapi2-security-profile-final-test-plan", () => {
 		fapi2ParWithoutDuplicateParameters,
 	);
 
+	// upstream: fapi2spfinal/FAPI2SPFinalEnsureDifferentNonceInsideAndOutsideRequestObject.java
+	if (!plainOauth) {
+		test(
+			"fapi2-security-profile-final-ensure-different-nonce-inside-and-outside-request-object: a nonce outside the request object differing from the one inside is rejected with invalid_request or ignored",
+			fapi2EnsureDifferentNonceInsideAndOutsideRequestObject,
+		);
+	}
+
+	// upstream: fapi2spfinal/FAPI2SPFinalEnsureDifferentStateInsideAndOutsideRequestObject.java
+	test(
+		"fapi2-security-profile-final-ensure-different-state-inside-and-outside-request-object: a state outside the request object differing from the one inside is rejected with invalid_request or ignored",
+		fapi2EnsureDifferentStateInsideAndOutsideRequestObject,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalStateOnlyOutsideRequestObjectNotUsed.java
+	test(
+		"fapi2-security-profile-final-state-only-outside-request-object-not-used: a state only outside the request object is ignored (no state, no s_hash) or the request rejected",
+		fapi2StateOnlyOutsideRequestObjectNotUsed,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithoutRedirectUriFails.java
+	test(
+		"fapi2-security-profile-final-ensure-request-object-without-redirect-uri-fails: a request without redirect_uri is rejected at the PAR or the authorization endpoint",
+		fapi2EnsureRequestObjectWithoutRedirectUriFails,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPAREnsureServerAcceptsReusedRequestUriBeforeAuthenticationCompletion.java
+	test(
+		"fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds: a request_uri visited once without logging in is still accepted on the second visit",
+		fapi2PAREnsureServerAcceptsReusedRequestUriBeforeAuthenticationCompletion,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPARAttemptReuseRequestUri.java
+	test(
+		"fapi2-security-profile-final-par-attempt-reuse-request_uri: a request_uri already used for an authorization is rejected with invalid_request_uri (a warning when it is accepted)",
+		fapi2PARAttemptReuseRequestUri,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPARAttemptToUseExpiredRequestUri.java
+	test(
+		"fapi2-security-profile-final-par-attempt-to-use-expired-request_uri: a request_uri used after its expires_in is rejected with invalid_request_uri",
+		fapi2PARAttemptToUseExpiredRequestUri,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPAREnsureRequestUriIsBoundToClient.java
+	test(
+		"fapi2-security-profile-final-par-attempt-to-use-request_uri-for-different-client: the first client's request_uri sent with the second client's client_id is rejected",
+		fapi2PAREnsureRequestUriIsBoundToClient,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPARRejectRequestUriInParAuthorizationFormParams.java
+	test(
+		"fapi2-security-profile-final-par-authorization-request-containing-request_uri-form-param: a PAR request with a request_uri form parameter is rejected",
+		fapi2PARRejectRequestUriInParAuthorizationFormParams,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPARRejectInvalidHttpVerb.java
+	test(
+		"fapi2-security-profile-final-par-attempt-invalid-http-method: a PUT to the PAR endpoint is answered with an HTTP error",
+		fapi2PARRejectInvalidHttpVerb,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPAREnsurePKCECodeVerifierRequired.java
+	test(
+		"fapi2-security-profile-final-ensure-pkce-code-verifier-required: a token request without code_verifier is rejected with invalid_grant",
+		fapi2PAREnsurePKCECodeVerifierRequired,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPARIncorrectPKCECodeVerifierRejected.java
+	test(
+		"fapi2-security-profile-final-incorrect-pkce-code-verifier-rejected: a token request with a wrong code_verifier is rejected with invalid_grant",
+		fapi2PARIncorrectPKCECodeVerifierRejected,
+	);
+
+	// upstream: fapi2spfinal/FAPI2SPFinalPAREnsurePlainPKCERejected.java
+	test(
+		"fapi2-security-profile-final-par-plain-pkce-rejected: a PAR request with code_challenge_method=plain is rejected at the PAR or the authorization endpoint",
+		fapi2PAREnsurePlainPKCERejected,
+	);
+
 	// TODO(port): FAPI2SPFinalUserRejectsAuthentication.java
 	// TODO(port): FAPI2SPFinalEnsureAuthorizationRequestWith64CharNonceSuccess.java
 	// TODO(port): FAPI2SPFinalTestClaimsParameterIdentityClaims.java
@@ -155,12 +248,8 @@ test.describe("fapi2-security-profile-final-test-plan", () => {
 	// TODO(port): FAPI2SPFinalEnsureTokenEndpointFailsWithMismatchedDpopJkt.java
 	// TODO(port): FAPI2SPFinalEnsureDpopProofAtParEndpointBindingSuccess.java
 	// TODO(port): FAPI2SPFinalEnsureDpopAuthCodeBindingSuccess.java
-	// TODO(port): FAPI2SPFinalEnsureDifferentNonceInsideAndOutsideRequestObject.java
-	// TODO(port): FAPI2SPFinalEnsureDifferentStateInsideAndOutsideRequestObject.java
 	// TODO(port): FAPI2SPFinalEnsureAuthorizationRequestWithLongNonce.java
 	// TODO(port): FAPI2SPFinalEnsureAuthorizationRequestWithLongState.java
-	// TODO(port): FAPI2SPFinalStateOnlyOutsideRequestObjectNotUsed.java
-	// TODO(port): FAPI2SPFinalEnsureRequestObjectWithoutRedirectUriFails.java
 	// TODO(port): FAPI2SPFinalEnsureRegisteredRedirectUri.java (not applicable to fapi_profile=plain_fapi)
 	// TODO(port): FAPI2SPFinalTolerateUnregisteredRedirectUri.java
 	// TODO(port): FAPI2SPFinalEnsureUnsignedAuthorizationRequestWithoutUsingParFails.java
@@ -181,15 +270,6 @@ test.describe("fapi2-security-profile-final-test-plan", () => {
 	// TODO(port): FAPI2SPFinalCdrEnsureUnrecognisedArrangementIdFails.java (fapi_profile=consumerdataright_au only)
 	// TODO(port): FAPI2SPFinalBrazilEnsureBadPaymentSignatureFails.java (fapi_profile=openbanking_brazil only)
 	// TODO(port): FAPI2SPFinalAustraliaConnectIdTestClaimsParameterIdTokenIdentityClaims.java (fapi_profile=connectid_au only)
-	// TODO(port): FAPI2SPFinalPAREnsureServerAcceptsReusedRequestUriBeforeAuthenticationCompletion.java
-	// TODO(port): FAPI2SPFinalPARAttemptReuseRequestUri.java
-	// TODO(port): FAPI2SPFinalPARAttemptToUseExpiredRequestUri.java
-	// TODO(port): FAPI2SPFinalPAREnsureRequestUriIsBoundToClient.java
-	// TODO(port): FAPI2SPFinalPARRejectRequestUriInParAuthorizationFormParams.java
-	// TODO(port): FAPI2SPFinalPARRejectInvalidHttpVerb.java
-	// TODO(port): FAPI2SPFinalPAREnsurePKCECodeVerifierRequired.java
-	// TODO(port): FAPI2SPFinalPARIncorrectPKCECodeVerifierRejected.java
-	// TODO(port): FAPI2SPFinalPAREnsurePlainPKCERejected.java
 	// TODO(port): FAPI2SPFinalGrantManagementQueryAndRevoke.java (grant_management=enabled only)
 	// TODO(port): FAPI2SPFinalGrantManagementMerge.java (grant_management=enabled only)
 	// TODO(port): FAPI2SPFinalGrantManagementReplace.java (grant_management=enabled only)

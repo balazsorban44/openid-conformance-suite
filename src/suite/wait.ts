@@ -3,7 +3,7 @@
  * differs, 30 seconds before an authorization code is used again). Never use these to wait for something to happen
  * (wait for the request or the page instead).
  */
-import { condition } from "./conditions.ts";
+import { condition, type Condition } from "./conditions.ts";
 import type { TestConfig } from "./config.ts";
 
 /** upstream: condition/common/AbstractWaitForSpecifiedSeconds.java */
@@ -49,4 +49,18 @@ function configuredDelay(config: TestConfig | undefined, key: string, max: numbe
  */
 export function waitForJWKSRefreshDelay(config: TestConfig): Promise<void> {
 	return waitForSpecifiedSeconds("WaitForJWKSRefreshDelay", configuredDelay(config, "jwks_refresh_delay", 60));
+}
+
+/**
+ * The lifetime of a request_uri (the PAR response's expires_in, upstream env "expires_in"), so that it has expired
+ * before it is used.
+ *
+ * upstream: condition/client/WaitForExpiry.java
+ */
+export function waitForExpiry(expiresIn: number | null): Promise<void> {
+	const c: Condition = condition("WaitForExpiry");
+	if (expiresIn == null) {
+		c.failure("Missing key expires_in");
+	}
+	return waitForSpecifiedSeconds("WaitForExpiry", expiresIn);
 }

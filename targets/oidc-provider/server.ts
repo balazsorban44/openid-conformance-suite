@@ -19,6 +19,8 @@
  *                                     profile, PAR required, DPoP with server nonces, JARM, signed request objects,
  *                                     PKCE S256, private_key_jwt clients (clients-fapi2.json), x-fapi-interaction-id
  *                                     on userinfo responses. Without it the target behaves as for the OIDCC plans.
+ *   OIDC_PROVIDER_FAPI2_SIGNED_REQUESTS=1  FAPI 2.0 mode with signed request objects required of the static clients
+ *                                     (require_signed_request_object; the fapi2-message-signing project)
  *   DEBUG_OIDC_PROVIDER=1             log every request and provider error
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -210,6 +212,13 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 				"utf8",
 			),
 	);
+	if (FAPI2 && env["OIDC_PROVIDER_FAPI2_SIGNED_REQUESTS"] === "1") {
+		// fapi2-security-profile-final-ensure-unsigned-request-at-par-endpoint-fails (fapi_request_method=
+		// signed_non_repudiation): the clients of the message signing plan only accept signed request objects
+		for (const client of staticClients) {
+			client["require_signed_request_object"] = true;
+		}
+	}
 	const staticClientIds = new Set(staticClients.map((c) => String(c["client_id"])));
 
 	// ML-DSA is filtered out like upstream's CI (conformance-suite#1598); everything else oidc-provider implements is

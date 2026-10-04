@@ -2,11 +2,21 @@ import { describe, expect, test } from "vitest";
 import { ConditionFailed } from "../suite/conditions.ts";
 import { useTestLog } from "../suite/testing.ts";
 import {
+	addBadRequestUriToAuthorizationRequest,
+	addClientIdToAuthorizationEndpointRequest,
 	addIdTokenEssentialNameClaimToAuthorizationEndpointRequest,
+	addIncorrectNonceToAuthorizationEndpointRequest,
+	addIncorrectStateToAuthorizationEndpointRequest,
 	checkErrorFromAuthorizationEndpointErrorInvalidRequest,
+	checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject,
+	checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri,
+	createPlainCodeChallenge,
+	ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError,
+	ensureInvalidRequestUriError,
 	extractAccessTokenFromAuthorizationResponse,
 	extractIdTokenFromAuthorizationResponse,
 	validateIdTokenFromAuthorizationResponseEncryption,
+	warningAboutRequestUriError,
 	type AuthorizationResponse,
 } from "./authorization.ts";
 import type { RegisteredClient } from "./registration.ts";
@@ -98,5 +108,113 @@ describe("claims request parameter", () => {
 			src: "AddIdTokenEssentialNameClaimToAuthorizationEndpointRequest",
 			msg: "Added name claim to authorization_endpoint_request",
 		});
+	});
+});
+
+describe("the errors the FAPI 2.0 request_uri and request object modules permit", () => {
+	test("invalid_request_uri only (EnsureInvalidRequestUriError)", () => {
+		ensureInvalidRequestUriError(fragmentResponse({ error: "invalid_request_uri" }), "PAR-2.2");
+		expect(last()).toMatchObject({
+			src: "EnsureInvalidRequestUriError",
+			result: "SUCCESS",
+			msg: "Authorization endpoint returned expected 'error' of 'invalid_request_uri'",
+			requirements: ["PAR-2.2"],
+		});
+		expect(() => ensureInvalidRequestUriError(fragmentResponse({ error: "invalid_request" }))).toThrow(ConditionFailed);
+		expect(last()).toMatchObject({ msg: "'error' field has unexpected value", expected: "invalid_request_uri" });
+		expect(() => ensureInvalidRequestUriError(fragmentResponse({ code: "c" }))).toThrow(
+			"Expected 'error' field not found",
+		);
+	});
+
+	test("the AbstractEnsureAuthorizationEndpointError messages differ from the other permitted-error conditions", () => {
+		ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError(
+			fragmentResponse({ error: "invalid_request_object" }),
+			"PAR-3-3",
+		);
+		expect(last()).toMatchObject({
+			src: "EnsureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError",
+			result: "SUCCESS",
+			msg: "Authorization endpoint returned 'error'",
+			permitted: ["invalid_request", "invalid_request_object", "invalid_request_uri"],
+			error: "invalid_request_object",
+		});
+		expect(() =>
+			ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError(fragmentResponse({ code: "c" })),
+		).toThrow("The server was expected to return an error, but no error was returned");
+		expect(() =>
+			ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError(fragmentResponse({ error: "access_denied" })),
+		).toThrow("'error' field has unexpected value");
+	});
+
+	test("CheckErrorFromAuthorizationEndpointError... list the expected values", () => {
+		checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject(
+			fragmentResponse({ error: "invalid_request" }),
+			"OIDCC-3.1.2.6",
+		);
+		expect(last()).toMatchObject({
+			src: "CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject",
+			result: "SUCCESS",
+			msg: "Authorization endpoint returned expected error",
+			expected: ["invalid_request_object", "invalid_request"],
+			actual: "invalid_request",
+		});
+		checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri(
+			fragmentResponse({ error: "invalid_request_uri" }),
+		);
+		expect(last()).toMatchObject({
+			result: "SUCCESS",
+			expected: ["invalid_request_object", "invalid_request", "invalid_request_uri"],
+		});
+		expect(() =>
+			checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject(
+				fragmentResponse({ error: "invalid_request_uri" }),
+			),
+		).toThrow("'error' field has unexpected value");
+		expect(() => warningAboutRequestUriError("FAPI2-SP-FINAL-5.3.2.2")).toThrow(
+			"The server rejected reuse of the 'request_uri' prior to authentication completion.",
+		);
+		expect(last()).toMatchObject({ src: "WarningAboutRequestUriError", requirements: ["FAPI2-SP-FINAL-5.3.2.2"] });
+	});
+
+	test("the parameters the modules add outside the request object", () => {
+		const params: Record<string, unknown> = { client_id: "c1", state: "s", nonce: "n" };
+		addIncorrectNonceToAuthorizationEndpointRequest(params);
+		expect(params["nonce"]).toMatch(/^[A-Za-z0-9]{10}$/);
+		expect(params["nonce"]).not.toBe("n");
+		expect(last()).toMatchObject({
+			src: "AddIncorrectNonceToAuthorizationEndpointRequest",
+			msg: "Added incorrect nonce parameter to request",
+			nonce: params["nonce"],
+		});
+		addIncorrectStateToAuthorizationEndpointRequest(params);
+		expect(params["state"]).toMatch(/^[A-Za-z0-9]{10}$/);
+		expect(last()).toMatchObject({ src: "AddIncorrectStateToAuthorizationEndpointRequest", state: params["state"] });
+		addClientIdToAuthorizationEndpointRequest(params, { client_id: "c2" }, "PAR-4");
+		expect(params["client_id"]).toBe("c2");
+		expect(last()).toMatchObject({
+			src: "AddClientIdToAuthorizationEndpointRequest",
+			msg: "Added client_id of 'c2' to authorization endpoint request",
+			requirements: ["PAR-4"],
+		});
+		expect(() => addClientIdToAuthorizationEndpointRequest(params, { client_id: "" })).toThrow(
+			"client_id missing/empty in client object",
+		);
+		addBadRequestUriToAuthorizationRequest(params, "PAR-2");
+		expect(params["request_uri"]).toBe("urn%3Aexample%3Abwc4JK-ESC0w8acc191e-Y1LTC2");
+		expect(last()).toMatchObject({
+			src: "AddBadRequestUriToAuthorizationRequest",
+			msg: "Added bad request_uri to request object",
+			request_uri: "urn%3Aexample%3Abwc4JK-ESC0w8acc191e-Y1LTC2",
+		});
+	});
+
+	test("a plain code challenge is the verifier itself", () => {
+		expect(createPlainCodeChallenge("verifier-1")).toEqual({
+			codeChallenge: "verifier-1",
+			codeChallengeMethod: "plain",
+		});
+		expect(last()).toMatchObject({ src: "CreatePlainCodeChallenge", code_challenge: "verifier-1" });
+		expect(() => createPlainCodeChallenge("")).toThrow("code_verifier was null or empty");
 	});
 });

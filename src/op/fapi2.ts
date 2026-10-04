@@ -170,6 +170,11 @@ export function setupResourceEndpoint(op: Pick<Fapi2Op, "config">): Resource {
 
 /** The FAPI 2 authorization request: the OIDCC one plus PKCE and the request object of signed_non_repudiation */
 export interface Fapi2AuthorizationRequest extends authz.AuthorizationRequest {
+	/**
+	 * upstream env "state": CreateRandomStateValue always runs, so a module that leaves the state out of the request
+	 * (`omit.state`) still has the value (StateOnlyOutsideRequestObjectNotUsed sends it outside the request object)
+	 */
+	state: string | null;
 	/** The PKCE code_verifier (upstream "code_verifier"), null when the module leaves PKCE out */
 	codeVerifier: string | null;
 	/**
@@ -190,8 +195,8 @@ export interface Fapi2AuthorizationRequestOptions {
 	omit?: { state?: string; nonce?: [string, string] };
 	/** CreateRandomNonceValue's `requested_nonce_length` (FAPI2SPFinalHappyFlow: 43 for the second client) */
 	nonceLength?: number;
-	/** Steps the module adds after the standard ones (upstream `.then(condition(...))`) */
-	steps?: (params: Record<string, unknown>) => void | Promise<void>;
+	/** Steps the module adds after the standard ones (upstream `.then(condition(...))`); `pkce` is the code_verifier created */
+	steps?: (params: Record<string, unknown>, pkce: { codeVerifier: string | null }) => void | Promise<void>;
 }
 
 /**
@@ -211,13 +216,11 @@ export async function createAuthorizationRequest(
 	const isOpenId = op.variant.openid === "openid_connect";
 	const jarmMode = op.variant.fapi_response_mode === "jarm";
 	const params = authz.createAuthorizationEndpointRequestFromClientInformation(client.client, redirectUri);
-	let state: string | null = null;
+	// upstream `.skip(AddStateToAuthorizationEndpointRequest, reason)` leaves CreateRandomStateValue in place
+	const state = authz.createRandomStateValue(client.second ? 128 : undefined);
 	if (opts.omit?.state === undefined) {
-		state = authz.createRandomStateValue(client.second ? 128 : undefined);
 		authz.addStateToAuthorizationEndpointRequest(params, state);
 	} else {
-		// upstream `.skip(AddStateToAuthorizationEndpointRequest, reason)` leaves CreateRandomStateValue in place
-		authz.createRandomStateValue(client.second ? 128 : undefined);
 		condition("AddStateToAuthorizationEndpointRequest").log(opts.omit.state);
 	}
 	let nonce: string | null = null;
@@ -235,7 +238,7 @@ export async function createAuthorizationRequest(
 		authz.setAuthorizationEndpointRequestResponseModeToJWT(params);
 	}
 	const codeVerifier = opts.usePkce === false ? null : authz.setupPkceAndAddToAuthorizationRequest(params);
-	await opts.steps?.(params);
+	await opts.steps?.(params, { codeVerifier });
 	return {
 		params,
 		state,
@@ -259,6 +262,16 @@ export interface RequestObjectOptions {
 	/** upstream `.replace(AddExpToRequestObject, condition)` / `.replace(AddAudToRequestObject, condition)` */
 	exp?: (claims: Record<string, unknown>) => void;
 	aud?: (claims: Record<string, unknown>) => void;
+	/** upstream `.skip(AddNbfToRequestObject, reason)`: the reason logged in its place */
+	omitNbf?: string;
+	/** upstream `.replace(AddNbfToRequestObject, condition)` */
+	nbf?: (claims: Record<string, unknown>) => void;
+	/** upstream `.insertBefore(SignRequestObject, condition)` */
+	beforeSign?: (claims: Record<string, unknown>) => void;
+	/** upstream `.replace(SignRequestObject, condition)`: returns the request object */
+	sign?: (claims: Record<string, unknown>, client: Fapi2Client) => Promise<string>;
+	/** upstream `.insertAfter(SignRequestObject, condition)`: returns the (altered) request object */
+	afterSign?: (requestObject: string) => string;
 }
 
 /**
@@ -279,7 +292,13 @@ export async function createAuthorizationRequestObject(
 		requestObject.addIatToRequestObject(claims);
 	}
 	// mandatory in FAPI2-Message-Signing-Final
-	requestObject.addNbfToRequestObject(claims, "FAPI2-MS-ID1-5.3.1-3");
+	if (opts.omitNbf !== undefined) {
+		condition("AddNbfToRequestObject").log(opts.omitNbf);
+	} else if (opts.nbf) {
+		opts.nbf(claims);
+	} else {
+		requestObject.addNbfToRequestObject(claims, "FAPI2-MS-ID1-5.3.1-3");
+	}
 	if (opts.omitExp !== undefined) {
 		condition("AddExpToRequestObject").log(opts.omitExp);
 	} else if (opts.exp) {
@@ -297,9 +316,16 @@ export async function createAuthorizationRequestObject(
 	// jwsreq-26 is very explicit that client_id should be both inside and outside the request object
 	requestObject.addClientIdToRequestObject(claims, client.client, "JAR-5", "FAPI2-MS-ID1-5.3.2-1");
 	request.requestObjectClaims = claims;
-	request.requestObject = client.second
-		? await requestObject.signRequestObjectIncludeMediaType(claims, client, "JAR-4")
-		: await requestObject.signRequestObject(claims, client);
+	opts.beforeSign?.(claims);
+	let signed = opts.sign
+		? await opts.sign(claims, client)
+		: client.second
+			? await requestObject.signRequestObjectIncludeMediaType(claims, client, "JAR-4")
+			: await requestObject.signRequestObject(claims, client);
+	if (opts.afterSign) {
+		signed = opts.afterSign(signed);
+	}
+	request.requestObject = signed;
 }
 
 // ---- the PAR flow ----
@@ -350,6 +376,8 @@ export async function callParEndpointAndStopOnFailure(
 		/** the client authentication of this request (upstream addClientAuthenticationToPAREndpointRequest overrides) */
 		addClientAuthentication?: (req: par.ParRequest) => Promise<void>;
 		requirements?: string[];
+		/** upstream "par_endpoint_http_method" (fapi2-security-profile-final-par-attempt-invalid-http-method: PUT) */
+		method?: par.CallPAREndpointOptions["method"];
 	} = {},
 ): Promise<par.ParResponse> {
 	const requirements = opts.requirements ?? [];
@@ -369,7 +397,7 @@ export async function callParEndpointAndStopOnFailure(
 		return response as par.ParResponse;
 	}
 	await authenticate(req);
-	return par.callPAREndpoint(op, req, { requirements });
+	return par.callPAREndpoint(op, req, { requirements, method: opts.method });
 }
 
 /** upstream: AbstractFAPI2SPFinalServerTestModule.createDpopForParEndpoint */
@@ -419,8 +447,9 @@ function ensureContentTypeJsonOfPar(res: par.ParResponse): void {
 
 /**
  * The redirect to the authorization endpoint with the request_uri: with the duplicated OAuth parameters
- * (BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint, reversed for the second client of the happy flow),
- * or only client_id and request_uri (`withoutDuplicates`, PAR-4 / JAR-5).
+ * (BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint, reversed for the second client of the happy flow,
+ * with the state exposed for the modules whose request object the OP cannot verify), or only client_id and
+ * request_uri (`withoutDuplicates`, PAR-4 / JAR-5).
  *
  * upstream: AbstractFAPI2SPFinalServerTestModule.performPARRedirectWithRequestUri (the build part), with
  * FAPI2ProfileBehavior.getBuildRequestObjectByReferenceRedirectCondition
@@ -429,7 +458,7 @@ export function buildPARRedirect(
 	op: Pick<Fapi2Op, "metadata">,
 	request: Fapi2AuthorizationRequest,
 	requestUri: string,
-	opts: { reorderParameters?: boolean; withoutDuplicates?: boolean } = {},
+	opts: { reorderParameters?: boolean; withoutDuplicates?: boolean; exposeState?: boolean } = {},
 	...requirements: string[]
 ): void {
 	request.url = opts.withoutDuplicates
@@ -448,13 +477,22 @@ export function buildPARRedirect(
 					requestUri,
 					...requirements,
 				)
-			: requestObject.buildRequestObjectByReferenceRedirectToAuthorizationEndpoint(
-					op,
-					request.params,
-					request.requestObjectClaims,
-					requestUri,
-					...requirements,
-				);
+			: opts.exposeState
+				? requestObject.buildRequestObjectByReferenceRedirectToAuthorizationEndpointExposingState(
+						op,
+						request.params,
+						request.requestObjectClaims,
+						requestUri,
+						request.state,
+						...requirements,
+					)
+				: requestObject.buildRequestObjectByReferenceRedirectToAuthorizationEndpoint(
+						op,
+						request.params,
+						request.requestObjectClaims,
+						requestUri,
+						...requirements,
+					);
 }
 
 // ---- the callback ----

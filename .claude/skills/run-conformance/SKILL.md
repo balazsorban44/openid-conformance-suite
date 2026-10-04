@@ -68,8 +68,14 @@ browser tasks of the authorization endpoint. The second client's redirect_uri is
 `?dummy1=lorem&dummy2=ipsum` (both must be registered). The bundled target: `OIDC_PROVIDER_PROFILE=fapi2` in the
 config's `target.env` starts oidc-provider with its FAPI 2.0 profile, PAR required, DPoP with nonces required,
 JARM and the two private_key_jwt clients of targets/oidc-provider/clients-fapi2.json (their private keys are in
-configs/oidc-provider/fapi2-_.json). The DPoP nonce retries (`use_dpop_nonce` at the PAR, token and resource
-endpoints) are exercised because the target requires nonces.
+configs/oidc-provider/fapi2-_.json); the signed request object project (`fapi2-message-signing`,
+configs/oidc-provider/fapi2-message-signing.json) adds `OIDC_PROVIDER_FAPI2_SIGNED_REQUESTS=1`, which registers the
+clients with `require_signed_request_object` so that ensure-unsigned-request-at-par-endpoint-fails is rejected at
+the PAR endpoint; the JARM project (`fapi2-message-signing-jarm`, unsigned requests) uses
+fapi2-message-signing-jarm.json without it. The DPoP nonce retries (`use_dpop_nonce` at the PAR, token and resource
+endpoints) are exercised because the target requires nonces. The configurations' `override` gives
+par-ensure-reused-request-uri-prior-to-auth-completion-succeeds a first browser automation entry
+(`"match-limit": 1`) that only waits for the login page, so the user takes no action on the first visit.
 
 ## Environment variables
 

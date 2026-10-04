@@ -865,7 +865,7 @@ export const projects: ConformanceProject[] = [
 		name: "fapi2-message-signing-jarm",
 		plan: "fapi2-message-signing-final-test-plan",
 		variant: FAPI2_PRIVATE_KEY_DPOP + "[fapi_request_method=unsigned][fapi_response_mode=jarm]",
-		config: "configs/oidc-provider/fapi2-message-signing.json",
+		config: "configs/oidc-provider/fapi2-message-signing-jarm.json",
 		browsers,
 		workers: 3,
 	},

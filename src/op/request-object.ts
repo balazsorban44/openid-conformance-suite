@@ -12,7 +12,7 @@ import { condition, type Condition } from "../suite/conditions.ts";
 import { getSigningKey, signJwt } from "../suite/jose.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import { toUriString } from "../suite/uri.ts";
-import { jwtClaimsSetAsJsonObject } from "../suite/jose-jwt.ts";
+import { jwtClaimsSetAsJsonObject, parseSignedJWT } from "../suite/jose-jwt.ts";
 import { ParseException } from "../suite/errors.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import type { Op } from "./op.ts";
@@ -173,6 +173,8 @@ function buildRedirect(
 	paramValue: string,
 	includeDuplicates = true,
 	reverseParameterOrder = false,
+	/** upstream env "expose_state_in_authorization_endpoint_request": the state (env "state") goes into the query */
+	exposeState: string | null = null,
 ): string {
 	const requiredDuplicates = ["response_type", "client_id", "scope", "redirect_uri"];
 	const authorizationEndpoint = op.metadata.authorization_endpoint;
@@ -190,6 +192,9 @@ function buildRedirect(
 		}
 		const requestObjectValue = inObject === undefined ? null : String(inObject);
 		const requestParameterValue = String(inRequest);
+		if (key === "state" && exposeState != null) {
+			query.set("state", exposeState);
+		}
 		if (includeDuplicates) {
 			if (
 				requiredDuplicates.includes(key) ||
@@ -359,4 +364,111 @@ export async function signRequestObjectIncludeMediaType(
 		key: getSigningKey(c, "signing", client.keys.jwks),
 	});
 	return jws;
+}
+
+/**
+ * BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint with the state in the query even though the request
+ * object has it (upstream env "expose_state_in_authorization_endpoint_request": the modules whose request object
+ * the OP cannot verify still need the state back in the error response).
+ *
+ * upstream: condition/client/BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint.java
+ * (AbstractBuildRequestObjectRedirectToAuthorizationEndpoint, exposeState)
+ */
+export function buildRequestObjectByReferenceRedirectToAuthorizationEndpointExposingState(
+	op: Pick<Op, "metadata">,
+	params: Record<string, unknown>,
+	requestObjectClaims: Record<string, unknown>,
+	requestUri: string,
+	state: string | null,
+	...requirements: string[]
+): string {
+	const c: Condition = condition("BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint", ...requirements);
+	return buildRedirect(c, op, params, requestObjectClaims, "request_uri", requestUri, true, false, state);
+}
+
+/** upstream: condition/client/RemoveRedirectUriFromRequestObject.java */
+export function removeRedirectUriFromRequestObject(claims: Record<string, unknown>): void {
+	delete claims["redirect_uri"];
+	condition("RemoveRedirectUriFromRequestObject").success("Removed redirect_uri from request object claims", {
+		request_object_claims: claims,
+	});
+}
+
+/** java.time.Instant.toString() of a second count */
+function instantString(seconds: number): string {
+	return new Date(seconds * 1000).toISOString().replace(".000Z", "Z");
+}
+
+/** upstream: condition/client/AddNbfValueIs8SecondsInFutureToRequestObject.java */
+export function addNbfValueIs8SecondsInFutureToRequestObject(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const nbf = Math.floor(Date.now() / 1000) + 8;
+	claims["nbf"] = nbf;
+	condition("AddNbfValueIs8SecondsInFutureToRequestObject", ...requirements).success(
+		"Added nbf value to request object which is 8 seconds in the future",
+		{ request_object_claims: claims, nbf_is_8_seconds_in_the_future: instantString(nbf) },
+	);
+}
+
+/** upstream: condition/client/AddBadAudToRequestObject.java */
+export function addBadAudToRequestObject(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["aud"] = "https://www.other1.example.com/";
+	condition("AddBadAudToRequestObject", ...requirements).success("Added bad aud to request object claims", {
+		aud: claims["aud"],
+	});
+}
+
+/** upstream: condition/client/AddExpValueIs70MinutesInFutureToRequestObject.java */
+export function addExpValueIs70MinutesInFutureToRequestObject(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const exp = Math.floor(Date.now() / 1000) + 70 * 60;
+	claims["exp"] = exp;
+	// UPSTREAM: the field is named iat_is_70_minutes_in_the_future
+	condition("AddExpValueIs70MinutesInFutureToRequestObject", ...requirements).success(
+		"Added invalid exp value to request object which is 70 minutes in the future",
+		{ request_object_claims: claims, iat_is_70_minutes_in_the_future: instantString(exp) },
+	);
+}
+
+/** upstream: condition/client/AddNbfValueIs70MinutesInPastToRequestObject.java */
+export function addNbfValueIs70MinutesInPastToRequestObject(
+	claims: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const nbf = Math.floor(Date.now() / 1000) - 70 * 60;
+	claims["nbf"] = nbf;
+	condition("AddNbfValueIs70MinutesInPastToRequestObject", ...requirements).success(
+		"Added invalid nbf value to request object which is 70 minutes in the past",
+		{ request_object_claims: claims, nbf_is_70_minutes_in_the_past: instantString(nbf) },
+	);
+}
+
+/**
+ * Flips bits of the request object's signature so it no longer verifies.
+ *
+ * upstream: condition/client/InvalidateRequestObjectSignature.java (AbstractInvalidateJwsSignature)
+ */
+export function invalidateRequestObjectSignature(requestObject: string, ...requirements: string[]): string {
+	const c: Condition = condition("InvalidateRequestObjectSignature", ...requirements);
+	let parsed;
+	try {
+		parsed = parseSignedJWT(requestObject);
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse JWT", e, { request_object: requestObject });
+		}
+		throw e;
+	}
+	const bytes = Buffer.from(parsed.signature ?? "", "base64url");
+	//Flip some of the bits in the signature to make it invalid
+	for (let i = 0; i < bytes.length; i++) {
+		bytes[i] ^= 0x5a;
+	}
+	const invalid = parsed.parts[0] + "." + parsed.parts[1] + "." + bytes.toString("base64url");
+	c.log("Made the request_object signature invalid", { request_object: invalid });
+	return invalid;
 }

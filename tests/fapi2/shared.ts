@@ -34,7 +34,7 @@ import * as token from "../../src/op/token.ts";
 import { block, logModule, skipped, soft } from "../../src/suite/conditions.ts";
 import type { TestConfig } from "../../src/suite/config.ts";
 import type { EndpointResponse } from "../../src/suite/http.ts";
-import { waitFor30Seconds, waitForOneSecond } from "../../src/suite/wait.ts";
+import { waitFor30Seconds, waitForExpiry, waitForOneSecond } from "../../src/suite/wait.ts";
 import { skipTest } from "../fixtures.ts";
 
 /** The fixtures the shared test bodies use */
@@ -57,18 +57,50 @@ export interface AuthorizationFlowOptions {
 	 * overrides): returns the request_uri to continue with, or null when the module ends there
 	 */
 	processParResponse?: (res: par.ParResponse) => string | null;
-	/** The redirect: the duplicated parameters reversed (the happy flow's second client), or without them (PAR-4) */
-	redirect?: { reorderParameters?: boolean; withoutDuplicates?: boolean };
+	/**
+	 * The redirect: the duplicated parameters reversed (the happy flow's second client), without them (PAR-4), or
+	 * with the state exposed although the request object has it (the modules whose request object the OP cannot
+	 * verify; upstream "expose_state_in_authorization_endpoint_request")
+	 */
+	redirect?: { reorderParameters?: boolean; withoutDuplicates?: boolean; exposeState?: boolean };
 	/**
 	 * upstream AbstractFAPI2SPFinalExpectingAuthorizationEndpointPlaceholderOrCallback: the module's createPlaceholder;
 	 * the OP may answer with an error page (the browser automation screenshots it) instead of a redirect
 	 */
 	createPlaceholder?: () => string;
+	/**
+	 * upstream `isSignedRequest`: false sends the request parameters to the PAR endpoint unwrapped even with
+	 * fapi_request_method=signed_non_repudiation (ensure-unsigned-request-at-par-endpoint-fails)
+	 */
+	signedRequest?: boolean;
+	/** The module's createAuthorizationRequestObject override, in place of the standard one with `requestObject` */
+	createAuthorizationRequestObject?: (request: Fapi2AuthorizationRequest) => Promise<void>;
+	/** What the module does before the PAR call (upstream performParAuthorizationRequestFlow overrides calling super) */
+	beforePar?: (request: Fapi2AuthorizationRequest, parRequest: par.ParRequest) => void | Promise<void>;
+	/**
+	 * What the module does before the redirect is built (upstream performPARRedirectWithRequestUri overrides calling
+	 * super); `parResponse` for the module that waits for the request_uri to expire
+	 */
+	beforeRedirect?: (request: Fapi2AuthorizationRequest, parResponse: par.ParResponse) => void | Promise<void>;
+	/**
+	 * The module's own block for the redirect in place of "Make request to authorization endpoint" (upstream
+	 * performPARRedirectWithRequestUri overrides that start their own)
+	 */
+	redirectBlock?: string;
+	/** The requirements the redirect condition cites (PAR-4 by default; a module building the redirect itself cites none) */
+	redirectRequirements?: string[];
+	/**
+	 * The module's performRedirect override: the browser's trip(s) to the authorization endpoint, returning the
+	 * response the redirect_uri got (null for an error page)
+	 */
+	performRedirect?: (request: Fapi2AuthorizationRequest) => Promise<authz.AuthorizationResponse | null>;
 }
 
 export interface AuthorizationFlowResult {
 	request: Fapi2AuthorizationRequest;
 	parResponse: par.ParResponse;
+	/** The request_uri the PAR endpoint returned (upstream "request_uri"), null when the module ended at the PAR response */
+	requestUri: string | null;
 	/** null when the module ended at the PAR response (`processParResponse`) or the OP showed an error page */
 	response: authz.AuthorizationResponse | null;
 }
@@ -104,16 +136,16 @@ export async function performAuthorizationFlow(
 ): Promise<AuthorizationFlowResult> {
 	const prefix = client.prefix;
 	// plain_fapi: no pre-authorization steps
-	const request = await block(prefix + "Create authorization request", async () => {
-		const created = await fapi2.createAuthorizationRequest(op, client, redirectUri, opts.request);
-		if (op.variant.fapi_request_method === "signed_non_repudiation") {
-			await fapi2.createAuthorizationRequestObject(op, client, created, opts.requestObject);
-		}
-		return created;
-	});
+	const request = await createAuthorizationRequest(op, client, redirectUri, opts);
 
 	const { parResponse, requestUri } = await block(prefix + "Make request to PAR endpoint", async () => {
 		const parRequest = fapi2.buildPAREndpointRequest(request);
+		if (request.requestObject == null) {
+			// the request object is implicitly created by the PAR endpoint, but the redirect builder needs to know what
+			// is in the implicit request object (upstream maps "request_object_claims" to the pushed form parameters)
+			request.requestObjectClaims = parRequest.form;
+		}
+		await opts.beforePar?.(request, parRequest);
 		// plain_fapi: no PAR endpoint profile headers; private_key_jwt: no mTLS authentication to leave out
 		const res = await fapi2.callParEndpointAndStopOnFailure(op, client, parRequest, {
 			useDpopAuthCodeBinding: opts.useDpopAuthCodeBinding,
@@ -124,11 +156,15 @@ export async function performAuthorizationFlow(
 		return { parResponse: res, requestUri: uri };
 	});
 	if (requestUri == null) {
-		return { request, parResponse, response: null };
+		return { request, parResponse, requestUri, response: null };
 	}
 
 	const redirect = async () => {
-		fapi2.buildPARRedirect(op, request, requestUri, opts.redirect ?? {}, "PAR-4");
+		await opts.beforeRedirect?.(request, parResponse);
+		fapi2.buildPARRedirect(op, request, requestUri, opts.redirect ?? {}, ...(opts.redirectRequirements ?? ["PAR-4"]));
+		if (opts.performRedirect) {
+			return opts.performRedirect(request);
+		}
 		if (opts.createPlaceholder) {
 			return authz.authorizeExpectingErrorPageOrRedirect(op, request, opts.createPlaceholder());
 		}
@@ -137,8 +173,37 @@ export async function performAuthorizationFlow(
 	// upstream's modules that leave the duplicates out start no block: the redirect stays in the PAR endpoint's
 	const response = opts.redirect?.withoutDuplicates
 		? await redirect()
-		: await block(prefix + "Make request to authorization endpoint", redirect);
-	return { request, parResponse, response };
+		: await block(opts.redirectBlock ?? prefix + "Make request to authorization endpoint", redirect);
+	return { request, parResponse, requestUri, response };
+}
+
+/**
+ * The "Create authorization request" block: the authorization request and, with signed_non_repudiation (unless the
+ * module sends it unsigned), the request object.
+ *
+ * upstream: AbstractFAPI2SPFinalServerTestModule.performAuthorizationFlow (up to the PAR endpoint)
+ */
+export async function createAuthorizationRequest(
+	op: Fapi2Op,
+	client: Fapi2Client,
+	redirectUri: string,
+	opts: Pick<
+		AuthorizationFlowOptions,
+		"request" | "requestObject" | "signedRequest" | "createAuthorizationRequestObject"
+	> = {},
+): Promise<Fapi2AuthorizationRequest> {
+	const signed = opts.signedRequest ?? op.variant.fapi_request_method === "signed_non_repudiation";
+	return block(client.prefix + "Create authorization request", async () => {
+		const created = await fapi2.createAuthorizationRequest(op, client, redirectUri, opts.request);
+		if (signed) {
+			if (opts.createAuthorizationRequestObject) {
+				await opts.createAuthorizationRequestObject(created);
+			} else {
+				await fapi2.createAuthorizationRequestObject(op, client, created, opts.requestObject);
+			}
+		}
+		return created;
+	});
 }
 
 /**
@@ -1141,4 +1206,745 @@ export async function fapi2EnsureExpiredRequestObjectFails({ fapi }: Fapi2Fixtur
 			return null;
 		},
 	});
+}
+
+// ---- the modules that expect a rejection at the PAR endpoint, an error page or an error in the callback ----
+
+/**
+ * The checks on an error returned to the redirect_uri: the state, the error, no unexpected parameters, then the
+ * module's check of the error value; the module ends (null).
+ *
+ * upstream: the onAuthorizationCallbackResponse of the modules on
+ * AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback
+ */
+function expectAuthorizationErrorResponse(
+	request: Fapi2AuthorizationRequest,
+	res: authz.AuthorizationResponse,
+	checkError: (res: authz.AuthorizationResponse) => void,
+): null {
+	/* If we get an error back from the authorization server:
+	 * - It must be the error the module expects
+	 * - It must have the correct state we supplied
+	 */
+	soft(() => authz.checkStateInAuthorizationResponse(request, res));
+	soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+	soft(
+		() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(res, {}, "OIDCC-3.1.2.6"),
+		"warning",
+	);
+	soft(() => checkError(res));
+	return null;
+}
+
+/** What a module on AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback overrides */
+interface PlaceholderOrCallbackModule {
+	/** makeCreateAuthorizationRequestSteps / makeCreateAuthorizationRequestObjectSteps / createAuthorizationRequestObject / isSignedRequest */
+	flow?: AuthorizationFlowOptions;
+	createPlaceholder: () => string;
+	/** the check of the PAR endpoint's error response (callAndContinueOnFailure, FAILURE) */
+	processParErrorResponse: (res: par.ParResponse) => void;
+	/** the check of the error returned to the redirect_uri, after the state / error / unexpected parameters checks */
+	checkAuthorizationError: (res: authz.AuthorizationResponse) => void;
+	allowPlainErrorResponseForJarm?: boolean;
+}
+
+/**
+ * The server may reject the request at the PAR endpoint (the module ends there), with an error page (the browser
+ * automation screenshots it into the placeholder) or with an error returned to the redirect_uri.
+ *
+ * upstream: AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback (processParResponse,
+ * performRedirectAndWaitForPlaceholdersOrCallback, the module's onAuthorizationCallbackResponse)
+ */
+async function expectParErrorOrAuthorizationError(
+	op: Fapi2Op,
+	client: Fapi2Client,
+	module: PlaceholderOrCallbackModule,
+): Promise<void> {
+	const { request, response } = await performAuthorizationFlow(op, client, op.redirectUri, {
+		...module.flow,
+		processParResponse: expectingParErrorOrCallback((res) => soft(() => module.processParErrorResponse(res))),
+		createPlaceholder: module.createPlaceholder,
+	});
+	if (response == null) {
+		// the PAR endpoint rejected the request, or the OP showed an error page (its screenshot is in the log)
+		return;
+	}
+	await verifyAuthorizationResponse(op, client, request, response, {
+		allowPlainErrorResponseForJarm: module.allowPlainErrorResponseForJarm,
+		onAuthorizationCallbackResponse: (res) =>
+			expectAuthorizationErrorResponse(request, res, module.checkAuthorizationError),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithoutRedirectUriFails.java */
+export async function fapi2EnsureRequestObjectWithoutRedirectUriFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			requestObject: { beforeSign: (claims) => requestObject.removeRedirectUriFromRequestObject(claims) },
+			// with an unsigned request the claims are the pushed form parameters: the PAR request loses its redirect_uri
+			beforePar: (request) => requestObject.removeRedirectUriFromRequestObject(request.requestObjectClaims),
+		},
+		createPlaceholder: () => authz.expectRequestObjectMissingRedirectUriErrorPage("FAPI2-MS-ID1-5.3.2-1"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestOrInvalidRequestObjectError(res, "JAR-6.2"),
+		checkAuthorizationError: (res) =>
+			authz.checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject(res, "OIDCC-3.1.2.6"),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithoutNbfFails.java */
+export async function fapi2EnsureRequestObjectWithoutNbfFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: { requestObject: { omitNbf: "NOT adding nbf to request object" } },
+		createPlaceholder: () => authz.expectRequestObjectMissingNbfClaimErrorPage("FAPI2-MS-ID1-5.3.1-3"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.3", "PAR-2.1-3"),
+		// isPar
+		checkAuthorizationError: (res) =>
+			authz.ensureInvalidRequestInvalidRequestUriOrAccessDeniedError(res, "OIDCC-3.1.2.6", "RFC6749-4.2.2.1"),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithBadAudFails.java */
+export async function fapi2EnsureRequestObjectWithBadAudFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			requestObject: { aud: (claims) => requestObject.addBadAudToRequestObject(claims, "OIDCC-6.1", "RFC7519-4.1.3") },
+		},
+		createPlaceholder: () => authz.expectRequestObjectWithBadAudClaimErrorPage("OIDCC-6.1", "RFC7519-4.1.3"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.2", "PAR-2.3"),
+		// isPar
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestUriError(res, "JAR-4"),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithExpOver60Fails.java */
+export async function fapi2EnsureRequestObjectWithExpOver60Fails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			requestObject: {
+				exp: (claims) =>
+					requestObject.addExpValueIs70MinutesInFutureToRequestObject(claims, "OIDCC-6.1", "RFC7519-4.1.4"),
+			},
+		},
+		createPlaceholder: () => authz.expectRequestObjectWithExpOver60ClaimErrorPage("FAPI2-MS-ID1-5.3.1-4"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.3", "PAR-2.1-3"),
+		// isPar
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestUriError(res, "JAR-4"),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithNbfOver60Fails.java */
+export async function fapi2EnsureRequestObjectWithNbfOver60Fails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			requestObject: {
+				nbf: (claims) => requestObject.addNbfValueIs70MinutesInPastToRequestObject(claims, "FAPI2-MS-ID1-5.3.1-3"),
+			},
+		},
+		createPlaceholder: () => authz.expectRequestObjectWithNbfOver60ClaimErrorPage("OIDCC-6.1", "RFC7519-4.1.5"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.3", "PAR-2.1-3"),
+		// isPar
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestUriError(res, "JAR-4"),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureSignedRequestObjectWithRS256Fails.java */
+export async function fapi2EnsureSignedRequestObjectWithRS256Fails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	// onConfigure: If ES256 keys are supplied, the test module should probably just immediately exit successfully
+	// We don't need to check null for jwks and keys because it was checked the steps before
+	// We get first key to compare with PS256 because we use it to sign request_object or client_assertion
+	const alg = algFromClientJwks(client);
+	if (alg !== "PS256") {
+		// FAPI only allows ES256 and PS256
+		// This throws an exception: the test will stop here
+		skipTest(
+			`This test requires RSA keys to be performed, the alg in client configuration is '${alg}' so this test is being skipped. If your server does not support PS256 then this will not prevent you certifying.`,
+		);
+	}
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			// a copy of the jwks, so the client assertions are still signed with the original one
+			createAuthorizationRequestObject: async (request) => {
+				const rs256Client = { ...client, keys: structuredClone(client.keys) };
+				token.changeClientJwksAlgToRS256(rs256Client, "FAPI2-SP-FINAL-5.4");
+				await fapi2.createAuthorizationRequestObject(fapi, rs256Client, request);
+			},
+		},
+		createPlaceholder: () => authz.expectSignedRS256RequestObjectErrorPage("FAPI2-SP-FINAL-5.4"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.2"),
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestObjectError(res, "OIDCC-3.1.2.6"),
+		// isPar
+		allowPlainErrorResponseForJarm: true,
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectSignatureAlgorithmIsNotNone.java */
+export async function fapi2EnsureRequestObjectSignatureAlgorithmIsNotNone({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			requestObject: { sign: async (claims) => requestObject.serializeRequestObjectWithNullAlgorithm(claims) },
+			redirect: { exposeState: true },
+		},
+		createPlaceholder: () => authz.expectRequestObjectUnverifiableErrorPage("FAPI2-MS-ID1-5.4.2-2"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.2"),
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestObjectError(res, "OIDCC-3.1.2.6"),
+		// isPar
+		allowPlainErrorResponseForJarm: true,
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithInvalidSignatureFails.java */
+export async function fapi2EnsureRequestObjectWithInvalidSignatureFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: { requestObject: { afterSign: (jwt) => requestObject.invalidateRequestObjectSignature(jwt) } },
+		createPlaceholder: () => authz.expectRequestObjectInvalidSignatureErrorPage(),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestObjectError(res, "JAR-6.2"),
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestObjectError(res, "OIDCC-3.1.2.6"),
+		// isPar
+		allowPlainErrorResponseForJarm: true,
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureMatchingKeyInAuthorizationRequest.java */
+export async function fapi2EnsureMatchingKeyInAuthorizationRequest({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const client2 = await fapi2.configureSecondClient(fapi, client);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		flow: {
+			// Switch to client 2 JWKs
+			createAuthorizationRequestObject: (request) =>
+				block("Sign request object containing client_id for client 1 using JWK for client 2", () =>
+					fapi2.createAuthorizationRequestObject(fapi, { ...client, keys: client2.keys }, request),
+				),
+			redirect: { exposeState: true },
+		},
+		createPlaceholder: () => authz.expectRequestObjectUnverifiableErrorPage("FAPI2-MS-ID1-5.3.1-1", "OIDCC-6.3.2"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestOrInvalidRequestObjectError(res, "JAR-6.2"),
+		checkAuthorizationError: (res) => authz.ensureInvalidRequestObjectError(res, "OIDCC-3.1.2.6"),
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureUnsignedRequestAtParEndpointFails.java */
+export async function fapi2EnsureUnsignedRequestAtParEndpointFails({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await expectParErrorOrAuthorizationError(fapi, client, {
+		// onConfigure: isSignedRequest = false
+		flow: { signedRequest: false },
+		createPlaceholder: () => authz.expectAuthorizationRequestWithoutRequestObjectErrorPage("FAPI2-MS-ID1-5.3.2-1"),
+		processParErrorResponse: (res) => par.ensurePARInvalidRequestError(res, "PAR-2.3"),
+		checkAuthorizationError: (res) =>
+			authz.checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri(
+				res,
+				"OIDCC-3.1.2.6",
+			),
+	});
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalPAREnsurePlainPKCERejected.java
+ * (AbstractFAPI2SPFinalPARExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+export async function fapi2PAREnsurePlainPKCERejected({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		request: {
+			// ideally we'd replace the CreateS256CodeChallenge call instead, but
+			// .replace() doesn't currently work for sequences-within-sequences
+			steps: (params, { codeVerifier }) => {
+				const { codeChallenge, codeChallengeMethod } = authz.createPlainCodeChallenge(codeVerifier ?? "");
+				authz.addCodeChallengeToAuthorizationEndpointRequest(params, codeChallenge, codeChallengeMethod);
+			},
+		},
+		processParResponse: expectingParErrorOrCallback((res) =>
+			soft(() => par.ensurePARInvalidRequestError(res, "RFC7636-4.4.1")),
+		),
+		createPlaceholder: () => authz.expectPlainPkceErrorPage("FAPI2-SP-FINAL-5.3.2.2-5"),
+	});
+	if (response == null) {
+		return;
+	}
+	await verifyAuthorizationResponse(fapi, client, request, response, {
+		onAuthorizationCallbackResponse: (res) => {
+			soft(() => authz.ensureInvalidRequestError(res, "RFC7636-4.4.1"));
+			return null;
+		},
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureRequestObjectWithNbf8SecondsInTheFutureIsAccepted.java */
+export async function fapi2EnsureRequestObjectWithNbf8SecondsInTheFutureIsAccepted({
+	fapi,
+}: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		requestObject: {
+			nbf: (claims) => requestObject.addNbfValueIs8SecondsInFutureToRequestObject(claims, "FAPI2-SP-FINAL-5.3.2.1"),
+		},
+		processParResponse: (res) => {
+			// if response code is not 201 then skip test
+			if (res.status !== 201) {
+				soft(() => par.checkPAREndpointResponse201WithNoError(res, "PAR-2.2", "PAR-2.3"), "warning");
+				// UPSTREAM: logged under the test id rather than the test name
+				fapi.log.log(fapi.testId, "PAR endpoint doesn't seem to support clock skew, finishing test prematurely.");
+				return null;
+			}
+			return fapi2.processParResponse(res);
+		},
+	});
+	if (response == null) {
+		return;
+	}
+	const code = (await verifyAuthorizationResponse(fapi, client, request, response)) as string;
+	await performPostAuthorizationFlow(fapi, client, request, code, resource);
+}
+
+// ---- the request_uri modules ----
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalPAREnsureServerAcceptsReusedRequestUriBeforeAuthenticationCompletion.java
+ */
+export async function fapi2PAREnsureServerAcceptsReusedRequestUriBeforeAuthenticationCompletion({
+	fapi,
+}: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		performRedirect: async (req) => {
+			// Initial visit to the authorization endpoint. The user should take no action (the browser automation of
+			// this module only waits for the login page). Upstream polls the visited urls for up to 120 seconds; here
+			// the visit resolves once the automation ran on the page.
+			await fapi.browser.visit(req.url);
+			if (!fapi.browser.visited.includes(req.url)) {
+				throw new Error(
+					"The initial authorization server login page was not visited within the 120 seconds timeout period.",
+				);
+			}
+			// Proceed with the regular authorization flow, revisiting the authorization endpoint and logging in.
+			return block("Make second request to authorization endpoint", () =>
+				authz.authorizeExpectingErrorPageOrRedirect(fapi, req, authz.expectLoginPage()),
+			);
+		},
+	});
+	if (response == null) {
+		// the OP showed an error page instead of the login page (its screenshot is in the log)
+		return;
+	}
+	// The user must not authenticate until the second visit to the login page: the callback is only awaited on it
+	const code = await verifyAuthorizationResponse(fapi, client, request, response, {
+		onAuthorizationCallbackResponse: (res) => {
+			if (!Object.hasOwn(res.params, "error")) {
+				return fapi2.onAuthorizationCallbackResponse(fapi, request, res);
+			}
+			// If we get an error back from the authorization server:
+			// - It must be a 'invalid_request_uri' error
+			// - It must have the correct state we supplied
+			soft(() => authz.warningAboutRequestUriError("FAPI2-SP-FINAL-5.3.2.2"), "warning");
+			soft(() => authz.checkStateInAuthorizationResponse(request, res));
+			soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+			soft(
+				() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(res, {}, "OIDCC-3.1.2.6"),
+				"warning",
+			);
+			soft(() => authz.ensureInvalidRequestUriError(res, "OIDCC-3.3.2.6"));
+			return null;
+		},
+	});
+	if (code != null) {
+		await performPostAuthorizationFlow(fapi, client, request, code, resource);
+	}
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPARAttemptReuseRequestUri.java */
+export async function fapi2PARAttemptReuseRequestUri({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, requestUri, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri);
+	// first authentication is a normal successful one
+	const code = (await verifyAuthorizationResponse(
+		fapi,
+		client,
+		request,
+		response as authz.AuthorizationResponse,
+	)) as string;
+	await performPostAuthorizationFlow(fapi, client, request, code, resource);
+
+	//PAR-7.3 : An attacker could replay a request URI captured from a legitimate authorization request.
+	// In order to cope with such attacks, the AS SHOULD make the request URIs one-time use.
+	const second = await block(
+		"Attempting reuse of request_uri and testing if Authorization server returns error in callback",
+		() => {
+			fapi2.buildPARRedirect(fapi, request, requestUri as string);
+			// createPlaceholder (upstream ends the block there: the redirect's entries carry no block id)
+			return authz.authorizeExpectingErrorPageOrRedirect(
+				fapi,
+				request,
+				authz.expectInvalidRequestUriErrorPage("PAR-7.3", "PAR-4", "PAR-2.2"),
+			);
+		},
+	);
+	if (second == null) {
+		return;
+	}
+	const secondCode = await verifyAuthorizationResponse(fapi, client, request, second, {
+		allowPlainErrorResponseForJarm: true,
+		onAuthorizationCallbackResponse: (res) => {
+			if (Object.hasOwn(res.params, "error")) {
+				soft(() => authz.ensureInvalidRequestUriError(res, "PAR-2.2", "JAR-7"));
+				return null;
+			}
+			// second authentication "should" return an error, but only a should so warn but otherwise expect a
+			// successful response
+			soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "PAR-7.3"), "warning");
+			return fapi2.onAuthorizationCallbackResponse(fapi, request, res);
+		},
+	});
+	if (secondCode != null) {
+		// the server does not implement the 'should': the successful response when reusing the request_uri is
+		// verified (a warning was logged) and the test ends
+		await performPostAuthorizationFlow(fapi, client, request, secondCode, resource);
+	}
+}
+
+/** upstream: FAPI2SPFinalPARAttemptToUseExpiredRequestUri.waitForExpiresIn */
+async function waitForExpiresIn(parResponse: par.ParResponse): Promise<void> {
+	//expires_in : A JSON number that represents the lifetime of the request URI in seconds.
+	// The request URI lifetime is at the discretion of the AS.
+	const expiresIn = parResponse.json?.["expires_in"];
+	const seconds = typeof expiresIn === "number" ? Math.trunc(expiresIn) : null;
+	if (seconds != null && seconds > 30 * 60) {
+		skipTest("The expires in value is longer than 30 minutes so is too long for the suite to wait for it to expire.");
+	}
+	await waitForExpiry(seconds);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPARAttemptToUseExpiredRequestUri.java */
+export async function fapi2PARAttemptToUseExpiredRequestUri({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	//PAR-2.2.0 : If the verification is successful, the server MUST generate a request URI and return a
+	// JSON response that contains request_uri and expires_in members at the top level with 201 Created
+	// HTTP response code.
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		redirectBlock:
+			"Attempting use of request_uri after expiry and testing if Authorization server returns error in callback",
+		//wait for expiry of request_uri
+		beforeRedirect: (_request, parResponse) => waitForExpiresIn(parResponse),
+		redirectRequirements: [],
+		createPlaceholder: () => authz.expectInvalidRequestUriErrorPage("PAR-2.2"),
+	});
+	if (response == null) {
+		return;
+	}
+	// onConfigure: allowPlainErrorResponseForJarm
+	await verifyAuthorizationResponse(fapi, client, request, response, {
+		allowPlainErrorResponseForJarm: true,
+		onAuthorizationCallbackResponse: (res) => {
+			// verifyError
+			soft(() => authz.ensureInvalidRequestUriError(res, "PAR-2.2"));
+			return null;
+		},
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPAREnsureRequestUriIsBoundToClient.java */
+export async function fapi2PAREnsureRequestUriIsBoundToClient({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const client2 = await fapi2.configureSecondClient(fapi, client);
+	fapi2.setupResourceEndpoint(fapi);
+	//PAR-2.2.1 : The request_uri MUST be bound to the client that posted the authorization request.
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		redirectBlock:
+			"Attempting to send client2's clientId with request_uri to AS and expect it returns error in callback",
+		// switchToSecondClient
+		beforeRedirect: (req) => authz.addClientIdToAuthorizationEndpointRequest(req.params, client2.client, "PAR-4"),
+		redirectRequirements: [],
+		createPlaceholder: () => authz.expectInvalidRequestUriErrorPage("PAR-3-3"),
+	});
+	if (response == null) {
+		return;
+	}
+	// onConfigure: allowPlainErrorResponseForJarm; the second client is in use when the callback is processed
+	await verifyAuthorizationResponse(fapi, client2, request, response, {
+		allowPlainErrorResponseForJarm: true,
+		onAuthorizationCallbackResponse: (res) => {
+			// verifyError
+			soft(() => authz.ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError(res, "PAR-3-3"));
+			return null;
+		},
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPARRejectRequestUriInParAuthorizationFormParams.java */
+export async function fapi2PARRejectRequestUriInParAuthorizationFormParams({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const request = await createAuthorizationRequest(fapi, client, fapi.redirectUri);
+	//PAR-2.1 : The request_uri authorization request parameter MUST NOT be provided in this case
+	await block("Make request to PAR endpoint", async () => {
+		const parRequest = fapi2.buildPAREndpointRequest(request);
+		par.addBadRequestUriToRequestParameters(parRequest);
+		const res = await fapi2.callParEndpointAndStopOnFailure(fapi, client, parRequest);
+		soft(() => par.ensurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError(res, "PAR-2.1-2"));
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPARRejectInvalidHttpVerb.java */
+export async function fapi2PARRejectInvalidHttpVerb({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	const request = await createAuthorizationRequest(fapi, client, fapi.redirectUri);
+	//PAR-2.3.3 : If the request did not use POST, the authorization server shall return 405 Method Not Allowed HTTP error response.
+	await block("Make request to PAR endpoint", async () => {
+		const parRequest = fapi2.buildPAREndpointRequest(request);
+		const res = await fapi2.callParEndpointAndStopOnFailure(fapi, client, parRequest, { method: "PUT" });
+		soft(() => par.ensureParHTTPError(res, "PAR-2.3"));
+	});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPARRejectRequestUriInParAuthorizationRequest.java */
+export async function fapi2PARRejectRequestUriInParAuthorizationRequest({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	//PAR-2.1 : The request_uri authorization request parameter MUST NOT be provided in this case
+	const request = await createAuthorizationRequest(fapi, client, fapi.redirectUri, {
+		// butFirst: before the request parameters become the request object's claims
+		request: { steps: (params) => authz.addBadRequestUriToAuthorizationRequest(params, "PAR-2") },
+	});
+	await block("Make request to PAR endpoint", async () => {
+		const parRequest = fapi2.buildPAREndpointRequest(request);
+		const res = await fapi2.callParEndpointAndStopOnFailure(fapi, client, parRequest);
+		// this might be too strict, the spec mentions this error but doesn't require servers to use it
+		// the only firm requirement is for the http status code to indicate failure
+		soft(() => par.ensurePARInvalidRequestObjectError(res, "JAR-6.2", "PAR-2.1"));
+	});
+}
+
+// ---- the PKCE token endpoint modules ----
+
+/**
+ * upstream: FAPI2SPFinalPAREnsurePKCECodeVerifierRequired / FAPI2SPFinalPARIncorrectPKCECodeVerifierRejected
+ * .processTokenEndpointResponse
+ */
+function expectInvalidGrantFromTokenEndpoint(res: token.TokenResponse): void {
+	/* expect an 'invalid_grant' error */
+	soft(() => token.checkTokenEndpointHttpStatus400(res, "RFC6749-5.2"));
+	soft(() => token.checkTokenEndpointReturnedJsonContentType(res, "OIDCC-3.1.3.4"));
+	soft(() => token.checkErrorFromTokenEndpointResponseErrorInvalidGrant(res, "RFC7636-4.6", "RFC6749-5.2"));
+	soft(() => token.validateErrorFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+	soft(() => token.checkErrorDescriptionFromTokenEndpointResponseErrorContainsCRLFTAB(res, "RFC6749-5.2"), "warning");
+	soft(() => token.validateErrorDescriptionFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+	soft(() => token.validateErrorUriFromTokenEndpointResponseError(res, "RFC6749-5.2"));
+}
+
+/**
+ * The flow up to the token request, which is sent with the module's PKCE code_verifier (none, or another one) and
+ * must be rejected with invalid_grant.
+ *
+ * upstream: AbstractFAPI2SPFinalPerformTokenEndpoint (performPostAuthorizationFlow: createAuthorizationCodeRequest
+ * with the module's addPkceCodeVerifier, exchangeAuthorizationCode)
+ */
+async function performTokenEndpointWithCodeVerifier(
+	op: Fapi2Op,
+	client: Fapi2Client,
+	addPkceCodeVerifier: (req: token.TokenRequest) => void,
+): Promise<void> {
+	const { request, response } = await performAuthorizationFlow(op, client, op.redirectUri);
+	const code = (await verifyAuthorizationResponse(
+		op,
+		client,
+		request,
+		response as authz.AuthorizationResponse,
+	)) as string;
+	const tokenResponse = await block("Call token endpoint", async () => {
+		const req = token.createTokenEndpointRequestForAuthorizationCodeGrant(code, request.redirectUri);
+		addPkceCodeVerifier(req);
+		// plain_fapi: no token endpoint profile headers
+		return fapi2.callSenderConstrainedTokenEndpoint(op, client, req);
+	});
+	await block("Verify token endpoint response", () => expectInvalidGrantFromTokenEndpoint(tokenResponse));
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPAREnsurePKCECodeVerifierRequired.java (AbstractFAPI2SPFinalPerformTokenEndpoint) */
+export async function fapi2PAREnsurePKCECodeVerifierRequired({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	// addPkceCodeVerifier: nothing
+	await performTokenEndpointWithCodeVerifier(fapi, client, () => {});
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalPARIncorrectPKCECodeVerifierRejected.java (AbstractFAPI2SPFinalPerformTokenEndpoint) */
+export async function fapi2PARIncorrectPKCECodeVerifierRejected({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	fapi2.setupResourceEndpoint(fapi);
+	await performTokenEndpointWithCodeVerifier(fapi, client, (req) => {
+		// create a new, different code verified
+		const verifier = authz.createRandomCodeVerifier("RFC7636-4.1");
+		token.addCodeVerifierToTokenEndpointRequest(req, verifier, "RFC7636-4.5", "FAPI2-SP-FINAL-5.3.3.2-3");
+	});
+}
+
+// ---- the parameters outside the request object ----
+
+/**
+ * The module's callback checks: a successful response without state (the code), or the permitted errors.
+ *
+ * upstream: fapi2spfinal/AbstractFAPI2SPFinalEnsureRequestObjectWithoutState.onAuthorizationCallbackResponse
+ */
+function ensureRequestObjectWithoutStateCallback(
+	request: Fapi2AuthorizationRequest,
+	res: authz.AuthorizationResponse,
+): string | null {
+	if (!Object.hasOwn(res.params, "error")) {
+		authz.checkMatchingCallbackParameters(request, res);
+		authz.checkIfAuthorizationEndpointError(res);
+		soft(() => authz.verifyNoStateInAuthorizationResponse(res));
+		const code = authz.extractAuthorizationCodeFromAuthorizationResponse(res);
+		soft(() => authz.ensureMinimumAuthorizationCodeLength(code, "RFC6749-10.10", "RFC6819-5.1.4.2-2"));
+		soft(() => authz.ensureMinimumAuthorizationCodeEntropy(code, "RFC6749-10.10", "RFC6819-5.1.4.2-2"));
+		return code;
+	}
+	/* If we get an error back from the authorization server:
+	 * - It must be a 'invalid_request_object', 'invalid_request' or 'access_denied' error
+	 * - It must have the correct state we supplied
+	 */
+	// state can be absented if authorization request did not send state in the request object
+	if (res.params["state"] == null) {
+		skipped("CheckStateInAuthorizationResponse", { element: ["authorization_endpoint_response", "state"] });
+	} else {
+		soft(() => authz.checkStateInAuthorizationResponse(request, res));
+	}
+	soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+	soft(
+		() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(res, {}, "OIDCC-3.1.2.6"),
+		"warning",
+	);
+	soft(() =>
+		authz.ensureInvalidRequestInvalidRequestObjectInvalidRequestUriOrAccessDeniedError(
+			res,
+			"OIDCC-3.1.2.6",
+			"RFC6749-4.2.2.1",
+		),
+	);
+	return null;
+}
+
+/**
+ * upstream: fapi2spfinal/FAPI2SPFinalStateOnlyOutsideRequestObjectNotUsed.java
+ * (AbstractFAPI2SPFinalEnsureRequestObjectWithoutState)
+ */
+export async function fapi2StateOnlyOutsideRequestObjectNotUsed({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	const { request, response } = await performAuthorizationFlow(fapi, client, fapi.redirectUri, {
+		request: { omit: { state: "NOT adding state to request object" } },
+		// Note: BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint and
+		// BuildRequestObjectByValueRedirectToAuthorizationEndpoint include as URL
+		// parameters values in "authorization_endpoint_request" which differ or are
+		// missing from the request object. Here a state is added as a parameter.
+		beforeRedirect: (req) => authz.addStateToAuthorizationEndpointRequest(req.params, req.state as string),
+		createPlaceholder: () => authz.expectRequestObjectMissingStateErrorPage("RFC6749-4.1.1"),
+	});
+	if (response == null) {
+		return;
+	}
+	const code = await verifyAuthorizationResponse(fapi, client, request, response, {
+		onAuthorizationCallbackResponse: (res) => ensureRequestObjectWithoutStateCallback(request, res),
+	});
+	if (code != null) {
+		await performPostAuthorizationFlow(fapi, client, request, code, resource);
+	}
+}
+
+/**
+ * The flow of the modules that send a parameter outside the request object differing from the one inside: the OP
+ * may return invalid_request, show an error page, or authenticate with the value inside.
+ *
+ * upstream: FAPI2SPFinalEnsureDifferentNonceInsideAndOutsideRequestObject /
+ * FAPI2SPFinalEnsureDifferentStateInsideAndOutsideRequestObject (AbstractFAPI2SPFinalExpectingAuthorizationEndpointPlaceholderOrCallback)
+ */
+async function performFlowWithDifferentParameterOutsideRequestObject(
+	op: Fapi2Op,
+	client: Fapi2Client,
+	resource: Resource,
+	addIncorrectParameter: (params: Record<string, unknown>) => void,
+	createPlaceholder: () => string,
+): Promise<void> {
+	const { request, response } = await performAuthorizationFlow(op, client, op.redirectUri, {
+		// Note: BuildRequestObjectByReferenceRedirectToAuthorizationEndpoint and
+		// BuildRequestObjectByValueRedirectToAuthorizationEndpoint include as URL
+		// parameters values in "authorization_endpoint_request" which differ or are
+		// missing from the request object. Here, an incorrect value is added as a parameter.
+		beforeRedirect: (req) => addIncorrectParameter(req.params),
+		createPlaceholder,
+	});
+	if (response == null) {
+		return;
+	}
+	const code = await verifyAuthorizationResponse(op, client, request, response, {
+		onAuthorizationCallbackResponse: (res) => {
+			if (!Object.hasOwn(res.params, "error")) {
+				return fapi2.onAuthorizationCallbackResponse(op, request, res);
+			}
+			/* If we get an error back from the authorization server:
+			 * - It must be a 'invalid_request' error
+			 * - It must have the correct state we supplied
+			 */
+			soft(() => authz.checkStateInAuthorizationResponse(request, res));
+			soft(() => authz.ensureErrorFromAuthorizationEndpointResponse(res, "OIDCC-3.1.2.6"));
+			soft(
+				() => authz.checkForUnexpectedParametersInErrorResponseFromAuthorizationEndpoint(res, {}, "OIDCC-3.1.2.6"),
+				"warning",
+			);
+			soft(() => authz.ensureInvalidRequestError(res, "OIDCC-3.3.2.6"));
+			return null;
+		},
+	});
+	if (code != null) {
+		await performPostAuthorizationFlow(op, client, request, code, resource);
+	}
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureDifferentNonceInsideAndOutsideRequestObject.java */
+export async function fapi2EnsureDifferentNonceInsideAndOutsideRequestObject({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	await performFlowWithDifferentParameterOutsideRequestObject(
+		fapi,
+		client,
+		resource,
+		authz.addIncorrectNonceToAuthorizationEndpointRequest,
+		() => authz.expectRequestDifferentNonceInsideAndOutsideErrorPage("OIDCC-6.1"),
+	);
+}
+
+/** upstream: fapi2spfinal/FAPI2SPFinalEnsureDifferentStateInsideAndOutsideRequestObject.java */
+export async function fapi2EnsureDifferentStateInsideAndOutsideRequestObject({ fapi }: Fapi2Fixtures): Promise<void> {
+	const client = fapi2.configureClient(fapi);
+	const resource = fapi2.setupResourceEndpoint(fapi);
+	await performFlowWithDifferentParameterOutsideRequestObject(
+		fapi,
+		client,
+		resource,
+		authz.addIncorrectStateToAuthorizationEndpointRequest,
+		() => authz.expectRequestDifferentStateInsideAndOutsideErrorPage("FAPI2-MS-ID1-5.3.2-1"),
+	);
 }

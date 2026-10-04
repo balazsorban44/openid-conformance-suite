@@ -49,8 +49,8 @@ export interface CallPAREndpointOptions {
 	conditionName?: string;
 	/** the requirements the call site cites */
 	requirements?: string[];
-	/** upstream "par_endpoint_http_method" (the module that tries GET); default POST */
-	method?: "POST" | "GET";
+	/** upstream "par_endpoint_http_method" (the modules that try GET / PUT); default POST */
+	method?: "POST" | "GET" | "PUT";
 	onResponse?: (c: Condition, res: ParResponse) => void;
 	parsedResponseLogSuffix?: (res: ParResponse) => string;
 }
@@ -329,4 +329,56 @@ export function checkErrorFromParEndpointResponseErrorInvalidClientOrInvalidRequ
 		c.failure("'error' field has unexpected value", { expected, actual: error });
 	}
 	c.success(key + " error returned expected 'error' of '" + error + "'", { expected });
+}
+
+/**
+ * A request_uri form parameter in the PAR request (PAR-2.1: the request_uri parameter MUST NOT be provided).
+ *
+ * upstream: condition/client/AddBadRequestUriToRequestParameters.java (logs nothing)
+ */
+export function addBadRequestUriToRequestParameters(req: ParRequest): void {
+	req.form["request_uri"] = "urn:fdc:authlete.com:E2ooXxELkEFSKR90ymYV-BbwAvCC2TozHfSb_mMCw2s";
+}
+
+/** upstream: condition/client/EnsurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError.java */
+export function ensurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError(
+	res: ParResponse,
+	...requirements: string[]
+): void {
+	ensureSpecifiedErrorFromPushedAuthorizationEndpointResponse(
+		"EnsurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError",
+		res,
+		["invalid_request", "invalid_request_object", "request_uri_not_supported"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/EnsurePARInvalidRequestOrInvalidRequestObjectError.java */
+export function ensurePARInvalidRequestOrInvalidRequestObjectError(res: ParResponse, ...requirements: string[]): void {
+	ensureSpecifiedErrorFromPushedAuthorizationEndpointResponse(
+		"EnsurePARInvalidRequestOrInvalidRequestObjectError",
+		res,
+		["invalid_request", "invalid_request_object"],
+		requirements,
+	);
+}
+
+/**
+ * The PAR endpoint answered a request that did not use POST with a 4xx or 5xx (PAR-2.3: 405 Method Not Allowed).
+ *
+ * upstream: condition/client/EnsureParHTTPError.java
+ */
+export function ensureParHTTPError(res: ParResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureParHTTPError", ...requirements);
+	const status = res.status;
+	if (status == null) {
+		c.failure("PAR http status not found in environment");
+	}
+	if (status < 400 || status >= 600) {
+		c.failure("Invalid pushed authorization request endpoint response http status code", {
+			expected: "4xx or 5xx",
+			actual: status,
+		});
+	}
+	c.success("Pushed Authorization Request Endpoint returned a HTTP 4xx or 5xx error as expected", { actual: status });
 }

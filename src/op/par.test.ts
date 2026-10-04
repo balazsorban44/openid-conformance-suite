@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { ConditionFailed } from "../suite/conditions.ts";
 import { useMswServer, useTestLog } from "../suite/testing.ts";
 import {
+	addBadRequestUriToRequestParameters,
 	buildRequestObjectPostToPAREndpoint,
 	buildUnsignedPAREndpointRequest,
 	callPAREndpoint,
@@ -11,8 +12,11 @@ import {
 	checkForRequestUriValue,
 	checkPAREndpointResponse201WithNoError,
 	ensureMinimumRequestUriEntropy,
+	ensureParHTTPError,
 	ensurePARInvalidRequestError,
 	ensurePARInvalidRequestOrInvalidDpopProof,
+	ensurePARInvalidRequestOrInvalidRequestObjectError,
+	ensurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError,
 	extractRequestUriFromPARResponse,
 	type ParResponse,
 } from "./par.ts";
@@ -154,5 +158,53 @@ describe("the PAR response checks", () => {
 		expect(() => checkErrorFromParEndpointResponseErrorInvalidClientOrInvalidRequest(response(400, {}))).toThrow(
 			"Expected 'error' field is not present in PAR response",
 		);
+	});
+
+	test("the request_uri and http method modules: the errors they permit, a 4xx/5xx for a PUT, a request_uri form parameter", () => {
+		ensurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError(
+			response(400, { error: "request_uri_not_supported" }),
+			"PAR-2.1-2",
+		);
+		ensurePARInvalidRequestOrInvalidRequestObjectError(response(400, { error: "invalid_request_object" }), "JAR-6.2");
+		ensureParHTTPError(response(405, null), "PAR-2.3");
+		ensureParHTTPError(response(500, null), "PAR-2.3");
+		expect(t.entries().map((e) => [e.src, e["result"], e["msg"], e["requirements"]])).toEqual([
+			[
+				"EnsurePARInvalidRequestOrInvalidRequestObjectOrRequestUriNotSupportedError",
+				"SUCCESS",
+				"Pushed Authorization Request Endpoint returned expected 'error' of '[invalid_request, invalid_request_object, request_uri_not_supported]'",
+				["PAR-2.1-2"],
+			],
+			[
+				"EnsurePARInvalidRequestOrInvalidRequestObjectError",
+				"SUCCESS",
+				"Pushed Authorization Request Endpoint returned expected 'error' of '[invalid_request, invalid_request_object]'",
+				["JAR-6.2"],
+			],
+			[
+				"EnsureParHTTPError",
+				"SUCCESS",
+				"Pushed Authorization Request Endpoint returned a HTTP 4xx or 5xx error as expected",
+				["PAR-2.3"],
+			],
+			[
+				"EnsureParHTTPError",
+				"SUCCESS",
+				"Pushed Authorization Request Endpoint returned a HTTP 4xx or 5xx error as expected",
+				["PAR-2.3"],
+			],
+		]);
+		expect(() => ensureParHTTPError(response(201, { request_uri: "urn:x" }))).toThrow(
+			"Invalid pushed authorization request endpoint response http status code",
+		);
+		expect(() =>
+			ensurePARInvalidRequestOrInvalidRequestObjectError(response(400, { error: "request_uri_not_supported" })),
+		).toThrow("'error' field has unexpected value");
+
+		const req = buildUnsignedPAREndpointRequest({ client_id: "c1" });
+		const before = t.entries().length;
+		addBadRequestUriToRequestParameters(req);
+		expect(req.form["request_uri"]).toBe("urn:fdc:authlete.com:E2ooXxELkEFSKR90ymYV-BbwAvCC2TozHfSb_mMCw2s");
+		expect(t.entries().length).toBe(before);
 	});
 });

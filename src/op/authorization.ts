@@ -1833,3 +1833,292 @@ export function expectExpiredRequestObjectClaimErrorPage(...requirements: string
 		requirements,
 	);
 }
+
+/** upstream: condition/client/AddIncorrectNonceToAuthorizationEndpointRequest.java */
+export function addIncorrectNonceToAuthorizationEndpointRequest(params: Record<string, unknown>): void {
+	params["nonce"] = randomAlphanumeric(10);
+	condition("AddIncorrectNonceToAuthorizationEndpointRequest").success("Added incorrect nonce parameter to request", {
+		...params,
+	});
+}
+
+/** upstream: condition/client/AddIncorrectStateToAuthorizationEndpointRequest.java */
+export function addIncorrectStateToAuthorizationEndpointRequest(params: Record<string, unknown>): void {
+	params["state"] = randomAlphanumeric(10);
+	condition("AddIncorrectStateToAuthorizationEndpointRequest").success("Added incorrect state parameter to request", {
+		...params,
+	});
+}
+
+/** upstream: condition/client/AddClientIdToAuthorizationEndpointRequest.java */
+export function addClientIdToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	client: Pick<Client, "client_id">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("AddClientIdToAuthorizationEndpointRequest", ...requirements);
+	const clientId = client.client_id;
+	if (!clientId) {
+		c.failure("client_id missing/empty in client object");
+	}
+	params["client_id"] = clientId;
+	c.success("Added client_id of '" + clientId + "' to authorization endpoint request", { ...params });
+}
+
+/**
+ * An invalid request_uri in the authorization request (PAR-2.1: the request_uri parameter MUST NOT be provided).
+ *
+ * upstream: condition/client/AddBadRequestUriToAuthorizationRequest.java
+ */
+export function addBadRequestUriToAuthorizationRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	const badRequestUri = "urn%3Aexample%3Abwc4JK-ESC0w8acc191e-Y1LTC2";
+	params["request_uri"] = badRequestUri;
+	condition("AddBadRequestUriToAuthorizationRequest", ...requirements).success(
+		"Added bad request_uri to request object",
+		{
+			request_uri: badRequestUri,
+		},
+	);
+}
+
+/** upstream: condition/client/CreatePlainCodeChallenge.java */
+export function createPlainCodeChallenge(
+	verifier: string,
+	...requirements: string[]
+): { codeChallenge: string; codeChallengeMethod: "plain" } {
+	const c: Condition = condition("CreatePlainCodeChallenge", ...requirements);
+	if (!verifier) {
+		c.failure("code_verifier was null or empty");
+	}
+	c.log("Created code_challenge value", { code_challenge: verifier });
+	return { codeChallenge: verifier, codeChallengeMethod: "plain" };
+}
+
+/** upstream: condition/client/EnsureInvalidRequestUriError.java */
+export function ensureInvalidRequestUriError(response: AuthorizationResponse, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureInvalidRequestUriError", ...requirements);
+	const error = str(response.params, "error");
+	const expected = "invalid_request_uri";
+	if (!error) {
+		c.failure("Expected 'error' field not found");
+	}
+	if (error !== expected) {
+		c.failure("'error' field has unexpected value", { expected, actual: error });
+	}
+	c.success("Authorization endpoint returned expected 'error' of '" + expected + "'", { error });
+}
+
+/** upstream: condition/client/AbstractEnsureAuthorizationEndpointError.java */
+function ensureAuthorizationEndpointError(
+	name: string,
+	response: AuthorizationResponse,
+	permitted: string[],
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	const error = str(response.params, "error");
+	if (!error) {
+		c.failure("The server was expected to return an error, but no error was returned");
+	}
+	if (!permitted.includes(error)) {
+		c.failure("'error' field has unexpected value", { permitted, actual: error });
+	}
+	c.success("Authorization endpoint returned 'error'", { permitted, error });
+}
+
+/** upstream: condition/client/EnsureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError.java */
+export function ensureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	ensureAuthorizationEndpointError(
+		"EnsureInvalidRequestInvalidRequestObjectOrInvalidRequestUriError",
+		response,
+		["invalid_request", "invalid_request_object", "invalid_request_uri"],
+		requirements,
+	);
+}
+
+/** The shared body of the CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject* conditions */
+function checkErrorFromAuthorizationEndpointError(
+	name: string,
+	response: AuthorizationResponse,
+	expectedValues: string[],
+	requirements: string[],
+): void {
+	const c: Condition = condition(name, ...requirements);
+	const error = str(response.params, "error");
+	if (!error) {
+		c.failure("Expected 'error' field not found");
+	}
+	if (!expectedValues.includes(error)) {
+		c.failure("'error' field has unexpected value", { expected: expectedValues, actual: error });
+	}
+	c.success("Authorization endpoint returned expected error", { expected: expectedValues, actual: error });
+}
+
+/** upstream: condition/client/CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject.java */
+export function checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromAuthorizationEndpointError(
+		"CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObject",
+		response,
+		["invalid_request_object", "invalid_request"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri.java */
+export function checkErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	checkErrorFromAuthorizationEndpointError(
+		"CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrInvalidRequestObjectOrInvalidRequestUri",
+		response,
+		["invalid_request_object", "invalid_request", "invalid_request_uri"],
+		requirements,
+	);
+}
+
+/**
+ * Always fails: the server rejected a request_uri reused before the authentication completed (a recommendation,
+ * so the caller records it as a warning).
+ *
+ * upstream: condition/client/WarningAboutRequestUriError.java
+ */
+export function warningAboutRequestUriError(...requirements: string[]): never {
+	const c: Condition = condition("WarningAboutRequestUriError", ...requirements);
+	c.failure("The server rejected reuse of the 'request_uri' prior to authentication completion.");
+}
+
+/** upstream: condition/client/ExpectLoginPage.java; returns the placeholder to wait for */
+export function expectLoginPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectLoginPage",
+		"The login page should be shown, if not upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectInvalidRequestUriErrorPage.java; returns the placeholder to wait for */
+export function expectInvalidRequestUriErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectInvalidRequestUriErrorPage",
+		"If the server does not return an error back to the client, It must show an error page that the request_uri is invalid - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectPlainPkceErrorPage.java; returns the placeholder to wait for */
+export function expectPlainPkceErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectPlainPkceErrorPage",
+		"Show an error page saying plain PKCE must not be used.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestDifferentNonceInsideAndOutsideErrorPage.java; returns the placeholder to wait for */
+export function expectRequestDifferentNonceInsideAndOutsideErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestDifferentNonceInsideAndOutsideErrorPage",
+		"If the server does not return an invalid_request error back to the client, it must either show an error page (saying the request is invalid as the 'nonce' value in the request object and outside it are different - upload a screenshot of the error page) or must successfully authenticate and but return the nonce from inside the request object.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestDifferentStateInsideAndOutsideErrorPage.java; returns the placeholder to wait for */
+export function expectRequestDifferentStateInsideAndOutsideErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestDifferentStateInsideAndOutsideErrorPage",
+		"If the server does not return an invalid_request error back to the client, it must either show an error page (saying the request is invalid as the 'state' value in the request object and outside it are different - upload a screenshot of the error page) or must successfully authenticate and but return the state from inside the request object.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectMissingRedirectUriErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectMissingRedirectUriErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectMissingRedirectUriErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is missing the 'redirect_uri' claim - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectMissingNbfClaimErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectMissingNbfClaimErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectMissingNbfClaimErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is missing the 'nbf' claim - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectWithBadAudClaimErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectWithBadAudClaimErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectWithBadAudClaimErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is using bad aud value in signed request object - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectWithExpOver60ClaimErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectWithExpOver60ClaimErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectWithExpOver60ClaimErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is using exp value that is more than 60 minutes after the nbf value in signed request object - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectWithNbfOver60ClaimErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectWithNbfOver60ClaimErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectWithNbfOver60ClaimErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as it is using a 'nbf' value over 60 minutes in the past in the signed request object - upload a screenshot of the error page.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectSignedRS256RequestObjectErrorPage.java; returns the placeholder to wait for */
+export function expectSignedRS256RequestObjectErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectSignedRS256RequestObjectErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying the request object is invalid as the algorithm in the JWS header of the request object passed by 'request' parameter does not match the registered.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectUnverifiableErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectUnverifiableErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectUnverifiableErrorPage",
+		"Show request error page",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectRequestObjectInvalidSignatureErrorPage.java; returns the placeholder to wait for */
+export function expectRequestObjectInvalidSignatureErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectRequestObjectInvalidSignatureErrorPage",
+		"If the server does not return an invalid_request_object error back to the client, it must show an error page saying that the signature of the request object passed by 'request' parameter was not verified.",
+		requirements,
+	);
+}
+
+/** upstream: condition/client/ExpectAuthorizationRequestWithoutRequestObjectErrorPage.java; returns the placeholder to wait for */
+export function expectAuthorizationRequestWithoutRequestObjectErrorPage(...requirements: string[]): string {
+	return browserInteractionPlaceholder(
+		"ExpectAuthorizationRequestWithoutRequestObjectErrorPage",
+		"If the server does not return an invalid_request error back to the client, it must show an error page saying the request is invalid as it is missing the request_object - upload a screenshot of the error page.",
+		requirements,
+	);
+}

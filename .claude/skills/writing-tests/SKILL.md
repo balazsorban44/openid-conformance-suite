@@ -569,7 +569,15 @@ code site):
 - The FAPI 2 flow (tests/fapi2/shared.ts) runs each of upstream's `startBlock` sections as a `block()`, which ends
   it: the block upstream leaves open until the next `startBlock` ends with its section here, so a few entries
   carry no block id (the redirect and callback of the modules that leave the duplicate parameters out, and the
-  token request after the "Swapping to Client2" block of ensure-client-id-in-token-endpoint).
+  token request after the "Swapping to Client2" block of ensure-client-id-in-token-endpoint). Conversely the
+  request_uri modules whose `createPlaceholder` calls `endBlock()` upstream (par-attempt-reuse-request_uri,
+  par-attempt-to-use-expired-request_uri, par-attempt-to-use-request_uri-for-different-client) keep the browser's
+  trip and the callback in the block the redirect was built in.
+- fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds does not poll the
+  browser's visited urls for 120 seconds: the first visit resolves once the browser automation ran on the login
+  page (the configuration's `override` gives that module a first automation entry with `"match-limit": 1` that
+  only waits for the login page), and the callback is only awaited on the second visit, so upstream's
+  "authenticated on the initial visit" check cannot trigger.
 
 ### Review checklist
 
