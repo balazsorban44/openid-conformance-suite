@@ -1,11 +1,12 @@
 /**
- * OpenID Connect Core: Basic Certification Profile, OP tests (upstream openid/OIDCCBasicTestPlan.java).
+ * OpenID Connect Core: Form Post Basic Certification Profile, OP tests (upstream openid/OIDCCFormPostBasicTestPlan.java).
  *
- * The plan fixes response_type=code, client_auth_type=client_secret_basic and response_mode=default; the user
- * selects server_metadata and client_registration (CONFORMANCE_VARIANT or the CI project). The module bodies are in
- * tests/op/shared.ts (the implicit, hybrid and form post plans run the same modules).
+ * The basic plan's module lists with response_mode=form_post (upstream AbstractFormPostTestPlan.changeResponseTypeToFormPost):
+ * response_type=code, client_auth_type=client_secret_basic (client_secret_post for oidcc-server-client-secret-post);
+ * the user selects server_metadata and client_registration. The OP posts the authorization response to the
+ * redirect_uri as a form. The module bodies are in tests/op/shared.ts.
  *
- *   CONFORMANCE_PROJECT=op-basic-dynamic pnpm test tests/op/basic.spec.ts
+ *   CONFORMANCE_PROJECT=op-formpost-basic pnpm test tests/op/formpost-basic.spec.ts
  */
 import { test, variantNotApplicable } from "../fixtures.ts";
 import {
@@ -49,10 +50,10 @@ import {
 	oidccUserInfoPostHeader,
 } from "./shared.ts";
 
-test.describe("oidcc-basic-certification-test-plan", () => {
+test.describe("oidcc-formpost-basic-certification-test-plan", () => {
 	const plan = {
-		name: "oidcc-basic-certification-test-plan",
-		variant: { response_type: "code", client_auth_type: "client_secret_basic", response_mode: "default" },
+		name: "oidcc-formpost-basic-certification-test-plan",
+		variant: { response_type: "code", client_auth_type: "client_secret_basic", response_mode: "form_post" },
 	};
 	test.use({ plan });
 

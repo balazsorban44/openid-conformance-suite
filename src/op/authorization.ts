@@ -17,10 +17,12 @@ import { condition, logModule, soft, type Condition } from "../suite/conditions.
 import { randomAlphanumeric } from "../suite/random.ts";
 import { htmlResponse, WaitTimeoutError, type IncomingRequest } from "../suite/server.ts";
 import { toUriString } from "../suite/uri.ts";
+import { JOSEException, ParseException } from "../suite/errors.ts";
 import { checkErrorDescriptionContainsCRLFTAB, validateErrorDescription, validateErrorUri } from "./endpoint.ts";
-import type { ParsedJwt } from "../suite/jose.ts";
+import { parseJwt, type ParsedJwt } from "../suite/jose.ts";
 import type { Op } from "./op.ts";
-import type { Client } from "./registration.ts";
+import type { Client, RegisteredClient } from "./registration.ts";
+import { verifyJweEncryption, type AccessToken } from "./token.ts";
 
 export interface AuthorizationRequest {
 	/** The request parameters (upstream env "authorization_endpoint_request") */
@@ -1421,4 +1423,129 @@ export function authorizationEndpointRedirectedBackUnexpectedly(): never {
 	return condition("AuthorizationEndpointRedirectedBackUnexpectedly").failure(
 		"Authorization server redirected back in a case where it should not",
 	);
+}
+
+/** upstream: condition/client/ExtractAccessTokenFromAuthorizationResponse.java (AbstractExtractAccessToken) */
+export function extractAccessTokenFromAuthorizationResponse(response: AuthorizationResponse): AccessToken {
+	const c: Condition = condition("ExtractAccessTokenFromAuthorizationResponse");
+	const value = str(response.params, "access_token");
+	if (!value) {
+		c.failure("Couldn't find access token in authorization_endpoint_response");
+	}
+	const type = str(response.params, "token_type");
+	if (!type) {
+		c.failure("Couldn't find token type in authorization_endpoint_response");
+	}
+	const token = { value, type };
+	c.success("Extracted the access token", token);
+	return token;
+}
+
+/**
+ * An encrypted id_token in the authorization response must be encrypted to a key the client has (upstream
+ * AbstractVerifyJweEncryption).
+ *
+ * upstream: condition/client/ValidateIdTokenFromAuthorizationResponseEncryption.java
+ */
+export function validateIdTokenFromAuthorizationResponseEncryption(
+	response: AuthorizationResponse,
+	clientJwks: unknown,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("ValidateIdTokenFromAuthorizationResponseEncryption", ...requirements);
+	const idToken = response.params["id_token"];
+	if (idToken == null || typeof idToken === "object") {
+		c.failure("Couldn't find id_token in authorization_endpoint_response");
+	}
+	if (verifyJweEncryption(c, String(idToken), clientJwks, "id_token")) {
+		c.success("The client has a valid asymmetric key to decrypt the id_token");
+	} else {
+		c.success("The id_token is not encrypted using an asymmetric encryption algorithm");
+	}
+}
+
+/**
+ * Parses (decrypting with the client's keys if needed) the id_token of the authorization response.
+ *
+ * upstream: condition/client/ExtractIdTokenFromAuthorizationResponse.java (AbstractExtractJWT)
+ */
+export async function extractIdTokenFromAuthorizationResponse(
+	response: AuthorizationResponse,
+	client: RegisteredClient,
+	...requirements: string[]
+): Promise<ParsedJwt> {
+	const c: Condition = condition("ExtractIdTokenFromAuthorizationResponse", ...requirements);
+	const key = "authorization_endpoint_response";
+	const token = response.params["id_token"];
+	if (token == null || typeof token === "object") {
+		c.failure("Couldn't find id_token in " + key);
+	}
+	try {
+		const parsed = await parseJwt(String(token), client.client, client.keys?.jwks ?? null);
+		if (parsed == null) {
+			c.failure("Couldn't parse id_token from " + key + " as a JWT", { id_token: token });
+		}
+		c.success("Found and parsed the id_token from " + key, { ...parsed });
+		return parsed;
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse id_token from " + key + " as a JWT", e, { id_token: token });
+		}
+		if (
+			e instanceof JOSEException ||
+			(e as Error).name?.startsWith("JOSE") ||
+			(e as { code?: string }).code?.startsWith("ERR_J")
+		) {
+			c.failureFrom("Decrypting id_token from " + key + " failed", e, { id_token: token });
+		}
+		throw e;
+	}
+}
+
+/** upstream: condition/client/AddIdTokenEssentialNameClaimToAuthorizationEndpointRequest.java */
+export function addIdTokenEssentialNameClaimToAuthorizationEndpointRequest(
+	params: Record<string, unknown>,
+	...requirements: string[]
+): void {
+	addClaimToAuthorizationEndpointRequest(
+		"AddIdTokenEssentialNameClaimToAuthorizationEndpointRequest",
+		params,
+		"id_token",
+		"name",
+		null,
+		true,
+		requirements,
+	);
+}
+
+/**
+ * A REVIEW entry asking for a screenshot of the error page the OP shows for a request without nonce; see
+ * expectSecondLoginPage().
+ *
+ * upstream: condition/client/ExpectRequestMissingNonceErrorPage.java
+ */
+export function expectRequestMissingNonceErrorPage(...requirements: string[]): string {
+	const placeholder = randomAlphanumeric(10);
+	condition("ExpectRequestMissingNonceErrorPage", ...requirements).review(
+		"If the server does not return an invalid_request error back to the client, it must show an error page saying the request is invalid as it is missing the 'nonce' claim - upload a screenshot of the error page.",
+		{ upload: placeholder },
+	);
+	return placeholder;
+}
+
+/** upstream: condition/client/CheckErrorFromAuthorizationEndpointErrorInvalidRequest.java */
+export function checkErrorFromAuthorizationEndpointErrorInvalidRequest(
+	response: AuthorizationResponse,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("CheckErrorFromAuthorizationEndpointErrorInvalidRequest", ...requirements);
+	const expected = ["invalid_request"];
+	const error = str(response.params, "error");
+	if (!error) {
+		c.failure("Expected 'error' field not found");
+	}
+	if (!expected.includes(error)) {
+		c.failure("'error' field has unexpected value", { expected, actual: error });
+	}
+	c.success("Authorization endpoint returned expected error", { expected, actual: error });
 }

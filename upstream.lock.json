@@ -1223,6 +1223,18 @@
 			"ts": "src/op/token.ts",
 			"symbol": "verifyJweEncryption"
 		},
+		"src/main/java/net/openid/conformance/condition/client/AbstractVerifyScopesReturnedInClaims.java": {
+			"blob": "421c4047cb39d8f2fa4eceab74c0a7b22c196b43",
+			"loc": 76,
+			"ts": "src/op/id-token.ts",
+			"symbol": "verifyScopesInClaims"
+		},
+		"src/main/java/net/openid/conformance/condition/client/AbstractVerifyUserInfoAndIdTokenSameSub.java": {
+			"blob": "2aeb6ba31c104f05064ba3f87059505d1b1e4651",
+			"loc": 35,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "verifyUserInfoAndIdTokenSameSub"
+		},
 		"src/main/java/net/openid/conformance/condition/client/AddAudToRequestObject.java": {
 			"blob": "fe23404fe492ef4640f43a227d7cac9a8e605979",
 			"loc": 31,
@@ -1342,6 +1354,12 @@
 			"loc": 28,
 			"ts": "src/op/logout.ts",
 			"symbol": "addFrontchannelLogoutUriToDynamicRegistrationRequest"
+		},
+		"src/main/java/net/openid/conformance/condition/client/AddIdTokenEssentialNameClaimToAuthorizationEndpointRequest.java": {
+			"blob": "100aceb89fad8c5b83b185468420302cf0c83d3a",
+			"loc": 19,
+			"ts": "src/op/authorization.ts",
+			"symbol": "addIdTokenEssentialNameClaimToAuthorizationEndpointRequest"
 		},
 		"src/main/java/net/openid/conformance/condition/client/AddIdTokenHintFromFirstLoginToAuthorizationEndpointRequest.java": {
 			"blob": "1481cb6e47271cc35c8d5ffe3df510dba6f2e279",
@@ -1810,6 +1828,12 @@
 			"loc": 17,
 			"ts": "src/op/discovery.ts",
 			"symbol": "checkDiscoveryEndpointReturnedJsonContentType"
+		},
+		"src/main/java/net/openid/conformance/condition/client/CheckErrorFromAuthorizationEndpointErrorInvalidRequest.java": {
+			"blob": "6591cc12cf4f0f883694e4ad38534f4fbaf598a5",
+			"loc": 31,
+			"ts": "src/op/authorization.ts",
+			"symbol": "checkErrorFromAuthorizationEndpointErrorInvalidRequest"
 		},
 		"src/main/java/net/openid/conformance/condition/client/CheckErrorFromAuthorizationEndpointErrorInvalidRequestOrUnsupportedResponseType.java": {
 			"blob": "e4a3304216f8c2f01442ededc3973265ed6bb15d",
@@ -2285,6 +2309,12 @@
 			"ts": "src/op/id-token.ts",
 			"symbol": "ensureIdTokenContainsKid"
 		},
+		"src/main/java/net/openid/conformance/condition/client/EnsureIdTokenContainsName.java": {
+			"blob": "52d20a0c30926e06102a86aef30840ffa1060c69",
+			"loc": 24,
+			"ts": "src/op/id-token.ts",
+			"symbol": "ensureIdTokenContainsName"
+		},
 		"src/main/java/net/openid/conformance/condition/client/EnsureIdTokenDoesNotContainEmailForScopeEmail.java": {
 			"blob": "89fe6809a91e0f30aa53d47222b279815fffea73",
 			"loc": 23,
@@ -2483,6 +2513,12 @@
 			"ts": "src/op/authorization.ts",
 			"symbol": "expectRedirectUriMissingErrorPage"
 		},
+		"src/main/java/net/openid/conformance/condition/client/ExpectRequestMissingNonceErrorPage.java": {
+			"blob": "3b5fc99708908438a45243f70b3a2d4a44102f95",
+			"loc": 20,
+			"ts": "src/op/authorization.ts",
+			"symbol": "expectRequestMissingNonceErrorPage"
+		},
 		"src/main/java/net/openid/conformance/condition/client/ExpectSecondLoginPage.java": {
 			"blob": "5c0bf9ce428afc7afc4bb7e7a1423b71e58c472d",
 			"loc": 18,
@@ -2494,6 +2530,12 @@
 			"loc": 18,
 			"ts": "src/op/logout.ts",
 			"symbol": "expectSuccessfulLogoutPage"
+		},
+		"src/main/java/net/openid/conformance/condition/client/ExtractAccessTokenFromAuthorizationResponse.java": {
+			"blob": "83ddeae21b026286b78114f14fc87e5507dd3049",
+			"loc": 18,
+			"ts": "src/op/authorization.ts",
+			"symbol": "extractAccessTokenFromAuthorizationResponse"
 		},
 		"src/main/java/net/openid/conformance/condition/client/ExtractAccessTokenFromTokenResponse.java": {
 			"blob": "b4ee5d5aa55236d15d0189236f800258abcaf9c9",
@@ -2542,6 +2584,12 @@
 			"loc": 44,
 			"ts": "src/op/id-token.ts",
 			"symbol": "extractHash"
+		},
+		"src/main/java/net/openid/conformance/condition/client/ExtractIdTokenFromAuthorizationResponse.java": {
+			"blob": "1065583eb98cbacd899fe5d012b18e83c8687b04",
+			"loc": 21,
+			"ts": "src/op/authorization.ts",
+			"symbol": "extractIdTokenFromAuthorizationResponse"
 		},
 		"src/main/java/net/openid/conformance/condition/client/ExtractIdTokenFromTokenResponse.java": {
 			"blob": "00ef17646dcd9ce733c404d62252781c48e39776",
@@ -2963,6 +3011,12 @@
 			"ts": "src/op/id-token.ts",
 			"symbol": "validateIdTokenACRClaimAgainstRequest"
 		},
+		"src/main/java/net/openid/conformance/condition/client/ValidateIdTokenFromAuthorizationResponseEncryption.java": {
+			"blob": "87aa58f7f9731a2c6c96e4d549779f6a4c1ad4b0",
+			"loc": 35,
+			"ts": "src/op/authorization.ts",
+			"symbol": "validateIdTokenFromAuthorizationResponseEncryption"
+		},
 		"src/main/java/net/openid/conformance/condition/client/ValidateIdTokenFromTokenResponseEncryption.java": {
 			"blob": "a555c9618e0bfbbed9901ca92fad38ada6bbe709",
 			"loc": 34,
@@ -3065,6 +3119,12 @@
 			"ts": "src/op/registration.ts",
 			"symbol": "verifyDynamicRegistrationResponseClientCredentials"
 		},
+		"src/main/java/net/openid/conformance/condition/client/VerifyIdTokenSubConsistentHybridFlow.java": {
+			"blob": "9727cb8d3319cae39e4fd927bfe2cb6dfb98afcb",
+			"loc": 27,
+			"ts": "src/op/id-token.ts",
+			"symbol": "verifyIdTokenSubConsistentHybridFlow"
+		},
 		"src/main/java/net/openid/conformance/condition/client/VerifyNewJwksHasNewSigningKey.java": {
 			"blob": "f618a33f1c64b38ba1b867b42fdc125e7e512e59",
 			"loc": 89,
@@ -3077,11 +3137,23 @@
 			"ts": "src/op/jwks.ts",
 			"symbol": "verifyNewJwksStillHasOldSigningKey"
 		},
+		"src/main/java/net/openid/conformance/condition/client/VerifyScopesReturnedInAuthorizationEndpointIdToken.java": {
+			"blob": "8cbf68cdf6d9253c32971db58ed1e44313a70d8e",
+			"loc": 16,
+			"ts": "src/op/id-token.ts",
+			"symbol": "verifyScopesReturnedInAuthorizationEndpointIdToken"
+		},
 		"src/main/java/net/openid/conformance/condition/client/VerifyScopesReturnedInUserInfoClaims.java": {
 			"blob": "5b680f5dddc0979e85883eafb49fc0e44891e015",
 			"loc": 15,
 			"ts": "src/op/userinfo.ts",
 			"symbol": "verifyScopesReturnedInUserInfoClaims"
+		},
+		"src/main/java/net/openid/conformance/condition/client/VerifyUserInfoAndIdTokenInAuthorizationEndpointSameSub.java": {
+			"blob": "3fa0023808a6cf43977ed043b172e67c0a9ab308",
+			"loc": 10,
+			"ts": "src/op/userinfo.ts",
+			"symbol": "verifyUserInfoAndIdTokenInAuthorizationEndpointSameSub"
 		},
 		"src/main/java/net/openid/conformance/condition/client/VerifyUserInfoAndIdTokenInTokenEndpointSameSub.java": {
 			"blob": "a78566dde1620ad8bf83a1605904a2aac805aa77",
@@ -3640,6 +3712,12 @@
 			"loc": 39,
 			"ts": "tests/op/basic.spec.ts",
 			"symbol": "oidcc-ensure-request-with-acr-values-succeeds"
+		},
+		"src/main/java/net/openid/conformance/openid/OIDCCEnsureRequestWithoutNonceFails.java": {
+			"blob": "b93f4482030495c98c724d9f7dcf7a638e668fed",
+			"loc": 45,
+			"ts": "tests/op/formpost-hybrid.spec.ts",
+			"symbol": "oidcc-ensure-request-without-nonce-fails"
 		},
 		"src/main/java/net/openid/conformance/openid/OIDCCEnsureRequestWithoutNonceSucceedsForCodeFlow.java": {
 			"blob": "06f7c7e78121f99fef48f76d83f10ee771f7ab44",

@@ -33,7 +33,8 @@ import type { Jwks } from "../../src/suite/jose.ts";
 import { waitForJWKSRefreshDelay } from "../../src/suite/wait.ts";
 import { skipTest, test } from "../fixtures.ts";
 import {
-	completeCodeFlow,
+	accessTokenOf,
+	completeAuthorizationFlow,
 	oidccDiscoveryEndpointVerification,
 	oidccEnsureRequestObjectWithRedirectUri,
 	oidccIdTokenUnsigned,
@@ -145,7 +146,7 @@ test.describe(PLAN, () => {
 				authz.createAuthorizationRequest(op, client.client),
 			);
 			const response = await authz.authorize(op, request);
-			await completeCodeFlow(op, client, request, response, {
+			await completeAuthorizationFlow(op, client, request, response, {
 				performIdTokenValidation: async (signed) => {
 					// OP-IDToken-kid
 					// OIDCC-10.1 seems to only require a KID if the server has multiple JWKs, but we'll replicate the python
@@ -180,10 +181,10 @@ test.describe(PLAN, () => {
 				authz.createAuthorizationRequest(op, client.client),
 			);
 			const response = await authz.authorize(op, request);
-			const tokens = await completeCodeFlow(op, client, request, response);
+			const flow = await completeAuthorizationFlow(op, client, request, response);
 
 			// upstream: AbstractOIDCCUserInfoTest.onPostAuthorizationFlowComplete
-			const res = await userinfo.callUserInfoEndpoint(op, tokens.accessToken, {}, "OIDCC-5.3.1");
+			const res = await userinfo.callUserInfoEndpoint(op, accessTokenOf(flow), {}, "OIDCC-5.3.1");
 			soft(() => ensureHttpStatusCodeIs200(res));
 			// extractUserInfoResponse of the signed variant
 			soft(() => ensureContentTypeApplicationJwt(res, "OIDCC-5.3.2"));
@@ -207,7 +208,7 @@ test.describe(PLAN, () => {
 			// This is not a 'must not' in the spec, but equally including nonce here is almost certainly a mistake by the
 			// implementor there is nothing in the spec that suggests including nonce
 			soft(() => userinfo.ensureUserInfoDoesNotContainNonce(claims, "OIDCC-5.3.2", "OIDCC-5.1"));
-			userinfo.validateExtractedUserInfoResponse(claims);
+			userinfo.validateExtractedUserInfoResponse(claims, flow);
 		});
 
 		// upstream: openid/OIDCCEnsureRedirectUriInAuthorizationRequest.java (OP-redirect_uri-Missing)
@@ -249,7 +250,7 @@ test.describe(PLAN, () => {
 				authz.createAuthorizationRequest(queryOp, client.client),
 			);
 			const response = await authz.authorize(queryOp, request);
-			await completeCodeFlow(queryOp, client, request, response);
+			await completeAuthorizationFlow(queryOp, client, request, response);
 		});
 
 		// upstream: openid/OIDCCRedirectUriQueryMismatch.java (OP-redirect_uri-Query-Mismatch)
@@ -409,7 +410,7 @@ test.describe(PLAN, () => {
 				authz.createAuthorizationRequest(op, client.client),
 			);
 			const response = await authz.authorize(op, request);
-			await completeCodeFlow(op, client, request, response);
+			await completeAuthorizationFlow(op, client, request, response);
 		});
 
 		// upstream: openid/OIDCCRegistrationSectorUri.java
@@ -595,7 +596,7 @@ test.describe(PLAN, () => {
 				}),
 			);
 			const response = await authz.authorize(op, request);
-			await completeCodeFlow(op, client, request, response);
+			await completeAuthorizationFlow(op, client, request, response);
 		});
 
 		// https://www.heenan.me.uk/~joseph/oidcc_test_desc-phase1.html#OP_request_uri_Sig
@@ -638,7 +639,7 @@ test.describe(PLAN, () => {
 				return authorizationRequest;
 			});
 			const response = await authz.authorize(op, request);
-			await completeCodeFlow(op, client, request, response);
+			await completeAuthorizationFlow(op, client, request, response);
 		});
 
 		// upstream: openid/OIDCCEnsureRequestObjectWithRedirectUri.java

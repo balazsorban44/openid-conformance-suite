@@ -8,7 +8,7 @@ The [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-
 - [x] OpenID Connect Core, OpenID Provider
   - [x] basic, config, dynamic client registration
   - [x] RP-initiated, back-channel and front-channel logout, session management, 3rd-party-initiated login
-  - [ ] implicit and hybrid flows, form_post response mode
+  - [x] implicit and hybrid flows, form_post response mode
 - [x] OpenID Connect Core, Relying Party
   - [x] basic, config, dynamic client registration
   - [x] implicit and hybrid flows, form_post response mode

@@ -466,7 +466,8 @@ function validateHash(
 	name: string,
 	hashName: string,
 	extracted: ExtractedHash,
-	baseString: string,
+	/** upstream getBaseStringBasedOnType: the value hashed, or the failure message when it is missing */
+	base: { value: string | null; missing: string },
 	requirements: string[],
 ): void {
 	const c: Condition = condition(name, ...requirements);
@@ -475,6 +476,10 @@ function validateHash(
 	}
 	if (!extracted.hash) {
 		c.failure(hashName + " element is null or empty. Invalid");
+	}
+	const baseString = base.value;
+	if (baseString == null) {
+		c.failure(base.missing);
 	}
 	let digestAlgorithm: string;
 	try {
@@ -496,14 +501,26 @@ function validateHash(
 	c.success(hashName + " validated successfully", fields);
 }
 
-/** upstream: condition/client/ValidateAtHash.java */
-export function validateAtHash(atHash: ExtractedHash, accessToken: AccessToken, ...requirements: string[]): void {
-	validateHash("ValidateAtHash", "at_hash", atHash, accessToken.value, requirements);
+/**
+ * upstream: condition/client/ValidateAtHash.java
+ *
+ * UPSTREAM: without an access token (an at_hash in the id_token of response_type=id_token) upstream's @PreEnvironment
+ * check fails before the condition runs ("couldn't find required object in environment before evaluation:
+ * access_token"); here the condition fails with getBaseStringBasedOnType's message.
+ */
+export function validateAtHash(
+	atHash: ExtractedHash,
+	accessToken: AccessToken | null,
+	...requirements: string[]
+): void {
+	const base = { value: accessToken?.value ?? null, missing: "Could not get access_token object..." };
+	validateHash("ValidateAtHash", "at_hash", atHash, base, requirements);
 }
 
-/** upstream: condition/client/ValidateCHash.java */
-export function validateCHash(cHash: ExtractedHash, code: string, ...requirements: string[]): void {
-	validateHash("ValidateCHash", "c_hash", cHash, code, requirements);
+/** upstream: condition/client/ValidateCHash.java (the code of the authorization response) */
+export function validateCHash(cHash: ExtractedHash, code: string | null, ...requirements: string[]): void {
+	const base = { value: code, missing: "Could not find authorization_endpoint_response.code" };
+	validateHash("ValidateCHash", "c_hash", cHash, base, requirements);
 }
 
 /**
@@ -522,7 +539,7 @@ export function checkOptionalHashes(idToken: ParsedJwt, accessToken: AccessToken
 	if (cHash === undefined) {
 		skipped("ValidateCHash", { object: "c_hash" }, "OIDCC-3.3.2.11");
 	} else {
-		soft(() => validateCHash(cHash, code ?? "", "OIDCC-3.3.2.11"));
+		soft(() => validateCHash(cHash, code, "OIDCC-3.3.2.11"));
 	}
 }
 
@@ -956,4 +973,126 @@ export function compareIdTokenClaims(
 
 function hasClaim(claims: Record<string, unknown>, name: string): boolean {
 	return Object.hasOwn(claims, name);
+}
+
+/**
+ * The id_tokens from the authorization endpoint and the token endpoint of a hybrid flow are for the same user.
+ *
+ * upstream: condition/client/VerifyIdTokenSubConsistentHybridFlow.java
+ */
+export function verifyIdTokenSubConsistentHybridFlow(
+	authorizationEndpointIdToken: ParsedJwt,
+	tokenEndpointIdToken: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("VerifyIdTokenSubConsistentHybridFlow", ...requirements);
+	const subAuth = stringClaim(authorizationEndpointIdToken, "sub");
+	const subToken = stringClaim(tokenEndpointIdToken, "sub");
+	// UPSTREAM: Java's subAuth.equals(...) throws a NullPointerException when the authorization endpoint id_token has
+	// no sub; here the subs are simply compared
+	if (subAuth !== subToken) {
+		c.failure('"sub" in authorization endpoint id_token doesn\'t match with "sub" in token endpoint id_token', {
+			sub_auth_endpoint: subAuth,
+			sub_token_endpoint: subToken,
+		});
+	}
+	c.success("authorization endpoint and token endpoint id_token have same sub", {
+		sub_auth_endpoint: subAuth,
+		sub_token_endpoint: subToken,
+	});
+}
+
+/**
+ * The claims of `claims` (the object named `claimsKey` in the messages) include the standard claims of every scope
+ * of the authorization request.
+ *
+ * upstream: condition/client/AbstractVerifyScopesReturnedInClaims.java
+ */
+export function verifyScopesInClaims(
+	c: Condition,
+	claims: unknown,
+	claimsKey: string,
+	authorizationRequest: Pick<AuthorizationRequest, "params">,
+): void {
+	if (claims == null || typeof claims !== "object" || Array.isArray(claims)) {
+		c.failure("'claims' in " + claimsKey + " is invalid", { claims: claims ?? null });
+	}
+	const scope = authorizationRequest.params["scope"];
+	if (typeof scope !== "string" || scope === "") {
+		c.failure("'scope' not found in authorization endpoint request");
+	}
+	const claimsSet = Object.keys(claims);
+	const expectedScopeItems: string[] = [];
+	for (const s of scope.split(" ")) {
+		const items = SCOPE_STANDARD_CLAIMS.get(s);
+		// UPSTREAM: an unknown scope makes Java throw a NullPointerException (addAll(null)); here a TypeError
+		expectedScopeItems.push(...(items as string[]));
+	}
+	const missing = [...new Set(expectedScopeItems)].filter((item) => !claimsSet.includes(item));
+	if (missing.length > 0) {
+		c.failure(
+			"'claims' in " +
+				claimsKey +
+				" doesn't contain all scope items of scope in authorization request(corresponds to scope standard claims)",
+			{ actual_scope_items: claimsSet, expected_scope_items: expectedScopeItems, missing_items: missing },
+		);
+	}
+	c.success(
+		"'claims' in " +
+			claimsKey +
+			" contains all scope items of scope in authorization request (corresponds to scope standard claims)",
+		{ actual_scope_items: claimsSet, expected_scope_items: expectedScopeItems },
+	);
+}
+
+/**
+ * For response_type=id_token (no access token for the userinfo endpoint) the id_token carries the claims of the
+ * requested scopes.
+ *
+ * upstream: condition/client/VerifyScopesReturnedInAuthorizationEndpointIdToken.java (AbstractVerifyScopesReturnedInClaims)
+ */
+export function verifyScopesReturnedInAuthorizationEndpointIdToken(
+	authorizationEndpointIdToken: ParsedJwt,
+	authorizationRequest: Pick<AuthorizationRequest, "params">,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("VerifyScopesReturnedInAuthorizationEndpointIdToken", ...requirements);
+	verifyScopesInClaims(c, authorizationEndpointIdToken.claims, "authorization_endpoint_id_token", authorizationRequest);
+}
+
+/** upstream: condition/client/EnsureIdTokenContainsName.java */
+export function ensureIdTokenContainsName(idToken: ParsedJwt, ...requirements: string[]): void {
+	const c: Condition = condition("EnsureIdTokenContainsName", ...requirements);
+	const name = stringClaim(idToken, "name");
+	if (!name) {
+		c.failure("name not found in id_token");
+	}
+	c.success("Found name in id_token", { name });
+}
+
+/**
+ * An id_token from the authorization endpoint must have at_hash when an access token is returned with it and c_hash
+ * when a code is (OIDCC 3.3.2.11), and both must be right when present.
+ *
+ * upstream: OIDCCServerTest.performAuthorizationEndpointIdTokenValidation (the hash part)
+ */
+export function checkAuthorizationEndpointHashes(
+	idToken: ParsedJwt,
+	responseType: string,
+	accessToken: AccessToken | null,
+	code: string | null,
+): void {
+	const includes = (part: string) => responseType.split(" ").includes(part);
+	const atHash = soft(() => extractAtHash(idToken, "OIDCC-3.3.2.11"), includes("token") ? "failure" : "info");
+	if (atHash === undefined) {
+		skipped("ValidateAtHash", { object: "at_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		soft(() => validateAtHash(atHash, accessToken, "OIDCC-3.3.2.11"));
+	}
+	const cHash = soft(() => extractCHash(idToken, "OIDCC-3.3.2.11"), includes("code") ? "failure" : "info");
+	if (cHash === undefined) {
+		skipped("ValidateCHash", { object: "c_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		soft(() => validateCHash(cHash, code, "OIDCC-3.3.2.11"));
+	}
 }
