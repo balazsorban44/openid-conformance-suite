@@ -7,18 +7,15 @@
  * which the emulated OP fetches and checks. The user selects client_auth_type and response_mode.
  *
  * Every test starts the emulated OP (rp.start: what this module's OP does differently), makes the RP under test
- * log in against it (rp.driveClient), then follows the requests the RP sends.
+ * log in against it (rp.driveClient), then follows the requests the RP sends. The modules the config plan has too
+ * (discovery, key rotation, alg none) have their bodies in ./shared.ts.
  *
  *   CONFORMANCE_PROJECT=rp-dynamic pnpm test tests/rp/dynamic.spec.ts
  */
 import * as discovery from "../../src/rp/discovery.ts";
-import * as idToken from "../../src/rp/id-token.ts";
-import * as jwks from "../../src/rp/jwks.ts";
 import { failTest } from "../../src/rp/op.ts";
-import type { RpClient } from "../../src/rp/registration.ts";
 import * as requestObject from "../../src/rp/request-object.ts";
 import * as userinfo from "../../src/rp/userinfo.ts";
-import { randomAlphabetic } from "../../src/suite/random.ts";
 import { selectedVariant, test, variantNotApplicable } from "../fixtures.ts";
 import * as shared from "./shared.ts";
 
@@ -83,71 +80,22 @@ test.describe("oidcc-client-dynamic-certification-test-plan", () => {
 	});
 
 	// upstream: openid/client/config/OIDCCClientTestDiscoveryOpenIDConfiguration.java (rp-discovery-openid-configuration)
-	test("oidcc-client-test-discovery-openid-config: the RP fetches the OP's configuration from .well-known/openid-configuration", async ({
-		rp,
-	}) => {
-		const op = await rp.start();
-		const client = rp.driveClient();
-		// upstream finishes the test after the discovery request
-		await op.expect("discovery");
-		await client;
-	});
+	test(
+		"oidcc-client-test-discovery-openid-config: the RP fetches the OP's configuration from .well-known/openid-configuration",
+		shared.discoveryOpenIdConfig,
+	);
 
 	// upstream: openid/client/config/OIDCCClientTestDiscoveryJwksUriKeys.java (rp-discovery-jwks_uri-keys)
-	test("oidcc-client-test-discovery-jwks-uri-keys: the RP fetches the keys from the jwks_uri of the OP's configuration", async ({
-		rp,
-	}) => {
-		const randomJwksUriSuffix = randomAlphabetic(10);
-		const op = await rp.start({
-			// a jwks_uri that changes with every run (the keys are served there only): the RP has to use the configuration
-			serverConfiguration: (baseUrl) => {
-				const server = discovery.oidccGenerateServerConfiguration(baseUrl);
-				discovery.addRandomJwksUriToServerConfiguration(server, randomJwksUriSuffix);
-				return server;
-			},
-			// upstream checkIfDiscoveryCalled / checkIfJWKCalled: nothing before discovery, no userinfo before the keys
-			onRequest: (endpoint, request, { received }) => {
-				if (endpoint === "discovery" || endpoint === "webfinger") {
-					return;
-				}
-				if (received("discovery") === 0) {
-					failTest("Got unexpected HTTP call to " + request.path + " before the discovery endpoint call");
-				}
-				if (endpoint === "userinfo" && received("jwks") === 0) {
-					failTest("Got unexpected HTTP call to " + request.path + " before the jwks endpoint call");
-				}
-			},
-		});
-		const client = rp.driveClient();
-		// upstream finishes the test after the discovery and the jwks requests
-		await op.expect("discovery");
-		await op.expect("jwks");
-		await client;
-	});
+	test(
+		"oidcc-client-test-discovery-jwks-uri-keys: the RP fetches the keys from the jwks_uri of the OP's configuration",
+		shared.discoveryJwksUriKeys,
+	);
 
 	// upstream: openid/client/config/OIDCCClientTestDiscoveryIssuerMismatch.java (rp-discovery-issuer-not-matching-config)
-	test("oidcc-client-test-discovery-issuer-mismatch: the RP stops when the configuration's issuer is not the one WebFinger returned", async ({
-		rp,
-	}) => {
-		const op = await rp.start({
-			onRequest: (endpoint, _request, { metadata }) => {
-				if (endpoint === "discovery") {
-					discovery.changeIssuerInServerConfigurationToBeInvalid(metadata);
-				}
-				if (endpoint === "authorization") {
-					failTest(
-						"The client is expected to detect the issuer mismatch and stop" +
-							" the flow after fetching OpenID Provider configuration.",
-					);
-				}
-			},
-		});
-		const client = rp.driveClient();
-		await op.expect("discovery");
-		// the RP must detect the mismatch and stop: no authorization request within waitTimeoutSeconds
-		await op.waitFor("authorization", rp.waitTimeoutSeconds);
-		await client;
-	});
+	test(
+		"oidcc-client-test-discovery-issuer-mismatch: the RP stops when the configuration's issuer is not the one WebFinger returned",
+		shared.discoveryIssuerMismatch,
+	);
 
 	// the plan has this module for dynamic clients only
 	if (!variantNotApplicable(plan, { client_registration: ["static_client"] })) {
@@ -210,59 +158,16 @@ test.describe("oidcc-client-dynamic-certification-test-plan", () => {
 	}
 
 	// upstream: openid/client/config/OIDCCClientTestSigningKeyRotationJustBeforeSigning.java (rp-key-rotation-op-sign-key-native)
-	test("oidcc-client-test-signing-key-rotation-just-before-signing: the RP fetches the OP's keys again to verify an id_token signed with a new key", async ({
-		rp,
-	}) => {
-		const op = await rp.start({
-			// new keys (new kids) right before the id_token is signed
-			signIdToken: (claims, emulated) => {
-				emulated.keys = jwks.regenerateServerJwks();
-				return idToken.oidccSignIdToken(
-					claims,
-					emulated.keys.jwks,
-					emulated.client as RpClient,
-					emulated.signingAlg as string,
-					"OIDCC-2",
-				);
-			},
-		});
-		const client = rp.driveClient();
-		await op.clientRegistered();
-		await op.expect("authorization");
-		await op.expect("token");
-		// the RP can only verify the id_token with the new keys, then calls userinfo
-		await op.expect("userinfo");
-		await client;
-	});
+	test(
+		"oidcc-client-test-signing-key-rotation-just-before-signing: the RP fetches the OP's keys again to verify an id_token signed with a new key",
+		shared.signingKeyRotationJustBeforeSigning,
+	);
 
 	// upstream: openid/client/config/OIDCCClientTestSigningKeyRotation.java (rp-key-rotation-op-sign-key)
-	test("oidcc-client-test-signing-key-rotation: the RP logs in twice and fetches the OP's keys again after they were rotated", async ({
-		rp,
-	}) => {
-		const op = await rp.start({
-			// the second authorization request: new keys (new kids) sign the second id_token
-			onRequest: (endpoint, _request, emulated) => {
-				if (endpoint === "authorization" && emulated.received("authorization") > 0) {
-					emulated.keys = jwks.regenerateServerJwks();
-				}
-			},
-			authorizationBlock: ({ received }) =>
-				received("authorization") > 0 ? "Second Authorization Request" : "Authorization endpoint",
-		});
-		const client = rp.driveClient();
-		await op.clientRegistered();
-		await op.expect("authorization");
-		await op.expect("token");
-		await op.expect("userinfo");
-		// the second login, after the key rotation
-		await op.expect("authorization");
-		await op.expect("token");
-		await op.expect("userinfo");
-		// upstream finishes the test after the second userinfo request and the second jwks request
-		await op.expect("jwks");
-		await op.expect("jwks");
-		await client;
-	});
+	test(
+		"oidcc-client-test-signing-key-rotation: the RP logs in twice and fetches the OP's keys again after they were rotated",
+		shared.signingKeyRotation,
+	);
 
 	// upstream @VariantNotApplicable(parameter = ResponseType.class, values = { "id_token" }): no access token, no userinfo
 	if (!variantNotApplicable(plan, { response_type: ["id_token"] })) {

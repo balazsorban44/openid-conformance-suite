@@ -523,6 +523,10 @@ async function setUpClient(
 
 	const metadata: Record<string, unknown> = {
 		...(requestType !== "plain_http_request" ? { request_object_signing_alg: "RS256" } : {}),
+		// a web client with tokens in the front channel (any response type but code) must register https redirect_uris
+		// that are not localhost (OIDC Registration 2, OIDCCValidateClientRedirectUris); this RP runs on localhost, so it
+		// registers as a native (loopback) client, which may use http://localhost
+		...(responseType !== "code" ? { application_type: "native" } : {}),
 		...input.clientMetadataDefaults,
 		token_endpoint_auth_method: authMethod,
 		response_types: [responseType],
@@ -720,6 +724,13 @@ async function completeLogin(flow: Flow, params: URLSearchParams, config = flow.
 
 	// error responses are left to openid-client too: it validates state / iss and raises AuthorizationResponseError
 	if (types.has("code")) {
+		if (frontIdToken && frontAccessToken) {
+			// code id_token token: the front-channel access token is validated before the code is exchanged, an
+			// id_token with a missing / invalid at_hash must not lead to a token request
+			// (oidcc-client-test-missing-athash, oidcc-client-test-invalid-athash)
+			await validateAtHash(frontIdToken, frontAccessToken);
+			step(flow, "at_hash validated");
+		}
 		if (types.has("id_token")) {
 			currentUrl.hash = libParams.toString();
 		} else {
@@ -744,11 +755,11 @@ async function completeLogin(flow: Flow, params: URLSearchParams, config = flow.
 		step(flow, "front-channel ID Token validated");
 		result.idToken = frontIdToken;
 		result.accessToken = frontAccessToken;
-	}
-
-	if (frontIdToken && frontAccessToken) {
-		await validateAtHash(frontIdToken, frontAccessToken);
-		step(flow, "at_hash validated");
+		if (frontIdToken && frontAccessToken) {
+			// id_token token
+			await validateAtHash(frontIdToken, frontAccessToken);
+			step(flow, "at_hash validated");
+		}
 	}
 
 	if (result.idToken) {

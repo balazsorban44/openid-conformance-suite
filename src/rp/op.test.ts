@@ -129,6 +129,32 @@ describe("the emulated OP", () => {
 		expect(sources.indexOf("AddInvalidAudValueToIdToken")).toBe(sources.indexOf("GenerateIdTokenClaims") + 1);
 	});
 
+	test("a module's nonce extraction and at_hash step replace the default ones", async () => {
+		const calls: string[] = [];
+		const op = await start({
+			extractNonce: (params) => {
+				calls.push("extractNonce");
+				return params["nonce"] as string;
+			},
+			addAtHashToIdToken: (claims, atHash) => {
+				calls.push(`addAtHashToIdToken ${atHash == null ? "null" : "at_hash"}`);
+				claims["at_hash"] = "replaced";
+			},
+		});
+		const flow = login(op.issuer);
+		await op.expect("authorization");
+		const token = await op.expect("token");
+		await flow;
+
+		expect(calls).toEqual(["extractNonce", "addAtHashToIdToken at_hash"]);
+		const payload = decodeJwt(String(token.response["id_token"]));
+		expect(payload["nonce"]).toBe("n-0S6_WzA2Mj");
+		expect(payload["at_hash"]).toBe("replaced");
+		const sources = t.entries().map((e) => e.src);
+		expect(sources).not.toContain("ExtractNonceFromAuthorizationRequest");
+		expect(sources).not.toContain("AddAtHashToIdTokenClaims");
+	});
+
 	test("waitFor() resolves null once the RP finished; expect() then rejects", async () => {
 		const op = await start();
 		const optional = op.waitFor("userinfo", 30);

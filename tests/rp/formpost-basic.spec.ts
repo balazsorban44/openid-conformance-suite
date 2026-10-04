@@ -1,25 +1,22 @@
 /**
- * OpenID Connect Core: Basic Certification Profile, RP tests (upstream openid/client/OIDCCClientBasicTestPlan.java,
- * the tests of the profile document's table, in its order).
+ * OpenID Connect Core: Form Post Basic Certification Profile, RP tests (upstream
+ * openid/client/OIDCCClientFormPostBasicTestPlan.java: the basic plan's list with response_mode=form_post,
+ * AbstractFormPostTestPlan.changeResponseTypeToFormPost).
  *
- * The plan fixes response_type=code, response_mode=default and client_auth_type=client_secret_basic; the user
- * selects client_registration and request_type (CONFORMANCE_VARIANT or the CI project).
+ * The plan fixes response_type=code, response_mode=form_post and client_auth_type=client_secret_basic; the user
+ * selects client_registration and request_type (CONFORMANCE_VARIANT or the CI project). The emulated OP answers the
+ * authorization request with a page that posts the code to the RP's redirect_uri. The modules are the basic plan's
+ * (tests/rp/basic.spec.ts); their bodies are in ./shared.ts.
  *
- * Every test starts the emulated OP (rp.start: what this module's OP does differently), makes the RP under test
- * log in against it (rp.driveClient), then follows the requests the RP sends. A request the OP must not see
- * fails the test from the endpoint (onUserinfoRequest); a request the RP may or must not send is awaited with
- * op.waitFor (upstream's waitTimeoutSeconds timer). The modules are in several plans (the form post plan has the
- * same list with response_mode=form_post): their bodies are in ./shared.ts.
- *
- *   CONFORMANCE_PROJECT=rp-basic pnpm test tests/rp/basic.spec.ts
+ *   CONFORMANCE_PROJECT=rp-formpost-basic pnpm test tests/rp/formpost-basic.spec.ts
  */
 import { selectedVariant, test, variantNotApplicable } from "../fixtures.ts";
 import * as shared from "./shared.ts";
 
-test.describe("oidcc-client-basic-certification-test-plan", () => {
+test.describe("oidcc-client-formpost-basic-certification-test-plan", () => {
 	const plan = {
-		name: "oidcc-client-basic-certification-test-plan",
-		variant: { response_type: "code", response_mode: "default", client_auth_type: "client_secret_basic" },
+		name: "oidcc-client-formpost-basic-certification-test-plan",
+		variant: { response_type: "code", response_mode: "form_post", client_auth_type: "client_secret_basic" },
 	};
 	test.use({ plan });
 

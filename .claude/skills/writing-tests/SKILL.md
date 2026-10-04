@@ -77,10 +77,13 @@ tests/op/*.spec.ts    one file per OP plan (basic, config, dynamic, rp-initiated
                       frontchannel-logout, session-management, 3rdparty-init-login); tests/op/shared.ts: the
                       bodies of modules that are in several plans (oidcc-server, oidcc-refresh-token, ...) and the
                       code flow pieces of AbstractOIDCCServerTest (completeCodeFlow, userinfoEndpointTests)
-tests/rp/*.spec.ts    one file per RP plan (basic, dynamic, rp-initiated-logout, backchannel-logout,
-                      frontchannel-logout, session-management, 3rdparty-init-login); tests/rp/shared.ts: the bodies
-                      of modules that are in several plans (each spec registers them with its title and upstream
-                      comment) and the emulated OP options of each RP module (emulatedOpModules, for suite-vs-suite)
+tests/rp/*.spec.ts    one file per RP plan (basic, implicit, hybrid, formpost-basic, formpost-implicit,
+                      formpost-hybrid, config, dynamic, rp-initiated-logout, backchannel-logout, frontchannel-logout,
+                      session-management, refresh-token, 3rdparty-init-login); tests/rp/shared.ts: the bodies of
+                      modules that are in several plans (each spec registers them with its title and upstream
+                      comment), the flows they share per response type (expectLogin, finishingRequest, the
+                      AbstractOIDCCClientTestExpectingNothingInvalidIdToken flow) and the emulated OP options of
+                      each RP module (emulatedOpModules, for suite-vs-suite)
 src/runner/projects.ts `plans` (plan -> title, spec file, modules, user-selectable variants) and `projects` (the CI
                       matrix: plan, variant, config, skipModules); src/runner/list.ts: `openid-conformance list`
 bin/cli.ts            the CLI (list, run, ci, projects); playwright.config.ts picks the selected plan's spec
@@ -168,8 +171,9 @@ test.describe("oidcc-basic-certification-test-plan", () => {
   directly above the `test(` (scripts/upstream-lock-symbols.ts reads it).
 - **Plan**: one `test.describe("<plan name>")` with `test.use({ plan: { name, variant } })`: the variant values the
   plan fixes. The user's selection (CONFORMANCE_VARIANT or the CI project) fills in the rest (`variant` fixture).
-- **Not applicable** (upstream `@VariantNotApplicable`): a nested `test.describe` with
-  `test.skip(({ variant }) => variant.client_registration === "static_client", "not applicable to static clients")`.
+- **Not applicable** (upstream `@VariantNotApplicable`): the module is left out at collection time, as upstream's
+  plan does not list it: `if (!variantNotApplicable(plan, { client_registration: ["static_client"] })) { test(...) }`
+  (`variantNotApplicable` / `selectedVariant` from tests/fixtures.ts), not `test.skip`.
 - **Skipped at run time** (upstream `fireTestSkipped(msg)`): `skipTest(msg)` from tests/fixtures.ts logs the SKIPPED
   entry and ends the test (Playwright's skip); the expected skips of the configuration list such modules
   (`rp.skipTest(msg)` in RP tests).
@@ -218,8 +222,9 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   logs (metadata, keys and their validation, the user, the static client) and the endpoints, served on the test's
   server: the issuer is `server.baseUrl + "/"` (`/test/a/<alias>/`). The options are upstream's overridable methods
   as plain values / callbacks, named after what they change: `serverConfiguration`, `serverJwks`, `signingAlg`,
-  `registrationSteps`, `checkNonce`, `checkResponseType`, `checkAuthorizationRequest`,
-  `allowMaxAgeZeroWithPromptNone`, `customizeAuthorizationResponse`, `idTokenClaims`, `signIdToken`,
+  `registrationSteps`, `extractNonce`, `checkNonce`, `checkResponseType`, `checkAuthorizationRequest`,
+  `allowMaxAgeZeroWithPromptNone`, `customizeAuthorizationResponse`, `idTokenClaims`, `addCHashToIdToken`,
+  `addAtHashToIdToken`, `signIdToken`,
   `idTokenSignature`, `onCodeExchange`, `onUserinfoRequest`, `userinfo`, `clientAuthType`, `onRequest` (before
   any endpoint handles a request: the module's checks on the order of requests, key rotation), `checkClientMetadata`,
   `checkRequestObject`, `authorizationBlock`, `validateWebfingerResource`. A callback calls the upstream condition
@@ -236,6 +241,13 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   option: `onUserinfoRequest: () => failTest(msg)` (upstream throws TestFailureException in the handler) or
   `rp.skipTest(msg)` (upstream fireTestSkipped). A test whose upstream module finishes after a request ends with
   `await op.expect(<that endpoint>)`.
+- The response type decides the flow (upstream AbstractOIDCCClientTest): `op.responseType` has `includesCode`,
+  `includesIdToken` and `includesToken`. A body shared by the code, implicit and hybrid plans follows it with the
+  helpers of tests/rp/shared.ts: `expectLogin(op)` (authorization; token only for code and code id_token, where the code is
+  the only way to an access token; then userinfo, or for response_type=id_token the jwks request:
+  finishTestIfAllRequestsAreReceived) and, for the modules on AbstractOIDCCClientTestExpectingNothingInvalidIdToken,
+  `onCodeExchange` / `onUserinfoRequest` failing the test with the module's messages (a token request is unexpected
+  once the id_token came from the authorization endpoint) and `op.waitFor(finishingRequest(op), ...)`.
 - Requests are handled one at a time (upstream's test lock), outside the test's Playwright steps; the test's
   `expect`/`waitFor` calls are the steps of the report.
 - `rp.driveClient()` (the client driver contract, targets/openid-client-rp/README.md): GET
@@ -292,7 +304,10 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `skipTest(reason)`. Uses the same per-test setup and after-test analysis as `op` (the `conformance` fixture);
   a client driver call still running when the test ends is aborted.
 - `variant: OpVariant`, `plan: { name, variant }` (option). A plan whose module lists fix different variants
-  (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list.
+  (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list, titled after
+  the list's variant (tests/rp/implicit.spec.ts: `"response_type=id_token"`); a module in several lists runs once
+  per list, each with its variant in module-report.json, and the reporter labels it with the list
+  (`ModuleReport.moduleList`).
 - Worker scope: the config is loaded and `target` started once per worker, on a free port. Per test: a fresh log,
   a suite server on a free port (https with CONFORMANCE_TLS=1), the browser automation on Playwright's `context`.
 - After the test the fixture attaches `log.json`, `log.html`, `module-report.json`, `target-output.txt`,
@@ -316,7 +331,9 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `conformance-report/results.json` is an array of `ModuleReport`: `plan`, `testName`, `variant`, `variantString`,
   `testId`, `status` (FINISHED/INTERRUPTED), `result` (upstream's PASSED/WARNING/REVIEW/SKIPPED/FAILED), `ok`,
   `outcome`, `durationMs`, `analysis` (the expected-failures analysis: unexpected/expected failures and warnings
-  with condition, block, message), `title`, `attachments` (paths of `log.html` / `log.json`), `skipReason`, `error`.
+  with condition, block, message), `title`, `moduleList` (the nested describe of a plan with several module lists;
+  the console line, summary and annotation show it next to the module name), `attachments` (paths of `log.html` /
+  `log.json`), `skipReason`, `error`.
   Presentation only: it never changes what the conditions log.
 - `skipModules` of the CI project (src/runner/projects.ts): the `conformance` fixture skips a listed module with the
   reason given there, so it applies to every spec.
@@ -408,8 +425,8 @@ export function validateIdTokenNonce(
 
 An upstream test module becomes a `test()` the same way: read the Java module and its base classes (what
 `configure` / `start` / `performAuthorizationFlow` / `onPostAuthorizationFlowComplete` call, in which blocks), write
-the flow in the test body with the helpers, keep the block names; `@VariantNotApplicable` is a nested describe with
-`test.skip`, `fireTestSkipped` is `skipTest`, `@PublishTestModule(testName)` is the title before the `:`.
+the flow in the test body with the helpers, keep the block names; `@VariantNotApplicable` leaves the test out
+(`variantNotApplicable`), `fireTestSkipped` is `skipTest`, `@PublishTestModule(testName)` is the title before the `:`.
 
 ## Porting rules
 

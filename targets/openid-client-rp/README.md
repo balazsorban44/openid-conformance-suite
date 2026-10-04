@@ -108,6 +108,12 @@ request (always `state` and `nonce`, PKCE S256 for response types with `code`, `
 `request_type`), callback, token request (`client_auth_type`), userinfo when an access token was issued. The suite
 finishes these modules after the userinfo request (`id_token`: after the authorization + jwks requests).
 
+For any response type but `code` (implicit, hybrid) the RP registers `application_type` `native`: a web client with
+tokens in the front channel must register https redirect URIs that are not localhost (OIDC Registration 2, upstream
+OIDCCValidateClientRedirectUris), a native (loopback) client may use `http://localhost`. With `code id_token token`
+it checks the front-channel `at_hash` before it exchanges the code, so an id_token with a missing or invalid
+`at_hash` never leads to a token request (`missing-athash`, `invalid-athash`).
+
 | module(s)                                                                                                                                                                                                                                 | RP behaviour                                                                                                                                                                                              | expected                                                     |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | `invalid-iss`, `missing-sub`, `invalid-aud`, `missing-aud`, `missing-iat`, `kid-absent-multiple-jwks`, `invalid-sig-rs256`, `nonce-invalid`, `missing-chash`, `invalid-chash`, `missing-athash`, `invalid-athash`, `userinfo-invalid-sub` | normal login                                                                                                                                                                                              | rejected (the suite waits `waitTimeoutSeconds` and finishes) |

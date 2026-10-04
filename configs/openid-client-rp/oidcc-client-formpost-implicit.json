@@ -1,0 +1,24 @@
+{
+	"description": "openid-client RP (form_post implicit)",
+	"alias": "openid-client-rp",
+	"plan": "oidcc-client-formpost-implicit-certification-test-plan",
+	"variant": {
+		"client_registration": "dynamic_client",
+		"request_type": "plain_http_request"
+	},
+	"waitTimeoutSeconds": 5,
+	"target": {
+		"command": "node targets/openid-client-rp/server.ts",
+		"url": "http://localhost:${PORT}",
+		"readyUrl": "${TARGET_URL}/ready",
+		"env": {
+			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt",
+			"RP_HTTPS_PORT": "${PORT_HTTPS}"
+		}
+	},
+	"client_driver": {
+		"startUrl": "${TARGET_URL}/start"
+	},
+	"expectedFailures": "../expected-failures/openid-client-rp.json",
+	"expectedSkips": "../expected-skips/openid-client-rp.json"
+}

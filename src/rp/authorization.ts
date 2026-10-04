@@ -768,9 +768,11 @@ export async function handleAuthorizationRequest(
 		}
 		const params = createEffectiveAuthorizationRequestParameters(httpParams, requestObject, "OIDCC-6.1", "OIDCC-6.2");
 		const scope = extractRequestedScopes(params);
-		const nonce = param(params, "response_type")?.includes("id_token")
-			? extractNonceFromAuthorizationRequest(params, "OIDCC-3.1.2.1", "OIDCC-3.2.2.1")
-			: (soft(() => extractNonceFromAuthorizationRequest(params, "OIDCC-3.1.2.1"), "info") ?? null);
+		const nonce = op.options.extractNonce
+			? op.options.extractNonce(params)
+			: param(params, "response_type")?.includes("id_token")
+				? extractNonceFromAuthorizationRequest(params, "OIDCC-3.1.2.1", "OIDCC-3.2.2.1")
+				: (soft(() => extractNonceFromAuthorizationRequest(params, "OIDCC-3.1.2.1"), "info") ?? null);
 		op.options.checkNonce?.(nonce);
 		let codeChallenge: AuthorizationState["codeChallenge"] = null;
 		if (params["code_challenge"] == null) {

@@ -192,6 +192,23 @@ test("console lines: one per module, a note only where there is something to say
 	expect(renderConsoleLine(failed, 0)).toMatch(/^✗ oidcc-idtoken-kid {2}\s+0\.8s {2}FAILED$/);
 });
 
+function inList(list: string, r: ModuleReport): ModuleReport {
+	return { ...r, moduleList: list };
+}
+
+test("a module in several module lists of a plan is labelled with its list everywhere", () => {
+	const a = inList("response_type=id_token", report("oidcc-client-test", "PASSED", { ok: true }));
+	const b = inList("response_type=id_token token", failed);
+	// the console line keeps the name one word (the UI parses it): the list leads the note
+	expect(renderConsoleLine(a, 17)).toBe("✓ oidcc-client-test    0.8s  response_type=id_token");
+	expect(renderConsoleLine(b, 0)).toMatch(/^✗ oidcc-idtoken-kid\s+0\.8s {2}response_type=id_token token {2}FAILED$/);
+	const md = renderSummaryMarkdown([a, b]);
+	expect(md).toContain("✅ `oidcc-client-test` (response_type=id_token)");
+	expect(md).toContain("- **`oidcc-idtoken-kid` (response_type=id_token token)**");
+	expect(renderConsoleSummary([b], 1000)).toContain("✗ oidcc-idtoken-kid (response_type=id_token token)");
+	expect(githubErrorAnnotation(b)).toContain("title=oidcc-idtoken-kid (response_type=id_token token)::");
+});
+
 test("console summary: OK without failures, otherwise the failures with condition, message and log", () => {
 	expect(renderConsoleSummary([passed, skipped, expectedFailure], 65_000)).toBe(
 		"\nOK: 1 passed, 1 expected failure, 1 skipped (1m05s)",

@@ -59,11 +59,23 @@
 			"ts": "src/rp/authorization.ts",
 			"symbol": "addIdTokenToAuthorizationEndpointResponseParams"
 		},
+		"src/main/java/net/openid/conformance/condition/as/AddInvalidAtHashValueToIdToken.java": {
+			"blob": "807b99c6889b616c5a723b64d38231ff12d81c8c",
+			"loc": 34,
+			"ts": "src/rp/id-token.ts",
+			"symbol": "addInvalidAtHashValueToIdToken"
+		},
 		"src/main/java/net/openid/conformance/condition/as/AddInvalidAudValueToIdToken.java": {
 			"blob": "947db5e8194cca8566c5c3ed96124e46349d68d9",
 			"loc": 33,
 			"ts": "src/rp/id-token.ts",
 			"symbol": "addInvalidAudValueToIdToken"
+		},
+		"src/main/java/net/openid/conformance/condition/as/AddInvalidCHashValueToIdToken.java": {
+			"blob": "0a31e02ecfc0c3f74646f4b2251a916294ae083a",
+			"loc": 34,
+			"ts": "src/rp/id-token.ts",
+			"symbol": "addInvalidCHashValueToIdToken"
 		},
 		"src/main/java/net/openid/conformance/condition/as/AddInvalidIssValueToIdToken.java": {
 			"blob": "1add1a69867015a37d20f26b750bbf0bd81ffe2d",
@@ -3242,19 +3254,19 @@
 		"src/main/java/net/openid/conformance/openid/client/config/OIDCCClientTestDiscoveryIssuerMismatch.java": {
 			"blob": "d876e59f922a91cb14c50e1cb90c84169e703163",
 			"loc": 35,
-			"ts": "tests/rp/dynamic.spec.ts",
+			"ts": "tests/rp/config.spec.ts",
 			"symbol": "oidcc-client-test-discovery-issuer-mismatch"
 		},
 		"src/main/java/net/openid/conformance/openid/client/config/OIDCCClientTestDiscoveryJwksUriKeys.java": {
 			"blob": "fa9bf0ac02a74c387c95f56d7430b406ff680dce",
 			"loc": 63,
-			"ts": "tests/rp/dynamic.spec.ts",
+			"ts": "tests/rp/config.spec.ts",
 			"symbol": "oidcc-client-test-discovery-jwks-uri-keys"
 		},
 		"src/main/java/net/openid/conformance/openid/client/config/OIDCCClientTestDiscoveryOpenIDConfiguration.java": {
 			"blob": "af3d732a2af09b77b278600b35725a436f33d57d",
 			"loc": 25,
-			"ts": "tests/rp/dynamic.spec.ts",
+			"ts": "tests/rp/config.spec.ts",
 			"symbol": "oidcc-client-test-discovery-openid-config"
 		},
 		"src/main/java/net/openid/conformance/openid/client/config/OIDCCClientTestDiscoveryWebfingerAcct.java": {
@@ -3278,13 +3290,13 @@
 		"src/main/java/net/openid/conformance/openid/client/config/OIDCCClientTestSigningKeyRotation.java": {
 			"blob": "2c6624fa0255b0c3ed03c5e477319926898c03c7",
 			"loc": 135,
-			"ts": "tests/rp/dynamic.spec.ts",
+			"ts": "tests/rp/config.spec.ts",
 			"symbol": "oidcc-client-test-signing-key-rotation"
 		},
 		"src/main/java/net/openid/conformance/openid/client/config/OIDCCClientTestSigningKeyRotationJustBeforeSigning.java": {
 			"blob": "b609f00074dc9747dbec709f8da23deb6c879e30",
 			"loc": 28,
-			"ts": "tests/rp/dynamic.spec.ts",
+			"ts": "tests/rp/config.spec.ts",
 			"symbol": "oidcc-client-test-signing-key-rotation-just-before-signing"
 		},
 		"src/main/java/net/openid/conformance/openid/client/logout/OIDCCClientTestBackChannelLogout.java": {
@@ -3395,11 +3407,23 @@
 			"ts": "tests/rp/basic.spec.ts",
 			"symbol": "oidcc-client-test-idtoken-sig-rs256"
 		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestInvalidAtHashInIdToken.java": {
+			"blob": "c8652cdcf67852f953a7651fb70702b81c7fa294",
+			"loc": 42,
+			"ts": "tests/rp/formpost-hybrid.spec.ts",
+			"symbol": "oidcc-client-test-invalid-athash"
+		},
 		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestInvalidAudInIdToken.java": {
 			"blob": "c4629e2f458d5256b7a7d2d85b0c9319e962d8b2",
 			"loc": 34,
 			"ts": "tests/rp/basic.spec.ts",
 			"symbol": "oidcc-client-test-invalid-aud"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestInvalidCHashInIdToken.java": {
+			"blob": "f055b87870a0db7bd4fb2aaff0dbd2ef75c68895",
+			"loc": 38,
+			"ts": "tests/rp/formpost-hybrid.spec.ts",
+			"symbol": "oidcc-client-test-invalid-chash"
 		},
 		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestInvalidIdTokenSignatureWithRS256.java": {
 			"blob": "af199768bf30ce90c58b177d6eda9d9b951f78d9",
@@ -3431,6 +3455,18 @@
 			"ts": "tests/rp/basic.spec.ts",
 			"symbol": "oidcc-client-test-kid-absent-single-jwks"
 		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestMissingAtHashInIdToken.java": {
+			"blob": "a2b6cf4248ccfacd3f63f06896c0404c206d30e0",
+			"loc": 43,
+			"ts": "tests/rp/formpost-hybrid.spec.ts",
+			"symbol": "oidcc-client-test-missing-athash"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestMissingCHashInIdToken.java": {
+			"blob": "a85a1c68f7af7d783f0931c1730ef25d7cee46a9",
+			"loc": 36,
+			"ts": "tests/rp/formpost-hybrid.spec.ts",
+			"symbol": "oidcc-client-test-missing-chash"
+		},
 		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestMissingIatInIdToken.java": {
 			"blob": "3ea20707c40bc919eba921cc7970c8035864687a",
 			"loc": 34,
@@ -3442,6 +3478,12 @@
 			"loc": 34,
 			"ts": "tests/rp/basic.spec.ts",
 			"symbol": "oidcc-client-test-missing-sub"
+		},
+		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestNonce.java": {
+			"blob": "1906de968ef9dac6c4f41ed365a2bbe0bc3bbbe9",
+			"loc": 30,
+			"ts": "tests/rp/formpost-hybrid.spec.ts",
+			"symbol": "oidcc-client-test-nonce-unless-code-flow"
 		},
 		"src/main/java/net/openid/conformance/openid/client/OIDCCClientTestNonceInvalid.java": {
 			"blob": "50f5ece354d871569ad0b317bc8b628ac71fee00",

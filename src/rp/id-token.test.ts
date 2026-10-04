@@ -4,6 +4,10 @@ import { describe, expect, test } from "vitest";
 import { ConditionFailed } from "../suite/conditions.ts";
 import { useTestLog } from "../suite/testing.ts";
 import {
+	addAtHashToIdToken,
+	addCHashToIdToken,
+	addInvalidAtHashValueToIdToken,
+	addInvalidCHashValueToIdToken,
 	calculateAtHash,
 	invalidateIdTokenSignature,
 	oidccExtractServerSigningAlg,
@@ -106,6 +110,67 @@ test("at_hash: the left half of the digest the signing algorithm uses, base64url
 	expect(calculateAtHash("an-access-token", "ES384")).toBe(half("sha384", 24));
 	expect(calculateAtHash("an-access-token", "EdDSA")).toBe(half("sha512", 32));
 	expect(() => calculateAtHash("an-access-token", "XX1")).toThrow("CalculateAtHash: Unsupported algorithm");
+});
+
+describe("the at_hash / c_hash defects of the negative implicit and hybrid tests", () => {
+	test("AddInvalidAtHashValueToIdToken appends 1 to the calculated at_hash", () => {
+		const claims: Record<string, unknown> = { sub: "s" };
+		addInvalidAtHashValueToIdToken(claims, "abc", "OIDCC-3.3.2.11");
+		expect(claims["at_hash"]).toBe("abc1");
+		expect(t.entries().at(-1)).toMatchObject({
+			src: "AddInvalidAtHashValueToIdToken",
+			msg: "Added invalid at_hash to ID token claims",
+			result: "SUCCESS",
+			requirements: ["OIDCC-3.3.2.11"],
+			id_token_claims: { sub: "s", at_hash: "abc1" },
+			invalid_at_hash: "abc1",
+		});
+	});
+
+	test("AddInvalidCHashValueToIdToken appends 1 to the calculated c_hash", () => {
+		const claims: Record<string, unknown> = { sub: "s" };
+		addInvalidCHashValueToIdToken(claims, "xyz", "OIDCC-3.3.2.10");
+		expect(claims["c_hash"]).toBe("xyz1");
+		expect(t.entries().at(-1)).toMatchObject({
+			src: "AddInvalidCHashValueToIdToken",
+			msg: "Added invalid c_hash to ID token claims",
+			result: "SUCCESS",
+			requirements: ["OIDCC-3.3.2.10"],
+			id_token_claims: { sub: "s", c_hash: "xyz1" },
+			c_hash: "xyz1",
+		});
+	});
+
+	test("without a calculated hash there is nothing to make invalid (upstream's @PreEnvironment stops the test)", () => {
+		expect(() => addInvalidAtHashValueToIdToken({}, null)).toThrow("no at_hash was calculated");
+		expect(() => addInvalidCHashValueToIdToken({}, null)).toThrow("no c_hash was calculated");
+		expect(t.entries()).toEqual([]);
+	});
+
+	test("the default steps add the hash, or log upstream's skip when there is none", () => {
+		const claims: Record<string, unknown> = {};
+		addAtHashToIdToken(claims, "at");
+		addCHashToIdToken(claims, "c");
+		expect(claims).toEqual({ at_hash: "at", c_hash: "c" });
+		addAtHashToIdToken(claims, null);
+		addCHashToIdToken(claims, null);
+		expect(t.entries().map((e) => [e.src, e["result"], e["msg"], e["requirements"]])).toEqual([
+			["AddAtHashToIdTokenClaims", "SUCCESS", "Added at_hash to ID token claims", ["OIDCC-3.3.2.11"]],
+			["AddCHashToIdTokenClaims", "SUCCESS", "Added c_hash to ID token claims", ["OIDCC-3.3.2.11"]],
+			[
+				"AddAtHashToIdTokenClaims",
+				"INFO",
+				"Skipped evaluation due to missing required string: at_hash",
+				["OIDCC-3.3.2.11"],
+			],
+			[
+				"AddCHashToIdTokenClaims",
+				"INFO",
+				"Skipped evaluation due to missing required string: c_hash",
+				["OIDCC-3.3.2.11"],
+			],
+		]);
+	});
 });
 
 // Expected values were produced with OpenJDK 21.

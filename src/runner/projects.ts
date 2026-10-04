@@ -51,6 +51,65 @@ const CLIENT_AUTH_TYPE = [
 	"self_signed_tls_client_auth",
 ];
 
+/** The basic RP plan's modules (also the form post basic plan's) */
+const BASIC_RP_MODULES = [
+	"oidcc-client-test",
+	"oidcc-client-test-invalid-iss",
+	"oidcc-client-test-missing-sub",
+	"oidcc-client-test-invalid-aud",
+	"oidcc-client-test-missing-iat",
+	"oidcc-client-test-kid-absent-single-jwks",
+	"oidcc-client-test-kid-absent-multiple-jwks",
+	"oidcc-client-test-idtoken-sig-rs256",
+	"oidcc-client-test-idtoken-sig-none",
+	"oidcc-client-test-invalid-sig-rs256",
+	"oidcc-client-test-userinfo-invalid-sub",
+	"oidcc-client-test-nonce-invalid",
+	"oidcc-client-test-scope-userinfo-claims",
+	"oidcc-client-test-client-secret-basic",
+];
+
+/** The implicit RP plan's modules (also the form post implicit plan's), the lists of both response types */
+const IMPLICIT_RP_MODULES = [
+	"oidcc-client-test",
+	"oidcc-client-test-invalid-iss",
+	"oidcc-client-test-missing-sub",
+	"oidcc-client-test-invalid-aud",
+	"oidcc-client-test-missing-iat",
+	"oidcc-client-test-kid-absent-single-jwks",
+	"oidcc-client-test-kid-absent-multiple-jwks",
+	"oidcc-client-test-invalid-athash",
+	"oidcc-client-test-missing-athash",
+	"oidcc-client-test-idtoken-sig-rs256",
+	"oidcc-client-test-invalid-sig-rs256",
+	"oidcc-client-test-userinfo-invalid-sub",
+	"oidcc-client-test-nonce-unless-code-flow",
+	"oidcc-client-test-nonce-invalid",
+	"oidcc-client-test-scope-userinfo-claims",
+];
+
+/** The hybrid RP plan's modules (also the form post hybrid plan's), the lists of the three response types */
+const HYBRID_RP_MODULES = [
+	"oidcc-client-test",
+	"oidcc-client-test-invalid-iss",
+	"oidcc-client-test-missing-sub",
+	"oidcc-client-test-invalid-aud",
+	"oidcc-client-test-missing-iat",
+	"oidcc-client-test-kid-absent-single-jwks",
+	"oidcc-client-test-kid-absent-multiple-jwks",
+	"oidcc-client-test-invalid-chash",
+	"oidcc-client-test-missing-chash",
+	"oidcc-client-test-invalid-athash",
+	"oidcc-client-test-missing-athash",
+	"oidcc-client-test-idtoken-sig-rs256",
+	"oidcc-client-test-invalid-sig-rs256",
+	"oidcc-client-test-userinfo-invalid-sub",
+	"oidcc-client-test-nonce-unless-code-flow",
+	"oidcc-client-test-nonce-invalid",
+	"oidcc-client-test-scope-userinfo-claims",
+	"oidcc-client-test-client-secret-basic",
+];
+
 export interface Plan {
 	/** upstream's displayName */
 	title: string;
@@ -192,22 +251,7 @@ export const plans: Record<string, Plan> = {
 	"oidcc-client-basic-certification-test-plan": {
 		title: "OpenID Connect Core: Basic Certification Profile Relying Party Tests",
 		spec: "tests/rp/basic.spec.ts",
-		modules: [
-			"oidcc-client-test",
-			"oidcc-client-test-invalid-iss",
-			"oidcc-client-test-missing-sub",
-			"oidcc-client-test-invalid-aud",
-			"oidcc-client-test-missing-iat",
-			"oidcc-client-test-kid-absent-single-jwks",
-			"oidcc-client-test-kid-absent-multiple-jwks",
-			"oidcc-client-test-idtoken-sig-rs256",
-			"oidcc-client-test-idtoken-sig-none",
-			"oidcc-client-test-invalid-sig-rs256",
-			"oidcc-client-test-userinfo-invalid-sub",
-			"oidcc-client-test-nonce-invalid",
-			"oidcc-client-test-scope-userinfo-claims",
-			"oidcc-client-test-client-secret-basic",
-		],
+		modules: BASIC_RP_MODULES,
 		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
 	},
 	"oidcc-client-dynamic-certification-test-plan": {
@@ -228,6 +272,56 @@ export const plans: Record<string, Plan> = {
 			"oidcc-client-test-userinfo-signed",
 		],
 		variants: { client_auth_type: CLIENT_AUTH_TYPE, response_mode: RESPONSE_MODE },
+	},
+	"oidcc-client-implicit-certification-test-plan": {
+		title: "OpenID Connect Core: Implicit Certification Profile Relying Party Tests",
+		spec: "tests/rp/implicit.spec.ts",
+		// the modules of both lists (response_type=id_token, id_token token)
+		modules: IMPLICIT_RP_MODULES,
+		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
+	},
+	"oidcc-client-hybrid-certification-test-plan": {
+		title: "OpenID Connect Core: Hybrid Certification Profile Relying Party Tests",
+		spec: "tests/rp/hybrid.spec.ts",
+		// the modules of the three lists (response_type=code id_token, code token, code id_token token)
+		modules: HYBRID_RP_MODULES,
+		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
+	},
+	"oidcc-client-formpost-basic-certification-test-plan": {
+		title: "OpenID Connect Core: Form Post Basic Certification Profile Relying Party Tests",
+		spec: "tests/rp/formpost-basic.spec.ts",
+		modules: BASIC_RP_MODULES,
+		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
+	},
+	"oidcc-client-formpost-implicit-certification-test-plan": {
+		title: "OpenID Connect Core: Form Post Implicit Certification Profile Relying Party Tests",
+		spec: "tests/rp/formpost-implicit.spec.ts",
+		modules: IMPLICIT_RP_MODULES,
+		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
+	},
+	"oidcc-client-formpost-hybrid-certification-test-plan": {
+		title: "OpenID Connect Core: Form Post Hybrid Certification Profile Relying Party Tests",
+		spec: "tests/rp/formpost-hybrid.spec.ts",
+		modules: HYBRID_RP_MODULES,
+		variants: { client_registration: CLIENT_REGISTRATION, request_type: REQUEST_TYPE },
+	},
+	"oidcc-client-config-certification-test-plan": {
+		title: "OpenID Connect Core: Configuration Certification Profile Relying Party Tests",
+		spec: "tests/rp/config.spec.ts",
+		modules: [
+			"oidcc-client-test-discovery-openid-config",
+			"oidcc-client-test-discovery-jwks-uri-keys",
+			"oidcc-client-test-discovery-issuer-mismatch",
+			"oidcc-client-test-idtoken-sig-none",
+			"oidcc-client-test-signing-key-rotation-just-before-signing",
+			"oidcc-client-test-signing-key-rotation",
+		],
+		variants: {
+			client_auth_type: CLIENT_AUTH_TYPE,
+			response_mode: RESPONSE_MODE,
+			client_registration: CLIENT_REGISTRATION,
+			request_type: REQUEST_TYPE,
+		},
 	},
 	"oidcc-client-rp-initiated-logout-rp-basic": {
 		title: "OpenID Connect Core: RP Initiated Logout RP Certification Profile Relying Party Tests (Basic)",
@@ -430,6 +524,42 @@ export const projects: ConformanceProject[] = [
 		plan: "oidcc-client-basic-certification-test-plan",
 		variant: "[client_registration=dynamic_client][request_type=plain_http_request]",
 		config: "configs/openid-client-rp/oidcc-client-basic.json",
+	},
+	{
+		name: "rp-implicit",
+		plan: "oidcc-client-implicit-certification-test-plan",
+		variant: "[client_registration=dynamic_client][request_type=plain_http_request]",
+		config: "configs/openid-client-rp/oidcc-client-implicit.json",
+	},
+	{
+		name: "rp-hybrid",
+		plan: "oidcc-client-hybrid-certification-test-plan",
+		variant: "[client_registration=dynamic_client][request_type=plain_http_request]",
+		config: "configs/openid-client-rp/oidcc-client-hybrid.json",
+	},
+	{
+		name: "rp-formpost-basic",
+		plan: "oidcc-client-formpost-basic-certification-test-plan",
+		variant: "[client_registration=dynamic_client][request_type=plain_http_request]",
+		config: "configs/openid-client-rp/oidcc-client-formpost-basic.json",
+	},
+	{
+		name: "rp-formpost-implicit",
+		plan: "oidcc-client-formpost-implicit-certification-test-plan",
+		variant: "[client_registration=dynamic_client][request_type=plain_http_request]",
+		config: "configs/openid-client-rp/oidcc-client-formpost-implicit.json",
+	},
+	{
+		name: "rp-formpost-hybrid",
+		plan: "oidcc-client-formpost-hybrid-certification-test-plan",
+		variant: "[client_registration=dynamic_client][request_type=plain_http_request]",
+		config: "configs/openid-client-rp/oidcc-client-formpost-hybrid.json",
+	},
+	{
+		name: "rp-config",
+		plan: "oidcc-client-config-certification-test-plan",
+		variant: RP_CODE_BASIC,
+		config: "configs/openid-client-rp/oidcc-client-config.json",
 	},
 	{
 		name: "rp-dynamic",

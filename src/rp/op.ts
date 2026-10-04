@@ -102,6 +102,12 @@ export interface EmulatedOpOptions {
 	signingAlg?: (client: RpClient, op: EmulatedOp) => string;
 	/** Changes to the registered client (upstream getAdditionalClientRegistrationSteps) */
 	registrationSteps?: (client: RpClient) => void;
+	/**
+	 * Extracts the nonce from the authorization request instead of the default, which requires it for response types
+	 * with an id_token and logs its absence as INFO otherwise (upstream
+	 * extractNonceFromAuthorizationEndpointRequestParameters overridden)
+	 */
+	extractNonce?: (params: AuthorizationParams) => string | null;
 	/** Checks after the nonce was extracted (upstream extractNonceFromAuthorizationEndpointRequestParameters) */
 	checkNonce?: (nonce: string | null) => void;
 	/** The response_type check (upstream validateResponseTypeAuthorizationRequestParameter); default EnsureResponseTypeIs<variant> */
@@ -114,6 +120,16 @@ export interface EmulatedOpOptions {
 	customizeAuthorizationResponse?: (params: Record<string, string>) => void;
 	/** Changes to the id_token claims right after they are generated (upstream generateIdTokenClaims override) */
 	idTokenClaims?: (claims: IdTokenClaims, op: EmulatedOp) => void;
+	/**
+	 * Adds c_hash to an id_token from the authorization endpoint instead of AddCHashToIdTokenClaims (upstream
+	 * addCHashToIdToken overridden); `cHash` is null when no code was issued (or the id_token is unsigned)
+	 */
+	addCHashToIdToken?: (claims: IdTokenClaims, cHash: string | null) => void;
+	/**
+	 * Adds at_hash to the id_token instead of AddAtHashToIdTokenClaims (upstream addAtHashToIdToken overridden), at
+	 * the authorization and the token endpoint; `atHash` is null when no access token was issued with the id_token
+	 */
+	addAtHashToIdToken?: (claims: IdTokenClaims, atHash: string | null) => void;
 	/** Signs the id_token instead of OIDCCSignIdToken (upstream signIdToken) */
 	signIdToken?: (claims: IdTokenClaims, op: EmulatedOp) => string | Promise<string>;
 	/** Changes the signed id_token (upstream customizeIdTokenSignature) */

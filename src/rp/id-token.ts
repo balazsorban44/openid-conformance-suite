@@ -311,6 +311,72 @@ export function removeIatFromIdToken(claims: IdTokenClaims, ...requirements: str
 	});
 }
 
+/** upstream: condition/as/AddInvalidAtHashValueToIdToken.java */
+export function addInvalidAtHashValueToIdToken(
+	claims: IdTokenClaims,
+	atHash: string | null,
+	...requirements: string[]
+): void {
+	if (atHash == null) {
+		// UPSTREAM: @PreEnvironment(strings = "at_hash"): the framework stops the test before the condition runs
+		throw new Error("AddInvalidAtHashValueToIdToken: no at_hash was calculated (no access token was issued)");
+	}
+	// add number 1 onto end of at_hash string
+	const concat = atHash + "1";
+	claims["at_hash"] = concat;
+	condition("AddInvalidAtHashValueToIdToken", ...requirements).success("Added invalid at_hash to ID token claims", {
+		id_token_claims: claims,
+		invalid_at_hash: concat,
+	});
+}
+
+/** upstream: condition/as/AddInvalidCHashValueToIdToken.java */
+export function addInvalidCHashValueToIdToken(
+	claims: IdTokenClaims,
+	cHash: string | null,
+	...requirements: string[]
+): void {
+	if (cHash == null) {
+		// UPSTREAM: @PreEnvironment(strings = "c_hash"): the framework stops the test before the condition runs
+		throw new Error("AddInvalidCHashValueToIdToken: no c_hash was calculated (no authorization code was issued)");
+	}
+	// add number 1 onto end of hash string
+	const concat = cHash + "1";
+	claims["c_hash"] = concat;
+	condition("AddInvalidCHashValueToIdToken", ...requirements).success("Added invalid c_hash to ID token claims", {
+		id_token_claims: claims,
+		c_hash: concat,
+	});
+}
+
+/**
+ * at_hash in the id_token when an access token was issued with it (skipped otherwise); the step a module replaces
+ * with its `addAtHashToIdToken` option.
+ *
+ * upstream: AbstractOIDCCClientTest.addAtHashToIdToken
+ */
+export function addAtHashToIdToken(claims: IdTokenClaims, atHash: string | null): void {
+	if (atHash == null) {
+		skipped("AddAtHashToIdTokenClaims", { string: "at_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		addAtHashToIdTokenClaims(claims, atHash, "OIDCC-3.3.2.11");
+	}
+}
+
+/**
+ * c_hash in an id_token from the authorization endpoint when a code was issued with it (skipped otherwise); the
+ * step a module replaces with its `addCHashToIdToken` option.
+ *
+ * upstream: AbstractOIDCCClientTest.addCHashToIdToken
+ */
+export function addCHashToIdToken(claims: IdTokenClaims, cHash: string | null): void {
+	if (cHash == null) {
+		skipped("AddCHashToIdTokenClaims", { string: "c_hash" }, "OIDCC-3.3.2.11");
+	} else {
+		addCHashToIdTokenClaims(claims, cHash, "OIDCC-3.3.2.11");
+	}
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // signing
 
@@ -447,7 +513,8 @@ export function invalidateIdTokenSignature(idToken: string, ...requirements: str
 
 /**
  * Creates the id_token for the token endpoint (`codeGrant`) or the authorization endpoint: the claims, the module's
- * changes to them (`idTokenClaims`), at_hash / c_hash, auth_time when max_age was requested, signed
+ * changes to them (`idTokenClaims`), c_hash (authorization endpoint only) and at_hash (or the module's
+ * `addCHashToIdToken` / `addAtHashToIdToken` in their place), auth_time when max_age was requested, signed
  * (`signIdToken`, default OIDCCSignIdToken) and the module's change to the signature (`idTokenSignature`).
  * Encrypted id_tokens are not supported yet.
  *
@@ -458,15 +525,19 @@ export async function createIdToken(op: EmulatedOp, codeGrant: boolean): Promise
 	const authz = op.authorization;
 	const claims = generateIdTokenClaims(op.userInfo, op.issuer, client.client_id, authz?.nonce ?? null);
 	op.options.idTokenClaims?.(claims, op);
-	if (!codeGrant && authz?.cHash == null) {
-		skipped("AddCHashToIdTokenClaims", { string: "c_hash" }, "OIDCC-3.3.2.11");
-	} else if (!codeGrant) {
-		addCHashToIdTokenClaims(claims, authz?.cHash as string, "OIDCC-3.3.2.11");
+	if (!codeGrant) {
+		const cHash = authz?.cHash ?? null;
+		if (op.options.addCHashToIdToken) {
+			op.options.addCHashToIdToken(claims, cHash);
+		} else {
+			addCHashToIdToken(claims, cHash);
+		}
 	}
-	if (op.tokens?.atHash == null) {
-		skipped("AddAtHashToIdTokenClaims", { string: "at_hash" }, "OIDCC-3.3.2.11");
+	const atHash = op.tokens?.atHash ?? null;
+	if (op.options.addAtHashToIdToken) {
+		op.options.addAtHashToIdToken(claims, atHash);
 	} else {
-		addAtHashToIdTokenClaims(claims, op.tokens.atHash, "OIDCC-3.3.2.11");
+		addAtHashToIdToken(claims, atHash);
 	}
 	if (codeGrant || op.responseType.includesIdToken) {
 		if (authz?.params["max_age"] == null) {
@@ -507,11 +578,7 @@ export async function createIdToken(op: EmulatedOp, codeGrant: boolean): Promise
 export async function createIdTokenForRefreshRequest(op: EmulatedOp, refresh: RefreshOptions): Promise<string> {
 	const client = op.client as RpClient;
 	const claims = generateIdTokenClaims(op.userInfo, op.issuer, client.client_id, op.authorization?.nonce ?? null);
-	if (op.tokens?.atHash == null) {
-		skipped("AddAtHashToIdTokenClaims", { string: "at_hash" }, "OIDCC-3.3.2.11");
-	} else {
-		addAtHashToIdTokenClaims(claims, op.tokens.atHash, "OIDCC-3.3.2.11");
-	}
+	addAtHashToIdToken(claims, op.tokens?.atHash ?? null);
 	refresh.customIdTokenClaims?.(claims, op);
 	let idToken = await oidccSignIdToken(claims, op.keys.jwks, client, op.signingAlg as string, "OIDCC-2");
 	op.issuedIdTokens.push(idToken);

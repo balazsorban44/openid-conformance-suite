@@ -42,6 +42,11 @@ export interface ModuleReport {
 	analysis: ModuleAnalysis;
 	/** Playwright test title, for cross-referencing the HTML report */
 	title: string;
+	/**
+	 * The plan's module list the module ran in, when the plan has several (upstream ModuleListEntry: the spec's nested
+	 * describe, e.g. "response_type=id_token"): a module in several lists runs once per list, with that list's variant
+	 */
+	moduleList?: string;
 	/** The browser the suite drove (CONFORMANCE_BROWSER: chromium, firefox, webkit, chrome-mobile) */
 	browser?: string;
 	/** Paths of the attached log files (`log.html`, `log.json`) relative to the working directory, when known */
@@ -152,6 +157,11 @@ function noteOf(r: ModuleReport, q: string): string {
 	}
 }
 
+/** The module's name (quoted with `q`), and the module list it ran in when the plan has several */
+function moduleLabel(r: ModuleReport, q = ""): string {
+	return `${q}${r.testName}${q}${r.moduleList ? ` (${r.moduleList})` : ""}`;
+}
+
 function truncate(s: string, n: number): string {
 	s = s.replace(/\s+/g, " ");
 	return s.length > n ? s.slice(0, n - 1) + "…" : s;
@@ -218,7 +228,7 @@ export function renderSummaryMarkdown(
 
 	for (const r of failed) {
 		const reasons = failureReasons(r, "`");
-		lines.push(`- **\`${r.testName}\`**${reasons.length === 1 ? ` — ${reasons[0]}` : ""}`);
+		lines.push(`- **${moduleLabel(r, "`")}**${reasons.length === 1 ? ` — ${reasons[0]}` : ""}`);
 		if (reasons.length > 1) {
 			lines.push(...reasons.slice(0, 5).map((t) => `  - ${t}`));
 			if (reasons.length > 5) {
@@ -255,14 +265,14 @@ export function renderSummaryMarkdown(
 				);
 				for (const r of notedHere) {
 					lines.push(
-						`| \`${r.testName}\` | ${ICON[r.outcome]} ${r.outcome} |${variantColumn ? ` ${cell(deviations(r))} |` : ""} ${cell(noteOf(r, "`"))} |`,
+						`| ${cell(moduleLabel(r, "`"))} | ${ICON[r.outcome]} ${r.outcome} |${variantColumn ? ` ${cell(deviations(r))} |` : ""} ${cell(noteOf(r, "`"))} |`,
 					);
 				}
 				lines.push("");
 			}
 			const passed = rs.filter((r) => r.outcome === "passed");
 			if (passed.length > 0) {
-				lines.push(`${ICON.passed} ${passed.map((r) => `\`${r.testName}\``).join(", ")}`, "");
+				lines.push(`${ICON.passed} ${passed.map((r) => moduleLabel(r, "`")).join(", ")}`, "");
 			}
 		}
 		lines.push("</details>", "");
@@ -279,10 +289,13 @@ function artifactNote(opts: { reportUrl?: string; artifact?: string }): string {
 		: ` in the artifact \`${opts.artifact}\``;
 }
 
-/** The console line of a module: `<glyph> <module>  <duration>  <what is noteworthy>` (name padded to `width`) */
+/**
+ * The console line of a module: `<glyph> <module>  <duration>  <what is noteworthy>` (name padded to `width`); the
+ * module list it ran in, when the plan has several, leads the note (the name stays one word: the UI parses the line)
+ */
 export function renderConsoleLine(r: ModuleReport, width: number, colors = false): string {
 	const { glyph, color } = GLYPH[r.outcome];
-	const note = consoleNote(r);
+	const note = [r.moduleList, consoleNote(r)].filter(Boolean).join("  ");
 	return `${colors ? styleText(color, glyph) : glyph} ${r.testName.padEnd(width)}  ${formatDuration(r.durationMs).padStart(6)}${note ? `  ${note}` : ""}`;
 }
 
@@ -311,7 +324,7 @@ export function renderConsoleSummary(reports: ModuleReport[], durationMs: number
 		`${failed.length > 0 ? "FAILED" : "OK"}: ${countOutcomes(reports) || "no modules ran"} (${formatDuration(durationMs)})`,
 	];
 	for (const r of failed) {
-		lines.push("", `✗ ${r.testName}`, ...failureReasons(r).map((t) => `    ${t}`));
+		lines.push("", `✗ ${moduleLabel(r)}`, ...failureReasons(r).map((t) => `    ${t}`));
 		const log = r.attachments?.["log.html"];
 		if (log) {
 			lines.push(`    log: ${log}`);
@@ -334,7 +347,7 @@ export function githubErrorAnnotation(r: ModuleReport, location?: { file: string
 	const message = reasons.length > 1 ? `${reasons[0]} (and ${reasons.length - 1} more)` : (reasons[0] ?? "failed");
 	const props = [
 		...(location ? [`file=${escapeProperty(location.file)}`, `line=${location.line}`] : []),
-		`title=${escapeProperty(r.testName)}`,
+		`title=${escapeProperty(moduleLabel(r))}`,
 	];
 	return `::error ${props.join(",")}::${escapeData(message)}`;
 }
@@ -444,6 +457,10 @@ export default class ConformanceReporter implements Reporter {
 			return undefined;
 		}
 		r.browser = this.browser;
+		const list = moduleListOf(test);
+		if (list) {
+			r.moduleList = list;
+		}
 		const skip = test.annotations.find((a) => a.type === "skip" && a.description);
 		if (r.outcome === "skipped" && skip?.description) {
 			r.skipReason = skip.description;
@@ -508,6 +525,19 @@ export default class ConformanceReporter implements Reporter {
 	printsToStdio(): boolean {
 		return true;
 	}
+}
+
+/**
+ * The titled describes between the plan's describe and the test (titlePath: ["", project, spec file, the plan's
+ * describe, ..., test title]): the module list of a plan that has several (tests/rp/implicit.spec.ts: one describe
+ * per response_type); anonymous describes have no title
+ */
+function moduleListOf(test: TestCase): string {
+	return test
+		.titlePath()
+		.slice(4, -1)
+		.filter((t) => t !== "")
+		.join(" › ");
 }
 
 /** Test titles are "<module>: <what the OP/RP must do>" */
