@@ -425,12 +425,185 @@ function oauthError(
 	}
 }
 
-interface Waiter {
-	endpoint: Endpoint;
+interface Waiter<E> {
+	endpoint: E;
 	resolve: (event: unknown) => void;
 	reject: (e: unknown) => void;
 	/** waitFor(): resolve null instead of rejecting when the RP finished */
 	optional: boolean;
+}
+
+/**
+ * The requests an emulated server answers, as the events a test follows: `serve` registers an endpoint's handler
+ * on the test's server, `expect` / `waitFor` await the next request to an endpoint (already answered). Requests
+ * are handled one at a time (upstream's per-test lock); a check that fails while handling one ends the test: every
+ * pending and later expect()/waitFor() rejects with it, and the server answers 500 from then on (except the
+ * endpoints `servedAfterFailure` names). Shared by the emulated OP of the OIDCC RP tests ({@link startEmulatedOp})
+ * and the FAPI 2 authorization server (src/rp/fapi2.ts).
+ */
+export interface RequestDispatcher<E extends string, Events extends Record<E, unknown>> {
+	/**
+	 * The next request to `endpoint` (already answered). Fails when the RP under test finished without sending
+	 * one, after `timeoutSeconds` (60), or when handling a request failed the test.
+	 */
+	expect<K extends E>(endpoint: K, opts?: { timeoutSeconds?: number }): Promise<Events[K]>;
+	/**
+	 * The next request to `endpoint` within `seconds`, or null when none came (or the RP under test finished):
+	 * upstream's startWaitingForTimeout, where the RP may (or must not) continue.
+	 */
+	waitFor<K extends E>(endpoint: K, seconds: number): Promise<Events[K] | null>;
+	/** The RP under test reported that it finished (its client driver call returned) */
+	rpFinished(): void;
+	/** How many requests to `endpoint` were answered (upstream's received<Endpoint>Request flags) */
+	received(endpoint: E): number;
+	/** Forgets the requests to `endpoint` not yet taken by expect / waitFor (upstream: receivedUserinfoRequest = false) */
+	discardEvents(endpoint: E): void;
+	/**
+	 * Serves `path` (relative to the server's base url, or an absolute /.well-known/ path) as `endpoint`: `handle`
+	 * answers the request and says what expect()/waitFor() resolve with. `concurrent`: handled without waiting for
+	 * the lock (a read-only endpoint the RP calls while the server waits for it).
+	 */
+	serve<K extends E>(
+		endpoint: K,
+		path: string,
+		handle: (req: IncomingRequest) => Promise<{ response: Response; event: Events[K] }>,
+		opts?: { concurrent?: boolean },
+	): void;
+}
+
+/**
+ * The dispatcher of an emulated server started in the current test context: the handlers log into that context's
+ * log whatever context the server delivers the request in (suite-vs-suite: the emulated OP's own). `before` runs
+ * before any handler (the module's checks on the order of requests); `errorResponse` answers a request whose
+ * handling failed instead of ending the test (an OP under test's OAuth error responses).
+ */
+export function createRequestDispatcher<E extends string, Events extends Record<E, unknown>>(
+	server: TestServer,
+	hooks: {
+		before?: (endpoint: E, req: IncomingRequest) => void | Promise<void>;
+		errorResponse?: (endpoint: E, req: IncomingRequest, e: unknown) => Response;
+		servedAfterFailure?: readonly E[];
+	} = {},
+): RequestDispatcher<E, Events> {
+	const events = new Map<E, unknown[]>();
+	const counts = new Map<E, number>();
+	const waiters: Waiter<E>[] = [];
+	let failure: { error: unknown } | null = null;
+	let finished = false;
+
+	function next(endpoint: E, seconds: number, optional: boolean): Promise<unknown> {
+		if (failure) {
+			return Promise.reject(failure.error);
+		}
+		const queued = events.get(endpoint);
+		if (queued && queued.length > 0) {
+			return Promise.resolve(queued.shift());
+		}
+		if (finished) {
+			return optional
+				? Promise.resolve(null)
+				: Promise.reject(new Error(`The relying party under test finished without sending a ${endpoint} request`));
+		}
+		const { promise, resolve, reject } = Promise.withResolvers<unknown>();
+		const waiter: Waiter<E> = { endpoint, resolve, reject, optional };
+		waiters.push(waiter);
+		const timer = setTimeout(() => {
+			const i = waiters.indexOf(waiter);
+			if (i !== -1) {
+				waiters.splice(i, 1);
+			}
+			if (optional) {
+				resolve(null);
+			} else {
+				reject(new Error(`Timed out after ${seconds} seconds waiting for the relying party's ${endpoint} request`));
+			}
+		}, seconds * 1000);
+		return promise.finally(() => clearTimeout(timer));
+	}
+
+	function record(endpoint: E, event: unknown): void {
+		counts.set(endpoint, (counts.get(endpoint) ?? 0) + 1);
+		const i = waiters.findIndex((w) => w.endpoint === endpoint);
+		if (i !== -1) {
+			waiters.splice(i, 1)[0].resolve(event);
+			return;
+		}
+		const queue = events.get(endpoint) ?? [];
+		queue.push(event);
+		events.set(endpoint, queue);
+	}
+
+	// the handlers log into the log of the context the server was started in (the test's, or the emulated OP's own
+	// when another test talks to it: suite-vs-suite), whatever context the server delivers the request in
+	const opContext = currentContext();
+	// requests are handled one at a time, like upstream's per-test lock
+	let lock: Promise<unknown> = Promise.resolve();
+	return {
+		expect(endpoint, opts = {}) {
+			return currentContext().step(`The RP sends a ${endpoint} request`, () =>
+				next(endpoint, opts.timeoutSeconds ?? 60, false),
+			) as Promise<never>;
+		},
+		waitFor(endpoint, seconds) {
+			return currentContext().step(`The RP may send a ${endpoint} request within ${seconds} seconds`, () =>
+				next(endpoint, seconds, true),
+			) as Promise<never>;
+		},
+		rpFinished() {
+			finished = true;
+			for (const w of waiters.splice(0)) {
+				if (w.optional) {
+					w.resolve(null);
+				} else {
+					w.reject(new Error(`The relying party under test finished without sending a ${w.endpoint} request`));
+				}
+			}
+		},
+		received: (endpoint) => counts.get(endpoint) ?? 0,
+		discardEvents(endpoint) {
+			events.delete(endpoint);
+		},
+		serve(endpoint, path, handle, opts = {}) {
+			server.on(path, (req) => {
+				const run = (opts.concurrent ? Promise.resolve() : lock).then(async (): Promise<Response> => {
+					if (failure && !(hooks.servedAfterFailure ?? []).includes(endpoint)) {
+						return Response.json({ error: "server_error", error_description: "The test has failed" }, { status: 500 });
+					}
+					try {
+						// a request handler is not a Playwright step of the test: blocks only go to the log
+						const { response, event } = await withContext(
+							{ ...opContext, severity: "failure", step: (_name, fn) => fn() },
+							async () => {
+								await hooks.before?.(endpoint, req);
+								return handle(req);
+							},
+						);
+						record(endpoint, event);
+						return response;
+					} catch (e) {
+						if (hooks.errorResponse) {
+							// the OP under test answers as an OP does; the failed check stays in its log
+							return hooks.errorResponse(endpoint, req, e);
+						}
+						if (!failure) {
+							failure = { error: e };
+							for (const w of waiters.splice(0)) {
+								w.reject(e);
+							}
+						}
+						return Response.json(
+							{ error: "server_error", error_description: (e as Error).message ?? String(e) },
+							{ status: 500 },
+						);
+					}
+				});
+				if (!opts.concurrent) {
+					lock = run.catch(() => {});
+				}
+				return run;
+			});
+		},
+	};
 }
 
 /**
@@ -462,11 +635,13 @@ export async function startEmulatedOp(
 	const keys = await (options.serverJwks ?? configureServerJwks)();
 	const userInfo = oidccLoadUserInfo();
 
-	const events = new Map<Endpoint, unknown[]>();
-	const counts = new Map<Endpoint, number>();
-	const waiters: Waiter[] = [];
-	let failure: { error: unknown } | null = null;
-	let finished = false;
+	const dispatcher = createRequestDispatcher<Endpoint, OpEvents>(server, {
+		before: (endpoint, req) => options.onRequest?.(endpoint, req, op),
+		errorResponse: options.opUnderTest
+			? (endpoint, req, e) => opUnderTestErrorResponse(op, endpoint, req, e)
+			: undefined,
+		servedAfterFailure: ["jwks", "discovery"],
+	});
 
 	const op: EmulatedOp = {
 		testName: ctx.testName,
@@ -491,38 +666,19 @@ export async function startEmulatedOp(
 		sessionAuthTime: null,
 		usedCodes: new Set(),
 		selectClient,
-		discardEvents(endpoint) {
-			events.delete(endpoint);
-		},
+		discardEvents: dispatcher.discardEvents,
 		chooseSigningAlg: (client) =>
 			options.signingAlg ? options.signingAlg(client, op) : oidccExtractServerSigningAlg(client, op.keys.jwks),
-		expect(endpoint, opts = {}) {
-			return currentContext().step(`The RP sends a ${endpoint} request`, () =>
-				next(endpoint, opts.timeoutSeconds ?? 60, false),
-			) as Promise<never>;
-		},
-		waitFor(endpoint, seconds) {
-			return currentContext().step(`The RP may send a ${endpoint} request within ${seconds} seconds`, () =>
-				next(endpoint, seconds, true),
-			) as Promise<never>;
-		},
+		expect: dispatcher.expect,
+		waitFor: dispatcher.waitFor,
 		async clientRegistered() {
 			if (variant.client_registration === "static_client") {
 				return op.client as RpClient;
 			}
 			return (await op.expect("registration")).client;
 		},
-		rpFinished() {
-			finished = true;
-			for (const w of waiters.splice(0)) {
-				if (w.optional) {
-					w.resolve(null);
-				} else {
-					w.reject(new Error(`The relying party under test finished without sending a ${w.endpoint} request`));
-				}
-			}
-		},
-		received: (endpoint) => counts.get(endpoint) ?? 0,
+		rpFinished: dispatcher.rpFinished,
+		received: dispatcher.received,
 	};
 
 	// opUnderTest: the state of every registered client; the current client's is on `op` (upstream knows one client)
@@ -548,99 +704,7 @@ export async function startEmulatedOp(
 		return true;
 	}
 
-	function next(endpoint: Endpoint, seconds: number, optional: boolean): Promise<unknown> {
-		if (failure) {
-			return Promise.reject(failure.error);
-		}
-		const queued = events.get(endpoint);
-		if (queued && queued.length > 0) {
-			return Promise.resolve(queued.shift());
-		}
-		if (finished) {
-			return optional
-				? Promise.resolve(null)
-				: Promise.reject(new Error(`The relying party under test finished without sending a ${endpoint} request`));
-		}
-		const { promise, resolve, reject } = Promise.withResolvers<unknown>();
-		const waiter: Waiter = { endpoint, resolve, reject, optional };
-		waiters.push(waiter);
-		const timer = setTimeout(() => {
-			const i = waiters.indexOf(waiter);
-			if (i !== -1) {
-				waiters.splice(i, 1);
-			}
-			if (optional) {
-				resolve(null);
-			} else {
-				reject(new Error(`Timed out after ${seconds} seconds waiting for the relying party's ${endpoint} request`));
-			}
-		}, seconds * 1000);
-		return promise.finally(() => clearTimeout(timer));
-	}
-
-	function record(endpoint: Endpoint, event: unknown): void {
-		counts.set(endpoint, (counts.get(endpoint) ?? 0) + 1);
-		const i = waiters.findIndex((w) => w.endpoint === endpoint);
-		if (i !== -1) {
-			waiters.splice(i, 1)[0].resolve(event);
-			return;
-		}
-		const queue = events.get(endpoint) ?? [];
-		queue.push(event);
-		events.set(endpoint, queue);
-	}
-
-	// the handlers log into the log of the context the OP was started in (the test's, or the emulated OP's own when
-	// another test talks to it: suite-vs-suite), whatever context the server delivers the request in
-	const opContext = currentContext();
-	// requests are handled one at a time, like upstream's per-test lock
-	let lock: Promise<unknown> = Promise.resolve();
-	function serve(
-		endpoint: Endpoint,
-		path: string,
-		handle: (req: IncomingRequest) => Promise<{ response: Response; event: unknown }>,
-		/** concurrent: handled without waiting for the lock (a read-only endpoint the RP calls while the OP waits for it) */
-		opts: { concurrent?: boolean } = {},
-	) {
-		server.on(path, (req) => {
-			const run = (opts.concurrent ? Promise.resolve() : lock).then(async (): Promise<Response> => {
-				if (failure && endpoint !== "jwks" && endpoint !== "discovery") {
-					return Response.json({ error: "server_error", error_description: "The test has failed" }, { status: 500 });
-				}
-				try {
-					// a request handler is not a Playwright step of the test: blocks only go to the log
-					const { response, event } = await withContext(
-						{ ...opContext, severity: "failure", step: (_name, fn) => fn() },
-						async () => {
-							await options.onRequest?.(endpoint, req, op);
-							return handle(req);
-						},
-					);
-					record(endpoint, event);
-					return response;
-				} catch (e) {
-					if (options.opUnderTest) {
-						// the OP under test answers as an OP does; the failed check stays in its log
-						return opUnderTestErrorResponse(op, endpoint, req, e);
-					}
-					if (!failure) {
-						failure = { error: e };
-						for (const w of waiters.splice(0)) {
-							w.reject(e);
-						}
-					}
-					return Response.json(
-						{ error: "server_error", error_description: (e as Error).message ?? String(e) },
-						{ status: 500 },
-					);
-				}
-			});
-			if (!opts.concurrent) {
-				lock = run.catch(() => {});
-			}
-			return run;
-		});
-	}
+	const serve = dispatcher.serve;
 
 	// the endpoints are where the metadata says: a module may move the issuer (webfinger) or the jwks_uri
 	const relative = (url: unknown, fallback: string) =>

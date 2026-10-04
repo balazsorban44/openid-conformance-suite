@@ -11,7 +11,9 @@
  *   RP_HTTPS_PORT (4443)              https listener (configs/certs/localhost.{crt,key}) for initiate_login_uri and
  *                                     request objects, 0 disables (the configs pass free ports: ${PORT}, ${PORT_HTTPS})
  *   RP_STATIC_CLIENT_ID / RP_STATIC_CLIENT_SECRET   static client defaults (openid-client-rp / rp-secret-...)
- *   RP_JWKS                           private JWKS JSON to use instead of keys generated at startup
+ *   RP_JWKS / RP_JWKS_FILE            private JWKS (JSON, or the path of a JSON file) to use instead of keys generated
+ *                                     at startup; kinds of keys it lacks are generated (configs/openid-client-rp/
+ *                                     fapi2-rp-keys.json holds the PS256 key of the FAPI 2 configs)
  *   RP_CHROMIUM_EXECUTABLE_PATH       chromium binary for the Playwright user agent (default: Playwright's)
  *   RP_LOGIN_TIMEOUT_MS (30000)       how long to wait for an authorization round trip
  *   DEBUG_RP=1                        verbose logging
@@ -69,31 +71,23 @@ async function generateKey(alg: string, use: string, options: jose.GenerateKeyPa
 }
 
 async function initKeys(): Promise<void> {
-	if (process.env["RP_JWKS"]) {
-		const { keys } = JSON.parse(process.env["RP_JWKS"]) as { keys: jose.JWK[] };
-		const find = (pred: (k: jose.JWK) => boolean, what: string) => {
-			const k = keys.find(pred);
-			if (!k) {
-				throw new Error(`RP_JWKS has no ${what} key`);
-			}
-			return k;
-		};
-		KEYS = {
-			rsaSig: find((k) => k.kty === "RSA" && k.use !== "enc", "RSA sig"),
-			ecSig: find((k) => k.kty === "EC" && k.use !== "enc", "EC sig"),
-			edSig: find((k) => k.kty === "OKP" && k.crv === "Ed25519", "Ed25519"),
-			rsaEnc: find((k) => k.kty === "RSA" && k.use === "enc", "RSA enc"),
-			ecEnc: find((k) => k.kty === "EC" && k.use === "enc", "EC enc"),
-		};
-	} else {
-		KEYS = {
-			rsaSig: await generateKey("RS256", "sig", { modulusLength: 2048 }),
-			ecSig: await generateKey("ES256", "sig"),
-			edSig: await generateKey("Ed25519", "sig"),
-			rsaEnc: await generateKey("RSA-OAEP", "enc", { modulusLength: 2048 }),
-			ecEnc: await generateKey("ECDH-ES", "enc", { crv: "P-256" }),
-		};
-	}
+	// the configured keys (RP_JWKS, or the file RP_JWKS_FILE names); the kinds it lacks are generated
+	const configured = process.env["RP_JWKS"]
+		? (JSON.parse(process.env["RP_JWKS"]) as { keys: jose.JWK[] })
+		: process.env["RP_JWKS_FILE"]
+			? (JSON.parse(readFileSync(process.env["RP_JWKS_FILE"], "utf8")) as { keys: jose.JWK[] })
+			: { keys: [] };
+	const find = (pred: (k: jose.JWK) => boolean) => configured.keys.find((k) => k.d && pred(k));
+	KEYS = {
+		rsaSig:
+			find((k) => k.kty === "RSA" && k.use !== "enc") ?? (await generateKey("RS256", "sig", { modulusLength: 2048 })),
+		ecSig: find((k) => k.kty === "EC" && k.use !== "enc") ?? (await generateKey("ES256", "sig")),
+		edSig: find((k) => k.kty === "OKP" && k.crv === "Ed25519") ?? (await generateKey("Ed25519", "sig")),
+		rsaEnc:
+			find((k) => k.kty === "RSA" && k.use === "enc") ??
+			(await generateKey("RSA-OAEP", "enc", { modulusLength: 2048 })),
+		ecEnc: find((k) => k.kty === "EC" && k.use === "enc") ?? (await generateKey("ECDH-ES", "enc", { crv: "P-256" })),
+	};
 	PUBLIC_JWKS = { keys: Object.values(KEYS).map(({ d: _d, p: _p, q: _q, dp: _dp, dq: _dq, qi: _qi, ...pub }) => pub) };
 }
 
@@ -102,15 +96,19 @@ async function importKey(jwk: jose.JWK, alg: string): Promise<client.CryptoKey> 
 	return (await jose.importJWK(material, alg)) as client.CryptoKey;
 }
 
-/** private signing key for a JWS alg (private_key_jwt assertions, request objects) */
+/**
+ * private signing key for a JWS alg (private_key_jwt assertions, request objects): a private key of the static
+ * client's jwks when it has one, else the RP's own key of the kind (the FAPI 2 configs carry the public keys only;
+ * the private key is RP_JWKS_FILE's)
+ */
 async function signingKey(alg: string, jwks?: { keys: jose.JWK[] }): Promise<client.PrivateKey> {
 	let jwk: jose.JWK | undefined;
+	const kty = alg.startsWith("ES") ? "EC" : alg.startsWith("RS") || alg.startsWith("PS") ? "RSA" : "OKP";
 	if (jwks) {
-		const kty = alg.startsWith("ES") ? "EC" : alg.startsWith("RS") || alg.startsWith("PS") ? "RSA" : "OKP";
 		jwk = jwks.keys.find((k) => k.d && k.use !== "enc" && k.kty === kty);
-		if (!jwk) {
-			throw new Error(`static client jwks has no private ${kty} key for ${alg}`);
-		}
+	}
+	if (jwk) {
+		// the static client's own private key
 	} else if (alg.startsWith("RS") || alg.startsWith("PS")) {
 		jwk = KEYS.rsaSig;
 	} else if (alg === "ES256") {
@@ -218,10 +216,11 @@ async function validateAtHash(idToken: string, accessToken: string): Promise<voi
 
 // ---------------------------------------------------------------------------------------------------------------
 // per test module behaviour (mirrors sample-openid-client-nodejs/modules/*.js, plus the logout / config modules
-// the sample client never implemented)
+// the sample client never implemented, and the FAPI 2 client test modules)
 
 type Kind =
 	| "login"
+	| "fapi2"
 	| "discovery"
 	| "jwks"
 	| "webfinger-acct"
@@ -334,7 +333,42 @@ const MODULES: Record<string, ModuleSpec> = {
 	"session-management": { kind: "session-management" },
 };
 
+/**
+ * FAPI 2 client test modules (upstream fapi2spfinal/FAPI2SPFinalClientTest*.java), the name without the
+ * "fapi2-security-profile-final-client-" prefix -> behaviour; not listed: the FAPI 2 happy path
+ */
+const FAPI2_MODULES: Record<string, ModuleSpec> = {
+	"test-discovery-issuer-mismatch": { kind: "discovery", expectFailure: true },
+	"test-invalid-iss": { kind: "fapi2", expectFailure: true },
+	"test-invalid-aud": { kind: "fapi2", expectFailure: true },
+	"test-invalid-secondary-aud": { kind: "fapi2", expectFailure: true },
+	"test-invalid-null-alg": { kind: "fapi2", expectFailure: true },
+	"test-invalid-alternate-alg": { kind: "fapi2", expectFailure: true },
+	"test-invalid-expired-exp": { kind: "fapi2", expectFailure: true },
+	"test-invalid-missing-exp": { kind: "fapi2", expectFailure: true },
+	"test-invalid-missing-aud": { kind: "fapi2", expectFailure: true },
+	"test-invalid-missing-iss": { kind: "fapi2", expectFailure: true },
+	"test-invalid-nonce": { kind: "fapi2", expectFailure: true },
+	"test-invalid-missing-nonce": { kind: "fapi2", expectFailure: true },
+	"test-invalid-authorization-response-iss": { kind: "fapi2", expectFailure: true },
+	"test-remove-authorization-response-iss": { kind: "fapi2", expectFailure: true },
+	"test-ensure-authorization-response-with-invalid-state-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-authorization-response-with-invalid-missing-state-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-without-iss-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-with-invalid-iss-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-without-aud-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-with-invalid-aud-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-without-exp-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-with-expired-exp-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-with-invalid-sig-fails": { kind: "fapi2", expectFailure: true },
+	"test-ensure-jarm-signature-is-not-none": { kind: "fapi2", expectFailure: true },
+};
+
 function moduleSpec(module: string): ModuleSpec {
+	if (module.startsWith("fapi2-")) {
+		const fapiName = module.replace(/^fapi2-security-profile-final-client-/, "");
+		return Object.hasOwn(FAPI2_MODULES, fapiName) ? FAPI2_MODULES[fapiName] : { kind: "fapi2" };
+	}
 	const name = module.replace(/^oidcc-client-test-/, "");
 	if (Object.hasOwn(MODULES, name)) {
 		return MODULES[name];
@@ -358,6 +392,19 @@ interface StartInput {
 	clientId?: string;
 	clientSecret?: string;
 	jwks?: { keys: jose.JWK[] };
+	/** the scope the static client is configured with (the FAPI 2 modules require exactly it) */
+	scope?: string;
+	/** the FAPI 2 resource endpoint (default: the suite's accounts endpoint, <issuer>open-banking/v1.1/accounts) */
+	accountsEndpoint?: string;
+}
+
+/** the FAPI 2 state of a flow: the DPoP key, the request object signing key, the response mode */
+interface Fapi2Flow {
+	DPoP: client.DPoPHandle;
+	/** fapi_request_method=signed_non_repudiation: the key the request object is signed with */
+	signingKey?: client.PrivateKey;
+	oidc: boolean;
+	accountsEndpoint: string;
 }
 
 interface RpClient {
@@ -402,6 +449,7 @@ interface Flow {
 	idTokenAlg?: string;
 	waitingForInitiateLogin?: boolean;
 	loggedIn: boolean;
+	fapi2?: Fapi2Flow;
 }
 
 const flows = new Map<string, Flow>();
@@ -593,6 +641,74 @@ async function configureResponseHandling(config: client.Configuration, responseT
 	}
 }
 
+/**
+ * The FAPI 2 client (upstream fapi2spfinal/AbstractFAPI2SPFinalClientTest's static client): private_key_jwt with
+ * the configured key, a DPoP key, PAR, PKCE, the id_token signing algorithm the server publishes, JARM
+ * (fapi_response_mode=jarm) and a signed request object (fapi_request_method=signed_non_repudiation). Only
+ * client_auth_type=private_key_jwt and sender_constrain=dpop are supported (no mTLS).
+ */
+async function setUpFapi2Client(
+	flowLike: { steps: string[]; module: string },
+	input: StartInput,
+): Promise<{ rp: RpClient; fapi2: Fapi2Flow }> {
+	const { variant } = input;
+	if ((variant["client_auth_type"] ?? "private_key_jwt") !== "private_key_jwt") {
+		throw new Error(
+			`client_auth_type ${variant["client_auth_type"]} is not supported by this RP (private_key_jwt only)`,
+		);
+	}
+	if ((variant["sender_constrain"] ?? "dpop") !== "dpop") {
+		throw new Error(`sender_constrain ${variant["sender_constrain"]} is not supported by this RP (DPoP only)`);
+	}
+	const oidc = variant["fapi_client_type"] !== "plain_oauth";
+	const jarm = variant["fapi_response_mode"] === "jarm";
+	const signed = variant["fapi_request_method"] === "signed_non_repudiation";
+	const execute = executeFor(input.issuer);
+	const clientId = input.clientId ?? STATIC_CLIENT_ID;
+	// one discovery request (RFC 8414 oauth-authorization-server metadata for a plain OAuth client): the client's
+	// configuration then comes from the discovered metadata
+	const discovered = await client.discovery(new URL(input.issuer), clientId, undefined, client.None(), {
+		execute,
+		algorithm: oidc ? "oidc" : "oauth2",
+	});
+	const server = discovered.serverMetadata();
+	const signingAlg = String(server.id_token_signing_alg_values_supported?.[0] ?? "PS256");
+	const key = await signingKey("PS256", input.jwks);
+	const metadata: Record<string, unknown> = {
+		token_endpoint_auth_method: "private_key_jwt",
+		token_endpoint_auth_signing_alg: "PS256",
+		id_token_signed_response_alg: signingAlg,
+		response_types: ["code"],
+		grant_types: ["authorization_code", "refresh_token"],
+		redirect_uris: [REDIRECT_URI],
+		...(jarm ? { authorization_signed_response_alg: signingAlg } : {}),
+		...(signed ? { request_object_signing_alg: "PS256" } : {}),
+	};
+	const clientAuth = client.PrivateKeyJwt(key);
+	const config = new client.Configuration(server, clientId, metadata as Partial<client.ClientMetadata>, clientAuth);
+	for (const ext of execute) {
+		ext(config);
+	}
+	client.enableNonRepudiationChecks(config);
+	if (jarm) {
+		client.useJwtResponseMode(config);
+	}
+	const DPoP = client.getDPoPHandle(config, await client.randomDPoPKeyPair("PS256"));
+	step(
+		flowLike,
+		`discovered ${server.issuer}, using static client ${clientId} (private_key_jwt, DPoP${jarm ? ", JARM" : ""}${signed ? ", signed request object" : ""})`,
+	);
+	return {
+		rp: { config, clientId, requestedMetadata: metadata, clientAuth, staticJwks: input.jwks },
+		fapi2: {
+			DPoP,
+			signingKey: signed ? key : undefined,
+			oidc,
+			accountsEndpoint: input.accountsEndpoint ?? `${input.issuer}open-banking/v1.1/accounts`,
+		},
+	};
+}
+
 /** a fresh Configuration for the same client, i.e. without cached JWKS (key rotation modules) */
 async function freshConfig(rp: RpClient, responseType: string, issuer: string): Promise<client.Configuration> {
 	const config = new client.Configuration(
@@ -643,7 +759,40 @@ function newFlow(input: StartInput, spec: ModuleSpec, rp: RpClient, steps: strin
 	return flow;
 }
 
+/**
+ * FAPI 2: the pushed authorization request (always PKCE S256, a state, and a nonce for OpenID Connect; a signed
+ * request object with signed_non_repudiation; response_mode=jwt is added by useJwtResponseMode), then the
+ * authorization endpoint with client_id and request_uri only. The use_dpop_nonce challenge is answered by
+ * openid-client (it retries with the nonce).
+ */
+async function buildFapi2AuthorizationUrl(flow: Flow, fapi2: Fapi2Flow): Promise<URL> {
+	const { config } = flow.rp;
+	flow.codeVerifier = client.randomPKCECodeVerifier();
+	const params: Record<string, string> = {
+		redirect_uri: REDIRECT_URI,
+		scope: flow.input.scope ?? (fapi2.oidc ? "openid" : "accounts"),
+		response_type: "code",
+		state: flow.state,
+		...(fapi2.oidc ? { nonce: flow.nonce } : {}),
+		code_challenge: await client.calculatePKCECodeChallenge(flow.codeVerifier),
+		code_challenge_method: "S256",
+		...flow.spec.params,
+	};
+	let pushed: Record<string, string> = params;
+	if (fapi2.signingKey) {
+		const jarUrl = await client.buildAuthorizationUrlWithJAR(config, params, fapi2.signingKey);
+		pushed = { request: jarUrl.searchParams.get("request")! };
+		step(flow, "request object signed for the pushed authorization request");
+	}
+	const url = await client.buildAuthorizationUrlWithPAR(config, pushed, { DPoP: fapi2.DPoP });
+	step(flow, `pushed authorization request accepted (${url.searchParams.get("request_uri")})`);
+	return url;
+}
+
 async function buildAuthorizationUrl(flow: Flow, extra: Record<string, string> = {}): Promise<URL> {
+	if (flow.fapi2) {
+		return buildFapi2AuthorizationUrl(flow, flow.fapi2);
+	}
 	const { config } = flow.rp;
 	const params: Record<string, string> = {
 		redirect_uri: REDIRECT_URI,
@@ -709,8 +858,59 @@ async function buildAuthorizationUrl(flow: Flow, extra: Record<string, string> =
 
 const FRONT_CHANNEL_TOKEN_PARAMS = ["access_token", "token_type", "expires_in", "session_state"];
 
+/**
+ * FAPI 2: the authorization response (plain, with iss, or a JARM `response` JWT), the DPoP-bound token request
+ * and the resource request with the DPoP-bound access token; the module's expectations are openid-client's checks
+ * (iss, state, the id_token, the JARM response).
+ */
+async function completeFapi2Login(flow: Flow, fapi2: Fapi2Flow, params: URLSearchParams): Promise<LoginResult> {
+	const { config } = flow.rp;
+	const currentUrl = new URL(REDIRECT_URI);
+	currentUrl.search = params.toString();
+	const tokens = await client.authorizationCodeGrant(
+		config,
+		currentUrl,
+		{
+			pkceCodeVerifier: flow.codeVerifier,
+			expectedState: flow.state,
+			...(fapi2.oidc ? { expectedNonce: flow.nonce, idTokenExpected: true } : {}),
+		},
+		undefined,
+		{ DPoP: fapi2.DPoP },
+	);
+	step(flow, `token endpoint response validated (token_type ${tokens.token_type})`);
+	const result: LoginResult = {
+		claims: tokens.claims() as Record<string, unknown> | undefined,
+		idToken: tokens.id_token,
+		accessToken: tokens.access_token,
+		refreshToken: tokens.refresh_token,
+	};
+	if (result.idToken) {
+		flow.idTokenAlg = String(jose.decodeProtectedHeader(result.idToken).alg ?? "");
+	}
+	const res = await client.fetchProtectedResource(
+		config,
+		tokens.access_token,
+		new URL(fapi2.accountsEndpoint),
+		"GET",
+		undefined,
+		new Headers({ "x-fapi-interaction-id": randomUUID(), accept: "application/json" }),
+		{ DPoP: fapi2.DPoP },
+	);
+	if (!res.ok) {
+		throw new Error(`resource endpoint responded with ${res.status}`);
+	}
+	result.userinfo = (await res.json()) as Record<string, unknown>;
+	step(flow, `resource endpoint ${fapi2.accountsEndpoint} responded with ${res.status}`);
+	flow.spec.check?.(result);
+	return result;
+}
+
 async function completeLogin(flow: Flow, params: URLSearchParams, config = flow.rp.config): Promise<LoginResult> {
 	step(flow, `authorization response received (${[...params.keys()].join(", ") || "no parameters"})`);
+	if (flow.fapi2) {
+		return completeFapi2Login(flow, flow.fapi2, params);
+	}
 	const types = new Set(flow.responseType.split(" "));
 	const result: LoginResult = { sessionState: params.get("session_state") ?? undefined };
 	const frontIdToken = params.get("id_token") ?? undefined;
@@ -907,7 +1107,11 @@ async function runModule(input: StartInput): Promise<StartResult> {
 
 	const execute = executeFor(input.issuer);
 	const discover = async (issuer: string) => {
-		const config = await client.discovery(new URL(issuer), "discovery-only", undefined, client.None(), { execute });
+		const config = await client.discovery(new URL(issuer), "discovery-only", undefined, client.None(), {
+			execute,
+			// a plain OAuth 2.0 FAPI 2 client reads the RFC 8414 oauth-authorization-server metadata
+			algorithm: input.variant["fapi_client_type"] === "plain_oauth" ? "oauth2" : "oidc",
+		});
 		step(ctx, `discovered ${config.serverMetadata().issuer}`);
 		return config;
 	};
@@ -938,6 +1142,21 @@ async function runModule(input: StartInput): Promise<StartResult> {
 			return expect(() => setUpClient(ctx, input, spec));
 		default:
 			break;
+	}
+
+	if (spec.kind === "fapi2") {
+		const { rp, fapi2 } = await setUpFapi2Client(ctx, input);
+		const flow = newFlow(input, spec, rp, steps);
+		flow.fapi2 = fapi2;
+		const ua = await browserUserAgent();
+		try {
+			return await expect(async () => {
+				await ua.open(`${BASE}/login?flow=${flow.id}`);
+				return withTimeout(flow.login.promise, LOGIN_TIMEOUT_MS, "the authorization response");
+			}, "signed in");
+		} finally {
+			await ua.close();
+		}
 	}
 
 	const rp = await setUpClient(ctx, input, spec);
@@ -1318,6 +1537,8 @@ async function startModule(res: ServerResponse, q: URLSearchParams): Promise<voi
 			clientId: q.get("client_id") ?? undefined,
 			clientSecret: q.get("client_secret") ?? undefined,
 			jwks: json("jwks"),
+			scope: q.get("scope") ?? undefined,
+			accountsEndpoint: q.get("accounts_endpoint") ?? undefined,
 		};
 	} catch (err) {
 		return sendJson(res, 400, { ok: false, error: describeError(err), steps: [] });

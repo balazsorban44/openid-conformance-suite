@@ -2,8 +2,10 @@
 
 TypeScript port of the OpenID Foundation conformance suite (https://gitlab.com/openid/Conformance-suite), driven
 by Playwright and runnable in GitHub Actions. Currently covers the OpenID Connect Core OP and RP plans (basic,
-config, dynamic client registration, RP-initiated/back-channel/front-channel logout, session management,
-3rd-party-initiated login).
+implicit, hybrid, form_post, config, dynamic client registration, RP-initiated/back-channel/front-channel logout,
+session management, 3rd-party-initiated login, RP refresh token) and the FAPI 2.0 Security Profile and Message
+Signing OP and RP plans for plain_fapi with private_key_jwt and DPoP (no mTLS, no ecosystem profiles, no grant
+management).
 
 ## Principles
 

@@ -913,3 +913,167 @@ export async function handleAuthorizationRequest(
 		return { response, authorization, responseParams };
 	});
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// the FAPI 2 authorization server's authorization endpoint (upstream AbstractFAPI2SPFinalClientTest.authorizationEndpoint)
+
+/** upstream: condition/as/EnsureClaimsParameterNotPresentInPlainOAuthRequest.java */
+export function ensureClaimsParameterNotPresentInPlainOAuthRequest(params: AuthorizationParams): void {
+	const c: Condition = condition("EnsureClaimsParameterNotPresentInPlainOAuthRequest");
+	if (params["claims"] != null) {
+		c.failure(
+			"The 'claims' parameter is an OpenID Connect extension and should not be present in a plain OAuth2 authorization request. Change the client type in the test configuration to 'oidc' to test OpenID Connect.",
+		);
+	}
+	c.success("Authorization request does not contain the OpenID Connect 'claims' parameter");
+}
+
+/**
+ * `httpParams`: the plain request parameters (upstream "authorization_endpoint_http_request_params").
+ *
+ * upstream: condition/as/EnsureClientIdInAuthorizationRequestParametersMatchRequestObject.java
+ */
+export function ensureClientIdInAuthorizationRequestParametersMatchRequestObject(
+	httpParams: AuthorizationParams,
+	requestObject: ParsedJwt,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureClientIdInAuthorizationRequestParametersMatchRequestObject", ...requirements);
+	const requestParam = param(httpParams, "client_id");
+	const requestObjectValue = requestObject.claims["client_id"];
+	if (requestParam == null) {
+		c.failure("client_id not found in http request parameters");
+	}
+	if (requestParam !== requestObjectValue) {
+		c.failure("client_id in http request parameters does not match client_id in request object", {
+			http_request_value: requestParam,
+			request_object_value: requestObjectValue ?? null,
+		});
+	}
+	c.success("client_id http request parameter value matches client_id in request object");
+}
+
+/** upstream: condition/as/EnsureRequestedScopeIsEqualToConfiguredScope.java */
+export function ensureRequestedScopeIsEqualToConfiguredScope(
+	requestedScope: string,
+	client: Record<string, unknown>,
+): void {
+	const c: Condition = condition("EnsureRequestedScopeIsEqualToConfiguredScope");
+	const configuredScope = typeof client["scope"] === "string" ? client["scope"] : null;
+	if (!configuredScope) {
+		c.failure("Missing scope value in client configuration");
+	}
+	if (configuredScope === requestedScope) {
+		c.success("Requested scopes match configured scopes", { scope: configuredScope });
+		return;
+	}
+	c.failure("Requested scopes don't match configured scopes", {
+		configured: configuredScope,
+		requested: requestedScope,
+	});
+}
+
+/** upstream: condition/as/EnsureAuthorizationRequestContainsStateParameter.java */
+export function ensureAuthorizationRequestContainsStateParameter(
+	params: AuthorizationParams,
+	...requirements: string[]
+): void {
+	const c: Condition = condition("EnsureAuthorizationRequestContainsStateParameter", ...requirements);
+	const state = param(params, "state");
+	if (!state) {
+		c.failure("Missing state parameter");
+	}
+	c.success("Found state parameter", { state });
+}
+
+/** upstream: condition/as/CheckForInvalidCharsInState.java */
+export function checkForInvalidCharsInState(params: AuthorizationParams): void {
+	const c: Condition = condition("CheckForInvalidCharsInState");
+	const state = param(params, "state");
+	if (state) {
+		// Ensure the state contains only URL safe characters.
+		const invalid = [...new Set([...state].filter((ch) => !/^[A-Za-z0-9\-_.~]$/.test(ch)))];
+		if (invalid.length > 0) {
+			c.failure("Non URL safe characters found in state. This may introduce interoperability issues.", {
+				state,
+				invalid_chars: invalid,
+			});
+		}
+	}
+	c.success("State is empty or contains only URL safe characters");
+}
+
+/** upstream: condition/as/CheckStateLength.java */
+export function checkStateLength(params: AuthorizationParams): void {
+	const c: Condition = condition("CheckStateLength");
+	const state = param(params, "state");
+	if (state && state.length > 128) {
+		c.failure("State contains in excess of 128 characters. This may introduce interoperability issues.");
+	}
+	c.success("State is empty or does not exceed 128 characters");
+}
+
+/** upstream: condition/as/AddIssToAuthorizationEndpointResponseParams.java */
+export function addIssToAuthorizationEndpointResponseParams(
+	response: Record<string, string>,
+	issuer: string,
+	...requirements: string[]
+): void {
+	response["iss"] = issuer;
+	condition("AddIssToAuthorizationEndpointResponseParams", ...requirements).success(
+		"Added Iss to authorization endpoint response params",
+		{ authorization_endpoint_response_params: response },
+	);
+}
+
+/** upstream: condition/as/AddInvalidIssToAuthorizationEndpointResponseParams.java */
+export function addInvalidIssToAuthorizationEndpointResponseParams(
+	response: Record<string, string>,
+	issuer: string,
+	...requirements: string[]
+): void {
+	const invalidIssuer = issuer + "1";
+	response["iss"] = invalidIssuer;
+	condition("AddInvalidIssToAuthorizationEndpointResponseParams", ...requirements).success(
+		"Added invalid Issuer to authorization endpoint response params",
+		{ authorization_endpoint_response_params: response, "invalid Iss": invalidIssuer },
+	);
+}
+
+/** upstream: condition/as/RemoveIssFromAuthorizationEndpointResponseParams.java */
+export function removeIssFromAuthorizationEndpointResponseParams(
+	response: Record<string, string>,
+	...requirements: string[]
+): void {
+	delete response["iss"];
+	condition("RemoveIssFromAuthorizationEndpointResponseParams", ...requirements).success(
+		"Removed Iss from authorization endpoint response params",
+		{ authorization_endpoint_response_params: response },
+	);
+}
+
+/** upstream: condition/as/AddInvalidStateToAuthorizationEndpointResponseParams.java */
+export function addInvalidStateToAuthorizationEndpointResponseParams(
+	response: Record<string, string>,
+	...requirements: string[]
+): void {
+	const state = response["state"];
+	const invalidState = state ? state + "1" : "1";
+	response["state"] = invalidState;
+	condition("AddInvalidStateToAuthorizationEndpointResponseParams", ...requirements).success(
+		"Added invalid state to authorization endpoint response params",
+		{ state: invalidState },
+	);
+}
+
+/** upstream: condition/as/RemoveStateFromAuthorizationEndpointResponseParams.java */
+export function removeStateFromAuthorizationEndpointResponseParams(
+	response: Record<string, string>,
+	...requirements: string[]
+): void {
+	delete response["state"];
+	condition("RemoveStateFromAuthorizationEndpointResponseParams", ...requirements).success(
+		"Removed state from authorization endpoint response params",
+		{ authorization_endpoint_response_params: response },
+	);
+}

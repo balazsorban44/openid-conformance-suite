@@ -8,7 +8,10 @@ The Relying Party under test for the RP plans (`oidcc-client-*`). It is built on
 node targets/openid-client-rp/server.ts      # prints "ready" once listening on http://localhost:4000 (PORT)
 ```
 
-`PORT` (http, default 4000) and `RP_HTTPS_PORT` (https, default 4443, `0` disables) choose the listeners. The
+`PORT` (http, default 4000) and `RP_HTTPS_PORT` (https, default 4443, `0` disables) choose the listeners. `RP_JWKS`
+(a private JWKS as JSON) or `RP_JWKS_FILE` (the path of one) supplies the RP's keys instead of generated ones, so
+a config can carry their public half as the static client's `jwks` (the FAPI 2 configs:
+`configs/openid-client-rp/fapi2-rp-keys.json`); kinds the set lacks are still generated. The
 configs in `configs/openid-client-rp/` let the suite pick free ports (src/suite/target.ts): `"url":
 "http://localhost:${PORT}"`, `"env": { "RP_HTTPS_PORT": "${PORT_HTTPS}" }`, and use `${TARGET_URL}` and
 `${PORT_HTTPS}` wherever the RP's URLs appear (readyUrl, `client_driver.startUrl`, static `redirect_uri`, browser
@@ -44,7 +47,7 @@ logout, session management and third party initiated login modules work too.
 
    ```
    GET {client_driver.startUrl}?issuer=<url>&module=<testName>&variant=<json>&client_metadata_defaults=<json>&alias=<alias>
-       [&client_id=<id>&client_secret=<secret>&jwks=<private jwks json>]
+       [&client_id=<id>&client_secret=<secret>&jwks=<jwks json>&scope=<scope>][&accounts_endpoint=<url>]
    ```
 
    | parameter                            | meaning                                                                                                                                                                                                                               |
@@ -55,6 +58,8 @@ logout, session management and third party initiated login modules work too.
    | `client_metadata_defaults`           | JSON object of extra registration metadata (upstream `CLIENT_METADATA_DEFAULTS`); configs may carry it as `client_metadata_defaults`                                                                                                  |
    | `alias`                              | the suite alias (only used to build the webfinger `acct:` resource)                                                                                                                                                                   |
    | `client_id`, `client_secret`, `jwks` | static client (`client_registration=static_client`), taken from the test config's `client`; defaults `openid-client-rp` / `rp-secret-0123456789abcdefghij` (or `RP_STATIC_CLIENT_ID` / `RP_STATIC_CLIENT_SECRET`)                     |
+   | `scope`                              | the test config's `client.scope` (the FAPI 2 modules request it as is; default `openid`)                                                                                                                                              |
+   | `accounts_endpoint`                  | FAPI 2 modules: the protected resource to call after the token request (default `<issuer>open-banking/v1.1/accounts`, the suite's accounts endpoint)                                                                                  |
 
 3. The request blocks until the RP has run the whole flow for that module (or gave up) and answers 200 with
 
@@ -136,6 +141,25 @@ it checks the front-channel `at_hash` before it exchanges the code, so an id_tok
 | `rp-backchannel-rpinitlogout-{alg-none,no-event,with-nonce,wrong-alg,wrong-aud,wrong-event,wrong-iss}`                                                                                                                                    | as above; the `logout_token` must be rejected (400)                                                                                                                                                       | rejected                                                     |
 | `rp-frontchannel-opinitlogout`                                                                                                                                                                                                            | login, then waits for the suite's browser to load `frontchannel_logout_uri`                                                                                                                               | front-channel request received                               |
 | `session-management`                                                                                                                                                                                                                      | login, session check (`unchanged`), RP-initiated logout, session check (`changed`)                                                                                                                        | success                                                      |
+
+### FAPI 2.0 modules (`fapi2-security-profile-final-client-*`)
+
+The FAPI 2 client plans drive the same `/start` endpoint; the module name's `fapi2-security-profile-final-client-`
+prefix selects the FAPI 2 flow: one discovery, a static client with `PrivateKeyJwt` (the key of `RP_JWKS_FILE`,
+whose `kid` must be in the config's public `client.jwks`), a fresh PS256 DPoP key per module with openid-client's
+nonce handling (a `use_dpop_nonce` answer at the PAR, token or resource endpoint is retried once), PKCE S256, PAR
+(`buildAuthorizationUrlWithPAR`; with `fapi_request_method=signed_non_repudiation` the pushed request is a signed
+request object, `buildAuthorizationUrlWithJAR`), `response_mode=jwt` with `fapi_response_mode=jarm`
+(`useJwtResponseMode`), `enableNonRepudiationChecks`, the code exchange with DPoP, then `fetchProtectedResource`
+on `accounts_endpoint` with `x-fapi-interaction-id`. `fapi_client_type=oidc` requests `scope` with `openid` and
+a `nonce`; `plain_oauth` requests the config's scope as is.
+
+| module(s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | RP behaviour                                                       | expected                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------ |
+| `happy-path`, `happy-path-no-dpop-nonce`, `happy-path-no-mtls-endpoint-aliases`, `valid-aud-as-array`, `token-endpoint-response-without-expires_in`, `token-type-case-insensitivity`, `rs-dpop-auth-scheme-case-insensitivity`                                                                                                                                                                                                                                                                        | the flow above                                                     | success (accounts returned)    |
+| `discovery-issuer-mismatch`                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | discovery only                                                     | rejected (issuer mismatch)     |
+| `invalid-iss`, `invalid-aud`, `invalid-secondary-aud`, `invalid-null-alg`, `invalid-alternate-alg`, `invalid-expired-exp`, `invalid-missing-exp`, `invalid-missing-aud`, `invalid-missing-iss`, `invalid-nonce`, `invalid-missing-nonce`                                                                                                                                                                                                                                                              | the flow above; the id_token of the token response must be refused | rejected (no resource request) |
+| `invalid-authorization-response-iss`, `remove-authorization-response-iss`, `ensure-authorization-response-with-invalid-state-fails`, `ensure-authorization-response-with-invalid-missing-state-fails`, `ensure-jarm-without-iss-fails`, `ensure-jarm-with-invalid-iss-fails`, `ensure-jarm-without-aud-fails`, `ensure-jarm-with-invalid-aud-fails`, `ensure-jarm-without-exp-fails`, `ensure-jarm-with-expired-exp-fails`, `ensure-jarm-with-invalid-sig-fails`, `ensure-jarm-signature-is-not-none` | the authorization response must be refused                         | rejected (no token request)    |
 
 The test modules this mirrors are in upstream `src/main/java/net/openid/conformance/openid/client/` and
 `client/logout/`: `finishTestIfAllRequestsAreReceived()` in each module says which requests end it (e.g. the

@@ -14,9 +14,11 @@ The [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-
   - [x] implicit and hybrid flows, form_post response mode
   - [x] RP-initiated, back-channel and front-channel logout, session management, 3rd-party-initiated login,
         refresh token
-- [ ] FAPI 2 Security Profile and Message Signing, OpenID Provider (in progress: the discovery, happy flow,
-      refresh token, PAR / PKCE, client assertion, DPoP binding, code binding and signed request object / JARM
-      modules; client_auth_type=private_key_jwt and sender_constrain=dpop only, mTLS is not covered)
+- [x] FAPI 2 Security Profile and Message Signing (plain_fapi, private_key_jwt, DPoP, JAR, JARM)
+  - [x] OpenID Provider: every module of both plans that applies to plain_fapi
+  - [x] Relying Party: every module of both plans that applies to plain_fapi
+  - [ ] mTLS client authentication and sender constraining, grant management, the ecosystem profiles (Brazil,
+        Australia CDR and ConnectID, KSA, CBUAE, Chile)
 - [ ] FAPI 1 Advanced, FAPI-CIBA
 - [ ] OpenID Federation, Shared Signals Framework, OpenID4VC issuer / wallet / verifier, eKYC, AuthZEN
 

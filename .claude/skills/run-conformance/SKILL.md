@@ -20,6 +20,10 @@ node bin/cli.ts ci --project rp-basic
 # FAPI 2.0 OP plans against oidc-provider in its FAPI 2.0 profile (OIDC_PROVIDER_PROFILE=fapi2: PAR, DPoP, PKCE,
 # private_key_jwt; fapi2-message-signing = signed request objects, fapi2-message-signing-jarm = JARM)
 node bin/cli.ts ci --project fapi2-security-profile
+# FAPI 2.0 RP plans: the suite emulates the FAPI 2.0 authorization server (PAR, DPoP with nonces, private_key_jwt,
+# JARM), the bundled openid-client RP is driven through it (rp-fapi2-message-signing = signed request objects,
+# rp-fapi2-message-signing-jarm = JARM)
+node bin/cli.ts ci --project rp-fapi2-security-profile
 # extra Playwright args after `--`, e.g. one module
 node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
 # another browser: chromium (default) | firefox | webkit | chrome-mobile
@@ -80,6 +84,21 @@ ensure-holder-of-key-required make raw TLS handshakes with the OP's endpoints (T
 the BCP 195 recommended ciphers only, TLS 1.3): in FAPI 2.0 mode the target serves https with that cipher policy.
 `fapi2-security-profile-final-user-rejects-authentication` needs the browser to reject the login: the configs'
 `override` for it clicks the "Cancel" link of oidc-provider's login page instead of logging in.
+
+The FAPI 2.0 RP plans (`fapi2-security-profile-final-client-test-plan`,
+`fapi2-message-signing-final-client-test-plan`; tests/rp/fapi2-security-profile.spec.ts,
+tests/rp/fapi2-message-signing.spec.ts; projects `rp-fapi2-security-profile`, `rp-fapi2-message-signing` (signed
+request objects) and `rp-fapi2-message-signing-jarm`) run `[client_auth_type=private_key_jwt][sender_constrain=dpop]
+[fapi_profile=plain_fapi][fapi_client_type=oidc][authorization_request_type=simple][grant_management=disabled]`
+(the message signing plan adds `fapi_request_method` and `fapi_response_mode`; `rp-fapi2-security-profile-plain-oauth`
+runs the security profile plan with `fapi_client_type=plain_oauth`: configs/openid-client-rp/fapi2-plain-oauth.json
+with a non-openid `scope`, the id_token modules are not applicable). The suite emulates the authorization server (PAR required, DPoP nonces at the PAR, token and accounts
+endpoints, private_key_jwt, JARM when selected) and drives the RP through `client_driver.startUrl` as the OIDCC RP
+plans do, passing the static `client` along (`client_id`, `scope`, and `jwks`: the RP's PUBLIC keys, the suite
+validates them as a public JWK set). The bundled target takes its private key from `RP_JWKS_FILE`
+(configs/openid-client-rp/fapi2-rp-keys.json; the public half is the config's `client.jwks`). mTLS, client
+attestation, RAR, grant management and the ecosystem profiles (the refresh token module is Brazil / CBUAE / Chile /
+KSA only) are not ported.
 
 ## Environment variables
 

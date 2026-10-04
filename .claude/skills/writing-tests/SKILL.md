@@ -87,6 +87,15 @@ src/rp/               the emulated OP for testing a Relying Party, one file per 
                       the post_logout_redirect_uri redirect (AbstractOIDCCClientLogoutTest)
   session.ts          session_state, sid, the check_session_iframe and get_session_state (Session Management)
   webfinger.ts        WebFinger issuer discovery (/.well-known/webfinger on the test's server)
+  client-assertion.ts private_key_jwt client authentication at the token and PAR endpoints (the client_assertion
+                      checks, ValidateClientAuthenticationWithPrivateKeyJWT)
+  dpop.ts             DPoP (RFC 9449) at the authorization and resource server: the proof checks, the nonces and
+                      the use_dpop_nonce error responses, the DPoP-bound access token
+  par.ts              the PAR endpoint (RFC 9126): metadata, request checks, the request_uri response
+  jarm.ts             JARM: metadata, the signed response JWT and the redirect, the negative modules' defects
+  fapi2.ts            startEmulatedFapi2As(): the FAPI 2.0 authorization server of the RP plans
+                      (AbstractFAPI2SPFinalClientTest): setup, the endpoints (discovery, jwks, PAR, authorization,
+                      token, userinfo, the accounts resource), options (knobs), events
 tests/fixtures.ts     the `test` with the `op`, `registrationOp`, `client`, `client2`, `configureClient`, `fapi`, `rp`,
                       `variant`, `plan` fixtures, and `skipTest(reason)`
 tests/suite-target.ts suite-vs-suite: the emulated OP the `suiteTarget` fixture starts for an OP test (`suite_target`)
@@ -108,6 +117,10 @@ tests/rp/*.spec.ts    one file per RP plan (basic, implicit, hybrid, formpost-ba
                       comment), the flows they share per response type (expectLogin, finishingRequest, the
                       AbstractOIDCCClientTestExpectingNothingInvalidIdToken flow) and the emulated OP options of
                       each RP module (emulatedOpModules, for suite-vs-suite)
+tests/rp/fapi2-*.spec.ts one file per FAPI 2.0 RP plan (security-profile, message-signing); tests/rp/fapi2-shared.ts:
+                      the bodies of the modules (both plans share them), expectLogin / expectWithDpopNonce (the
+                      PAR, token and accounts requests after their use_dpop_nonce challenge) and the flows of
+                      AbstractFAPI2SPFinalClientExpectNothingAfterIdTokenIssued / ...AfterAuthorizationResponse
 src/runner/projects.ts `plans` (plan -> title, spec file, modules, user-selectable variants) and `projects` (the CI
                       matrix: plan, variant, config, skipModules); src/runner/list.ts: `openid-conformance list`
 bin/cli.ts            the CLI (list, run, ci, projects); playwright.config.ts picks the selected plan's spec
@@ -293,9 +306,34 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   `client_driver.startUrl` with issuer, module, variant, client_metadata_defaults, alias and a static client's
   credentials; logged under TEST-RUNNER. The call blocks until the RP has run its flow, so its return tells the OP
   that no further requests will come.
-- Not supported yet by the emulated OP (they throw a TODO(port) error): client_secret_jwt / private_key_jwt /
-  mTLS client authentication, encrypted userinfo responses, encrypted id_tokens and logout tokens, refresh tokens,
-  the OP-initiated front-channel logout page. Add them to the concern file (a new endpoint: `serve(...)` in op.ts,
+- Not supported yet by the emulated OP (they throw a TODO(port) error): client_secret_jwt / private_key_jwt
+  (private_key_jwt only at the FAPI 2 authorization server, src/rp/client-assertion.ts) / mTLS client
+  authentication, encrypted userinfo responses, encrypted id_tokens and logout tokens, refresh tokens, the
+  OP-initiated front-channel logout page.
+- `rp.startFapi2(options)` (src/rp/fapi2.ts `startEmulatedFapi2As`): the FAPI 2.0 authorization server of the RP
+  plans (upstream AbstractFAPI2SPFinalClientTest with the plain_fapi FAPI2ClientProfileBehavior). Setup logs what
+  its `configure` logs (the discovery document with mtls_endpoint_aliases, PAR, DPoP and JARM metadata, the PS256
+  key with decoys and the alternate RSA key, the static client and its public `jwks`, the DPoP nonces); the
+  endpoints are discovery, jwks, PAR, authorization, token, userinfo and the accounts resource
+  (`open-banking/v1.1/accounts`), each request checked as upstream does (private_key_jwt client assertion, DPoP
+  proof and nonce, PKCE, the signed request object, the FAPI headers). The options are upstream's overridable
+  methods, named after them: `onConfigurationCompleted`, `adjustServerConfigurationForMtlsEndpointAliasesVariant`,
+  `requireAuthorizationServerEndpointDpopNonce` / `requireResourceServerEndpointDpopNonce` (false: no
+  use_dpop_nonce challenge), `addCustomValuesToIdToken`, `addCustomSignatureOfIdToken`, `afterIdTokenIssued`,
+  `afterAccessTokenIssued`, `beforeAuthorizationResponse`, `addCustomValuesToAuthorizationResponse`,
+  `afterAuthorizationResponse`, `addCustomValuesToJarmResponse`, `createJARMResponse`,
+  `endTestIfRequiredParametersAreMissing`, `createPAREndpointCustomErrorResponse`, `addCustomValuesToParResponse`,
+  `afterDiscoveryResponse`, `createResourceEndpointDpopErrorResponse`, `responseClientMustStopAfter`.
+  `as.expect(endpoint)` / `as.waitFor(endpoint, seconds)` work as the OIDCC ones; the par, token, userinfo and
+  accounts events carry `status` and `dpopNonceError` (the nonce a use_dpop_nonce answer supplied), so
+  tests/rp/fapi2-shared.ts `expectWithDpopNonce(as, endpoint)` awaits the challenge and the retry. The variant
+  (`Fapi2RpVariant`): client_auth_type, sender_constrain, fapi_profile, fapi_client_type (oidc / plain_oauth),
+  fapi_request_method (unsigned / signed_non_repudiation), fapi_response_mode (plain_response / jarm),
+  authorization_request_type, grant_management. The config's `client.jwks` holds the RP's PUBLIC keys
+  (ValidateJwksSequence rejects private material); the bundled target reads its private key from `RP_JWKS_FILE`.
+  mTLS (client authentication, sender constraining; the `mtls_endpoint_aliases` are published under /test-mtls/ but
+  no listener serves them), client attestation, RAR, grant management and the ecosystem profiles are not ported:
+  their modules are left out with `variantNotApplicable` or are `TODO(port)` comments in the specs. Add them to the concern file (a new endpoint: `serve(...)` in op.ts,
   its handler in the concern file, e.g. `src/rp/logout.ts` serves end_session_endpoint and the session pages); the
   Nimbus encrypters (JWEUtil.createEncrypter) would go into src/suite/jose-jwe.ts next to the decrypters.
 
@@ -354,8 +392,8 @@ test("oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not
   fetches the configuration (the discovery-endpoint-verification modules call `getDynamicServerConfiguration`;
   oidcc-discovery-endpoint-verification then runs `performEndpointVerification()` from src/op/discovery-endpoint.ts).
 - `rp: Rp` (src/rp/rp.ts): `testName`, `variant` (RpVariant), `config`, `waitTimeoutSeconds` (config
-  `waitTimeoutSeconds`, default 5), `start(options)` -> `EmulatedOp` (also `rp.op`), `driveClient()`,
-  `skipTest(reason)`. Uses the same per-test setup and after-test analysis as `op` (the `conformance` fixture);
+  `waitTimeoutSeconds`, default 5), `start(options)` -> `EmulatedOp` (also `rp.op`), `startFapi2(options)` ->
+  `Fapi2As` (the FAPI 2 RP plans), `driveClient()`, `skipTest(reason)`. Uses the same per-test setup and after-test analysis as `op` (the `conformance` fixture);
   a client driver call still running when the test ends is aborted.
 - `variant: OpVariant`, `plan: { name, variant }` (option). A plan whose module lists fix different variants
   (upstream ModuleListEntry) uses one nested `test.describe` with its own `test.use({ plan })` per list, titled after
@@ -585,6 +623,10 @@ code site):
   page (the configuration's `override` gives that module a first automation entry with `"match-limit": 1` that
   only waits for the login page), and the callback is only awaited on the second visit, so upstream's
   "authenticated on the initial visit" check cannot trigger.
+- The FAPI 2 authorization server's `validateClientAuthenticationWithPrivateKeyJWT` (src/rp/client-assertion.ts)
+  stops the test when the request carries no client_assertion. Upstream continues (callAndContinueOnFailure) and
+  the following conditions each fail with "couldn't find required object in environment" before the request is
+  answered.
 
 ### Review checklist
 

@@ -1,0 +1,46 @@
+{
+	"description": "openid-client RP as a plain OAuth 2.0 client (FAPI 2.0 Security Profile, fapi_client_type=plain_oauth: no openid scope, no id_token; private_key_jwt, DPoP, PAR, PKCE; the RP's private key is configs/openid-client-rp/fapi2-rp-keys.json, its public part is client.jwks)",
+	"alias": "openid-client-rp",
+	"plan": "fapi2-security-profile-final-client-test-plan",
+	"variant": {
+		"client_auth_type": "private_key_jwt",
+		"sender_constrain": "dpop",
+		"fapi_profile": "plain_fapi",
+		"fapi_client_type": "plain_oauth",
+		"authorization_request_type": "simple",
+		"grant_management": "disabled"
+	},
+	"waitTimeoutSeconds": 5,
+	"client": {
+		"client_id": "openid-client-rp-fapi2",
+		"scope": "accounts",
+		"redirect_uri": "${TARGET_URL}/cb",
+		"jwks": {
+			"keys": [
+				{
+					"kty": "RSA",
+					"use": "sig",
+					"alg": "PS256",
+					"kid": "openid-client-rp-fapi2-c0a06316",
+					"n": "0vwYZiHQAV8dLvlZPNXgJUp3i1uUF-2SjvdlPmyUb9Od9jMnlZPdUaIVqCLEG0u_ICb98567mM0bGOUdodMIB3rpOGuCb6MU3k1Ss5w8m7smQddKWvPSIDwzrD7sRVUy8OD90IpMLKPrcyJcppH-6wKHCuaL4tCFft3d38o3Rh-Xb3M0sjViQZoOb-epN5weBsiy3WHynXMYJmZwNrsvq7rjlfcy4Gc6VZLkZoQdrgETGNGdtb8ijMhBR6XmfoGcKLam9mvtp8HXKvvvzeJ1P4cxi3PVvv059gj0AdSGgsWa-HNrPrZYLKwLXbWwr8EwJGtcuFy1ZxNCT-wmjN7iOw",
+					"e": "AQAB"
+				}
+			]
+		}
+	},
+	"target": {
+		"command": "node targets/openid-client-rp/server.ts",
+		"url": "http://localhost:${PORT}",
+		"readyUrl": "${TARGET_URL}/ready",
+		"env": {
+			"NODE_EXTRA_CA_CERTS": "configs/certs/localhost.crt",
+			"RP_HTTPS_PORT": "${PORT_HTTPS}",
+			"RP_JWKS_FILE": "configs/openid-client-rp/fapi2-rp-keys.json"
+		}
+	},
+	"client_driver": {
+		"startUrl": "${TARGET_URL}/start"
+	},
+	"expectedFailures": "../expected-failures/openid-client-rp-fapi2.json",
+	"expectedSkips": "../expected-skips/openid-client-rp-fapi2.json"
+}
