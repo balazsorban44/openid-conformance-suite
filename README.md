@@ -135,6 +135,16 @@ pnpm exec openid-conformance run --plan oidcc-basic-certification-test-plan \
 
 Node.js 24 or newer; no build step (native TypeScript).
 
+## Web UI
+
+A checkout of this repository also has a local web UI like the official suite's (`ui/`, Next.js and shadcn/ui):
+the plans and CI projects with the latest result of every module, a dialog to start a run (a project, or a plan with
+your configuration and variant), the run's progress live, and each module's log with its conditions, results, HTTP
+exchanges, screenshots and expected-failures analysis. `pnpm install && pnpm ui` (or `node bin/cli.ts ui`) serves it
+on http://127.0.0.1:3000; see [`ui/README.md`](ui/README.md).
+
+[![The UI's overview](ui/docs/overview-light.png)](ui/README.md)
+
 ## What is in the box
 
 |                                              |                                                                                                                            |
@@ -145,6 +155,7 @@ Node.js 24 or newer; no build step (native TypeScript).
 | `src/op/`                                    | upstream's client-side conditions as functions, per concern (discovery, registration, authorization, token, id_token, ...) |
 | `src/rp/`                                    | the emulated OP for RP tests and upstream's server-side conditions as functions                                            |
 | `src/runner/`, `bin/cli.ts`                  | the plans and the CI projects (`projects.ts`), and the `openid-conformance` CLI (commander)                                |
+| `ui/`                                        | the web UI (Next.js, shadcn/ui): plans, runs with live progress, module logs; see [`ui/README.md`](ui/README.md)           |
 | `scripts/`                                   | `sync-upstream.ts`, `upstream-lock-symbols.ts`, `log-fingerprint.ts` (log fidelity diff)                                   |
 | `targets/`                                   | implementations under test used by this repo's CI: panva's `oidc-provider` and an `openid-client` RP                       |
 | `configs/`                                   | the CI test configurations and expected-failure lists                                                                      |

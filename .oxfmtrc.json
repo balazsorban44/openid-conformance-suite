@@ -5,5 +5,13 @@
 	"semi": true,
 	"singleQuote": false,
 	"trailingComma": "all",
-	"ignorePatterns": ["node_modules", "test-results", "playwright-report", "conformance-report", ".upstream"]
+	"ignorePatterns": [
+		"node_modules",
+		"test-results",
+		"playwright-report",
+		"conformance-report",
+		".upstream",
+		".next",
+		"next-env.d.ts"
+	]
 }

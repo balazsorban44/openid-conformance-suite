@@ -8,3 +8,8 @@ conformance-report/
 
 # agent worktrees
 .claude/worktrees/
+
+# ui (Next.js)
+.next/
+next-env.d.ts
+*.tsbuildinfo

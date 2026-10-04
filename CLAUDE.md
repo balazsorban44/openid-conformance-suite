@@ -21,7 +21,8 @@ config, dynamic client registration, RP-initiated/back-channel/front-channel log
   changed upstream.
 - **Least dependencies.** Runtime: `@playwright/test`, `jose`, `commander`. Dev: `typescript`, `oxlint`, `oxfmt`,
   `vitest`, `msw`, the CI targets (`oidc-provider`, `openid-client`). Prefer web and node APIs (`Response`, `URL`,
-  `node:http`, `crypto`).
+  `node:http`, `crypto`). The `ui/` workspace package has its own (Next.js, React, Radix via shadcn/ui, Tailwind,
+  `lucide-react`, `sonner`, `geist`) and the suite never imports it.
 - **Native TS.** Node >= 24 runs the sources directly; no build step. No enums/namespaces/decorators/parameter
   properties (`erasableSyntaxOnly`). Imports carry `.ts` extensions.
 
@@ -37,8 +38,10 @@ config, dynamic client registration, RP-initiated/back-channel/front-channel log
   an RP (upstream server-side conditions).
 - `src/runner/projects.ts` - `plans` (plan -> title, spec, modules, variants) and `projects` (the CI matrix);
   `src/runner/list.ts` - `openid-conformance list`.
-- `bin/cli.ts` - CLI (`list`, `run`, `ci`, `projects`); `action.yml` - composite GitHub Action;
+- `bin/cli.ts` - CLI (`list`, `run`, `ci`, `projects`, `ui`); `action.yml` - composite GitHub Action;
   `playwright.config.ts` - selects the plan's spec from the `CONFORMANCE_*` environment.
+- `ui/` - the web UI, a workspace package (Next.js App Router, shadcn/ui, Tailwind): `ui/lib/` reads the report
+  files and spawns runs of `bin/cli.ts`; see `ui/README.md`. `pnpm ui` starts it.
 - `scripts/` - `upstream-lock-symbols.ts`, `sync-upstream.ts`, `log-fingerprint.ts` (log fidelity diff).
 - `targets/` - implementations under test for CI (panva `oidc-provider` OP, `openid-client` RP).
 - `configs/` - CI test configurations, expected-failures/skips lists, the bundled TLS certificate.
