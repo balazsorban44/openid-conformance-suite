@@ -1,4 +1,5 @@
 import { rejectCrossSite } from "@/lib/http.ts";
+import { refuseWhenHosted } from "@/lib/mode.ts";
 import { activeRunId, listRuns, RunError, startRun } from "@/lib/runs.ts";
 import type { RunRequest } from "@/lib/types.ts";
 
@@ -7,9 +8,12 @@ export async function GET(): Promise<Response> {
 	return Response.json({ active: activeRunId(), runs: await listRuns() });
 }
 
-/** Starts a run: a `RunRequest` (a CI project, or a plan + config + variant); 409 while another run is going */
+/**
+ * Starts a run: a `RunRequest` (a CI project, or a plan + config + variant); 409 while another run is going; 405 when
+ * the UI is hosted (read-only)
+ */
 export async function POST(request: Request): Promise<Response> {
-	const rejected = rejectCrossSite(request, { json: true });
+	const rejected = refuseWhenHosted() ?? rejectCrossSite(request, { json: true });
 	if (rejected) {
 		return rejected;
 	}

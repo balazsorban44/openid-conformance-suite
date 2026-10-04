@@ -27,8 +27,10 @@ import {
 } from "@/components/ui/select.tsx";
 import { Switch } from "@/components/ui/switch.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
-import { globMatch, parseVariant } from "@/lib/format.ts";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip.tsx";
+import { globMatch, HOSTED_RUN_MESSAGE, parseVariant } from "@/lib/format.ts";
 import type { ConformanceProject, PlanInfo, RunRequest } from "@/lib/types.ts";
+import { cn } from "@/lib/utils.ts";
 
 export interface RunCatalog {
 	projects: (ConformanceProject & { kind: "OP" | "RP" })[];
@@ -40,9 +42,15 @@ export type RunPrefill =
 	| { kind: "project"; project?: string; module?: string }
 	| { kind: "plan"; plan?: string; config?: string; module?: string };
 
-const RunDialogContext = createContext<{ open: (prefill?: RunPrefill) => void } | null>(null);
+interface RunDialogContextValue {
+	open: (prefill?: RunPrefill) => void;
+	/** hosted UI: the run controls are shown but disabled */
+	readOnly: boolean;
+}
 
-export function useRunDialog(): { open: (prefill?: RunPrefill) => void } {
+const RunDialogContext = createContext<RunDialogContextValue | null>(null);
+
+export function useRunDialog(): RunDialogContextValue {
 	const ctx = useContext(RunDialogContext);
 	if (!ctx) {
 		throw new Error("useRunDialog() outside <RunDialogProvider>");
@@ -50,8 +58,16 @@ export function useRunDialog(): { open: (prefill?: RunPrefill) => void } {
 	return ctx;
 }
 
-/** Holds the "new run" dialog; `n` opens it from anywhere (outside text fields) */
-export function RunDialogProvider({ catalog, children }: { catalog: RunCatalog; children: React.ReactNode }) {
+/** Holds the "new run" dialog; `n` opens it from anywhere (outside text fields); never in a read-only (hosted) UI */
+export function RunDialogProvider({
+	catalog,
+	readOnly = false,
+	children,
+}: {
+	catalog: RunCatalog;
+	readOnly?: boolean;
+	children: React.ReactNode;
+}) {
 	const [open, setOpen] = useState(false);
 	const [prefill, setPrefill] = useState<RunPrefill>({ kind: "project" });
 	const [key, setKey] = useState(0);
@@ -62,10 +78,14 @@ export function RunDialogProvider({ catalog, children }: { catalog: RunCatalog; 
 				setKey((k) => k + 1);
 				setOpen(true);
 			},
+			readOnly,
 		}),
-		[],
+		[readOnly],
 	);
 	useEffect(() => {
+		if (readOnly) {
+			return;
+		}
 		const onKey = (e: KeyboardEvent) => {
 			const t = e.target as HTMLElement | null;
 			if (
@@ -81,15 +101,17 @@ export function RunDialogProvider({ catalog, children }: { catalog: RunCatalog; 
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [value]);
+	}, [value, readOnly]);
 	return (
 		<RunDialogContext.Provider value={value}>
 			{children}
-			<Dialog open={open} onOpenChange={setOpen}>
-				<DialogContent className="sm:max-w-xl">
-					<RunForm key={key} catalog={catalog} prefill={prefill} onStarted={() => setOpen(false)} />
-				</DialogContent>
-			</Dialog>
+			{!readOnly && (
+				<Dialog open={open} onOpenChange={setOpen}>
+					<DialogContent className="sm:max-w-xl">
+						<RunForm key={key} catalog={catalog} prefill={prefill} onStarted={() => setOpen(false)} />
+					</DialogContent>
+				</Dialog>
+			)}
 		</RunDialogContext.Provider>
 	);
 }
@@ -99,14 +121,30 @@ export function NewRunButton({
 	children,
 	...props
 }: { prefill?: RunPrefill; children?: React.ReactNode } & Omit<React.ComponentProps<typeof Button>, "onClick">) {
-	const { open } = useRunDialog();
+	const { open, readOnly } = useRunDialog();
+	const content = children ?? (
+		<>
+			<Play /> New run
+		</>
+	);
+	if (readOnly) {
+		// a disabled button gets no pointer events: the tooltip hangs on a focusable wrapper
+		return (
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<span tabIndex={0} className="inline-flex cursor-not-allowed rounded-md" aria-label={HOSTED_RUN_MESSAGE}>
+						<Button {...props} disabled tabIndex={-1} className={cn("pointer-events-none", props.className)}>
+							{content}
+						</Button>
+					</span>
+				</TooltipTrigger>
+				<TooltipContent>{HOSTED_RUN_MESSAGE}</TooltipContent>
+			</Tooltip>
+		);
+	}
 	return (
 		<Button {...props} onClick={() => open(prefill)}>
-			{children ?? (
-				<>
-					<Play /> New run
-				</>
-			)}
+			{content}
 		</Button>
 	);
 }

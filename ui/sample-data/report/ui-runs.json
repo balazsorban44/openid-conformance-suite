@@ -1,0 +1,375 @@
+[
+	{
+		"id": "20261004085210-op-config",
+		"label": "op-config",
+		"request": {
+			"kind": "project",
+			"project": "op-config",
+			"options": {
+				"verbose": false,
+				"video": false,
+				"trace": false
+			}
+		},
+		"plan": "oidcc-config-certification-test-plan",
+		"variant": "",
+		"command": "node bin/cli.ts ci --project op-config",
+		"outputDir": "op-config/sample",
+		"status": "passed",
+		"startedAt": 1791103930338,
+		"endedAt": 1791103930385,
+		"exitCode": 0,
+		"modules": [
+			{
+				"title": "oidcc-discovery-endpoint-verification: the discovery document is served as JSON and has the metadata the specifications require",
+				"name": "oidcc-discovery-endpoint-verification",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 47,
+				"testId": "d3671059028e"
+			}
+		]
+	},
+	{
+		"id": "20261004084842-op-dynamic",
+		"label": "op-dynamic",
+		"request": {
+			"kind": "project",
+			"project": "op-dynamic",
+			"options": {
+				"verbose": false,
+				"video": false,
+				"trace": false
+			}
+		},
+		"plan": "oidcc-dynamic-certification-test-plan",
+		"variant": "[response_type=code][client_auth_type=client_secret_basic][response_mode=default]",
+		"command": "node bin/cli.ts ci --project op-dynamic",
+		"outputDir": "op-dynamic/sample",
+		"status": "passed",
+		"startedAt": 1791103722939,
+		"endedAt": 1791103923577,
+		"exitCode": 0,
+		"modules": [
+			{
+				"title": "oidcc-idtoken-rs256: an id_token requested with RS256 is signed with RS256 and names its key",
+				"name": "oidcc-idtoken-rs256",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 13636,
+				"testId": "386242d01b95"
+			},
+			{
+				"title": "oidcc-idtoken-unsigned: an id_token requested with alg none is returned unsigned, or the test is skipped when the OP does not support none",
+				"name": "oidcc-idtoken-unsigned",
+				"state": "done",
+				"outcome": "skipped",
+				"durationMs": 14,
+				"testId": "bd98561f10be"
+			},
+			{
+				"title": "oidcc-userinfo-rs256: the userinfo response is a JWT signed with RS256 when the client registered for it",
+				"name": "oidcc-userinfo-rs256",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 14538,
+				"testId": "0122878888a9"
+			},
+			{
+				"title": "oidcc-ensure-redirect-uri-in-authorization-request: a request without redirect_uri is answered with an error page, not a redirect",
+				"name": "oidcc-ensure-redirect-uri-in-authorization-request",
+				"state": "done",
+				"outcome": "review",
+				"durationMs": 6711,
+				"testId": "bbc0c7a41509"
+			},
+			{
+				"title": "oidcc-redirect-uri-query-OK: a redirect_uri with the registered query component completes the authorization",
+				"name": "oidcc-redirect-uri-query-OK",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 7860,
+				"testId": "ad8a18316833"
+			},
+			{
+				"title": "oidcc-redirect-uri-query-mismatch: a redirect_uri whose query differs from the registered one is rejected with an error page",
+				"name": "oidcc-redirect-uri-query-mismatch",
+				"state": "done",
+				"outcome": "review",
+				"durationMs": 6458,
+				"testId": "d514b1735679"
+			},
+			{
+				"title": "oidcc-redirect-uri-query-added: a redirect_uri with a query when none is registered is rejected with an error page",
+				"name": "oidcc-redirect-uri-query-added",
+				"state": "done",
+				"outcome": "review",
+				"durationMs": 10364,
+				"testId": "4ff44e957cfd"
+			},
+			{
+				"title": "oidcc-redirect-uri-regfrag: a registration with a redirect_uri containing a fragment is rejected",
+				"name": "oidcc-redirect-uri-regfrag",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 28,
+				"testId": "81aa00007d8b"
+			},
+			{
+				"title": "oidcc-discovery-endpoint-verification: the discovery document is served as JSON and has the metadata the specifications require",
+				"name": "oidcc-discovery-endpoint-verification",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 16,
+				"testId": "0f2cf96ae84f"
+			},
+			{
+				"title": "oidcc-server: the code flow returns a valid code, tokens and id_token, and the access token works at userinfo",
+				"name": "oidcc-server",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 5021,
+				"testId": "a293cd540591"
+			},
+			{
+				"title": "oidcc-registration-logo-uri: a client registered with a logo_uri gets a login page showing the logo",
+				"name": "oidcc-registration-logo-uri",
+				"state": "done",
+				"outcome": "review",
+				"durationMs": 8107,
+				"testId": "9cb5ed0bdd29"
+			},
+			{
+				"title": "oidcc-registration-policy-uri: a client registered with a policy_uri gets a login page linking to the policy",
+				"name": "oidcc-registration-policy-uri",
+				"state": "done",
+				"outcome": "review",
+				"durationMs": 5433,
+				"testId": "09fac28fc952"
+			},
+			{
+				"title": "oidcc-registration-tos-uri: a client registered with a tos_uri gets a login page linking to the terms of service",
+				"name": "oidcc-registration-tos-uri",
+				"state": "done",
+				"outcome": "review",
+				"durationMs": 10163,
+				"testId": "8148cb31167c"
+			},
+			{
+				"title": "oidcc-registration-jwks-uri: a client registered with a jwks_uri authenticates with keys the OP fetches from it",
+				"name": "oidcc-registration-jwks-uri",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 15351,
+				"testId": "0e6b1c255374"
+			},
+			{
+				"title": "oidcc-registration-sector-uri: a registration with a sector_identifier_uri listing the redirect_uri is accepted",
+				"name": "oidcc-registration-sector-uri",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 110,
+				"testId": "fe433590582a"
+			},
+			{
+				"title": "oidcc-registration-sector-bad: a registration whose sector_identifier_uri does not list the redirect_uri is rejected",
+				"name": "oidcc-registration-sector-bad",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 112,
+				"testId": "4d0d26acaa20"
+			},
+			{
+				"title": "oidcc-server-rotate-keys: the OP's jwks_uri has a new signing key after a rotation and still has the old one",
+				"name": "oidcc-server-rotate-keys",
+				"state": "done",
+				"outcome": "expected-failure",
+				"durationMs": 32,
+				"testId": "8b864ef5aaee"
+			},
+			{
+				"title": "oidcc-refresh-token-rp-key-rotation: a refresh token is accepted with a client assertion signed by a rotated RP key",
+				"name": "oidcc-refresh-token-rp-key-rotation",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 66806,
+				"testId": "8b00dd2749d4"
+			},
+			{
+				"title": "oidcc-request-uri-unsigned: an authorization request passing an unsigned request object by reference completes",
+				"name": "oidcc-request-uri-unsigned",
+				"state": "done",
+				"outcome": "skipped",
+				"durationMs": 53,
+				"testId": "a81d3b78d8e7"
+			},
+			{
+				"title": "oidcc-request-uri-signed-rs256: an authorization request passing an RS256 signed request object by reference completes",
+				"name": "oidcc-request-uri-signed-rs256",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 9465,
+				"testId": "903bb31c3db7"
+			},
+			{
+				"title": "oidcc-ensure-request-object-with-redirect-uri: the redirect_uri in the request object takes precedence over an invalid redirect_uri parameter",
+				"name": "oidcc-ensure-request-object-with-redirect-uri",
+				"state": "done",
+				"outcome": "skipped",
+				"durationMs": 101,
+				"testId": "050e1fcca2cf"
+			},
+			{
+				"title": "oidcc-refresh-token: refresh tokens are issued to and usable by their client only, and refresh the tokens",
+				"name": "oidcc-refresh-token",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 12316,
+				"testId": "c02b83e6ade8"
+			},
+			{
+				"title": "oidcc-ensure-client-assertion-with-iss-aud-succeeds: a client assertion with the issuer as audience is accepted at the token endpoint, or rejected with invalid_client",
+				"name": "oidcc-ensure-client-assertion-with-iss-aud-succeeds",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 7199,
+				"testId": "539a9bca88ba"
+			}
+		]
+	},
+	{
+		"id": "20261004084837-rp-basic",
+		"label": "rp-basic",
+		"request": {
+			"kind": "project",
+			"project": "rp-basic",
+			"options": {
+				"verbose": false,
+				"video": false,
+				"trace": false
+			}
+		},
+		"plan": "oidcc-client-basic-certification-test-plan",
+		"variant": "[client_registration=dynamic_client][request_type=plain_http_request]",
+		"command": "node bin/cli.ts ci --project rp-basic",
+		"outputDir": "rp-basic/sample",
+		"status": "passed",
+		"startedAt": 1791103717706,
+		"endedAt": 1791103720649,
+		"exitCode": 0,
+		"modules": [
+			{
+				"title": "oidcc-client-test: the RP logs in with the code flow and calls the userinfo endpoint",
+				"name": "oidcc-client-test",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 991,
+				"testId": "89735a8dd0d3"
+			},
+			{
+				"title": "oidcc-client-test-invalid-iss: the RP rejects an id_token whose iss is not the issuer",
+				"name": "oidcc-client-test-invalid-iss",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 100,
+				"testId": "77160bf8355d"
+			},
+			{
+				"title": "oidcc-client-test-missing-sub: the RP rejects an id_token without sub",
+				"name": "oidcc-client-test-missing-sub",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 91,
+				"testId": "aae60b424ec5"
+			},
+			{
+				"title": "oidcc-client-test-invalid-aud: the RP rejects an id_token whose aud is not its client_id",
+				"name": "oidcc-client-test-invalid-aud",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 93,
+				"testId": "82a361f1cf1a"
+			},
+			{
+				"title": "oidcc-client-test-missing-iat: the RP rejects an id_token without iat",
+				"name": "oidcc-client-test-missing-iat",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 96,
+				"testId": "02a09284d79a"
+			},
+			{
+				"title": "oidcc-client-test-kid-absent-single-jwks: the RP verifies an id_token without kid with the only matching key",
+				"name": "oidcc-client-test-kid-absent-single-jwks",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 99,
+				"testId": "689d2e26a44f"
+			},
+			{
+				"title": "oidcc-client-test-kid-absent-multiple-jwks: the RP rejects an id_token without kid or finds the key among several",
+				"name": "oidcc-client-test-kid-absent-multiple-jwks",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 170,
+				"testId": "4d5a2c041dbd"
+			},
+			{
+				"title": "oidcc-client-test-idtoken-sig-rs256: the RP accepts an id_token signed with RS256",
+				"name": "oidcc-client-test-idtoken-sig-rs256",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 120,
+				"testId": "20e15a8daf99"
+			},
+			{
+				"title": "oidcc-client-test-idtoken-sig-none: the RP accepts an unsigned id_token from the token endpoint, or stops",
+				"name": "oidcc-client-test-idtoken-sig-none",
+				"state": "done",
+				"outcome": "skipped",
+				"durationMs": 118,
+				"testId": "aa2e7e6e0dd7"
+			},
+			{
+				"title": "oidcc-client-test-invalid-sig-rs256: the RP rejects an id_token with an invalid RS256 signature",
+				"name": "oidcc-client-test-invalid-sig-rs256",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 83,
+				"testId": "06d18d153411"
+			},
+			{
+				"title": "oidcc-client-test-userinfo-invalid-sub: the RP gets a userinfo response whose sub is not the id_token's (it must reject it)",
+				"name": "oidcc-client-test-userinfo-invalid-sub",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 95,
+				"testId": "cef7f43dc553"
+			},
+			{
+				"title": "oidcc-client-test-nonce-invalid: the RP rejects an id_token whose nonce is not the one it sent",
+				"name": "oidcc-client-test-nonce-invalid",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 117,
+				"testId": "0279c702309a"
+			},
+			{
+				"title": "oidcc-client-test-scope-userinfo-claims: the RP requests claims with the profile, email, phone or address scope",
+				"name": "oidcc-client-test-scope-userinfo-claims",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 95,
+				"testId": "17a86a95aec6"
+			},
+			{
+				"title": "oidcc-client-test-client-secret-basic: the RP authenticates at the token endpoint with client_secret_basic",
+				"name": "oidcc-client-test-client-secret-basic",
+				"state": "done",
+				"outcome": "passed",
+				"durationMs": 80,
+				"testId": "d6be1b28b3de"
+			}
+		]
+	}
+]

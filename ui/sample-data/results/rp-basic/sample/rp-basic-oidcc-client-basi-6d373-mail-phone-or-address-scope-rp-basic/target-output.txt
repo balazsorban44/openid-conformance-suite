@@ -1,0 +1,94 @@
+openid-client RP listening on http://localhost:35163 (redirect_uri http://localhost:35163/cb, initiate_login_uri https://localhost:39301/initiate-login)
+ready
+[rp] oidcc-client-test: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test: discovered https://localhost:44523/test/a/openid-client-rp/ and registered client client_JhvAvRhOapOtzgC95985;}$;< (client_secret_basic)
+[rp] oidcc-client-test: authorization request https://localhost:44523/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=cqTxvYQYtdN6G0vBiUrdaXTwXSvcDN-T30C0lu4vPfs&nonce=x2pxzgesusqiSiMdgHHsmnULodv9alkORx95a928R8s&code_challenge=qE3OxuKv2_2yQAtTOsvvk1D9oUbU-YZ4Gcp8tAxZ75o&co...
+[rp] oidcc-client-test: authorization response received (state, code)
+[rp] oidcc-client-test: token endpoint response validated (token_type bearer)
+[rp] oidcc-client-test: userinfo response validated
+[rp] oidcc-client-test: OK
+[rp] oidcc-client-test-invalid-iss: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-invalid-iss: discovered https://localhost:42839/test/a/openid-client-rp/ and registered client client_IHiFCyWPlVPHVBA25781}+[>_ (client_secret_basic)
+[rp] oidcc-client-test-invalid-iss: authorization request https://localhost:42839/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=m7V3pakn5mRd8fJa7Z4bZveXwsHOCi6YMcGWAjgxccQ&nonce=8e7-SNLNwBsiPp9HsTilNo4s2--ESK215l6wW15Mojs&code_challenge=PPJQHlgHAXSMol102Ziu27FRfOT4SNbyDWd4li6QiKQ&co...
+[rp] oidcc-client-test-invalid-iss: authorization response received (state, code)
+[rp] oidcc-client-test-invalid-iss: authorization response rejected: ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-invalid-iss: rejected as expected: ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-invalid-iss: OK - ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-missing-sub: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-missing-sub: discovered https://localhost:38651/test/a/openid-client-rp/ and registered client client_GctfIcaehHaOUbC80303#`_-$ (client_secret_basic)
+[rp] oidcc-client-test-missing-sub: authorization request https://localhost:38651/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=CTc42xo2ejoi2xji0dsmpktW8Df48aKHA6-v_zQ8J-Q&nonce=DA3FKufo2ux6_bF1x3ssDY_rBDjwCaq_I0nf5smxG78&code_challenge=Gf5e0-SM_BbyEUKKmVlxBCspiD67DBM1c9O6oVnXRp8&co...
+[rp] oidcc-client-test-missing-sub: authorization response received (state, code)
+[rp] oidcc-client-test-missing-sub: authorization response rejected: ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-missing-sub: rejected as expected: ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-missing-sub: OK - ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-invalid-aud: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-invalid-aud: discovered https://localhost:43399/test/a/openid-client-rp/ and registered client client_bjKtBfqvCDzIvdF98671#$\-< (client_secret_basic)
+[rp] oidcc-client-test-invalid-aud: authorization request https://localhost:43399/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=tRWS4GLggj_KjOurWTNc6zHwGhYhsSAFCOglXxUWgf8&nonce=_pfKZ9gHRwT0QvmE5QSRMdccJJaAGp-gano7S1bXRM8&code_challenge=cL4VysTkDXkKLFQmD1aZ0Vgz_lwU6F5EgNjFFxCIqtg&co...
+[rp] oidcc-client-test-invalid-aud: authorization response received (state, code)
+[rp] oidcc-client-test-invalid-aud: authorization response rejected: ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-invalid-aud: rejected as expected: ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-invalid-aud: OK - ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-missing-iat: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-missing-iat: discovered https://localhost:34075/test/a/openid-client-rp/ and registered client client_ccOcFylOJLBhUtW87809|),(! (client_secret_basic)
+[rp] oidcc-client-test-missing-iat: authorization request https://localhost:34075/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=QJ3kxvntmV57rAtskE4O7VSV-ORG3cRLo9I2kouWa2M&nonce=tF08E4TpKTYaFmazoDC_bmGL4LlC4yo9y1AOwQQU2YA&code_challenge=nVEc3nqcO3K8waBGbKnLtjt3Jcn71gGxxWeHtGruSPA&co...
+[rp] oidcc-client-test-missing-iat: authorization response received (state, code)
+[rp] oidcc-client-test-missing-iat: authorization response rejected: ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-missing-iat: rejected as expected: ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-missing-iat: OK - ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-kid-absent-single-jwks: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-kid-absent-single-jwks: discovered https://localhost:45537/test/a/openid-client-rp/ and registered client client_DdQXSuookayhCXc08021 @,:? (client_secret_basic)
+[rp] oidcc-client-test-kid-absent-single-jwks: authorization request https://localhost:45537/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=7z9TEBlsWk_7R_VRtcraq8GsSfZ6sbA8_FSNlAJExoY&nonce=B8cOtx5grLS_9cW6aTQKm02j8CyQSJmGpV1V4ER7bGw&code_challenge=N3SXNh4-6-PO2MjsiUcNlatZrHI4VjV_vQJ4u1NwnfQ&co...
+[rp] oidcc-client-test-kid-absent-single-jwks: authorization response received (state, code)
+[rp] oidcc-client-test-kid-absent-single-jwks: token endpoint response validated (token_type bearer)
+[rp] oidcc-client-test-kid-absent-single-jwks: userinfo response validated
+[rp] oidcc-client-test-kid-absent-single-jwks: OK
+[rp] oidcc-client-test-kid-absent-multiple-jwks: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-kid-absent-multiple-jwks: discovered https://localhost:43121/test/a/openid-client-rp/ and registered client client_zezGccRKfOaKDtQ57103 !!(~ (client_secret_basic)
+[rp] oidcc-client-test-kid-absent-multiple-jwks: authorization request https://localhost:43121/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=GB8jKoLRSjfFKKrZSc6q16fK5aCqxEoVaccRezrKS3E&nonce=H72WFP_PjTn18gFaX6_LbEZmFZH6q7FkKHMUA91klV0&code_challenge=cP6YNk2ZzcD0Lyh4Kg6L34M2gqQzKOshcg3Qi_NvJ9M&co...
+[rp] oidcc-client-test-kid-absent-multiple-jwks: authorization response received (state, code)
+[rp] oidcc-client-test-kid-absent-multiple-jwks: authorization response rejected: ClientError: error when selecting a JWT verification key, multiple applicable keys found, a "kid" JWT Header Parameter is required (OAUTH_KEY_SELECTION_FAILED)
+[rp] oidcc-client-test-kid-absent-multiple-jwks: rejected as expected: ClientError: error when selecting a JWT verification key, multiple applicable keys found, a "kid" JWT Header Parameter is required (OAUTH_KEY_SELECTION_FAILED)
+[rp] oidcc-client-test-kid-absent-multiple-jwks: OK - ClientError: error when selecting a JWT verification key, multiple applicable keys found, a "kid" JWT Header Parameter is required (OAUTH_KEY_SELECTION_FAILED)
+[rp] oidcc-client-test-idtoken-sig-rs256: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-idtoken-sig-rs256: discovered https://localhost:46043/test/a/openid-client-rp/ and registered client client_jaVOZqglAAUARUE11112?~($| (client_secret_basic)
+[rp] oidcc-client-test-idtoken-sig-rs256: authorization request https://localhost:46043/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=CnmdU5Pnf4Y_y2mwqYJ4uIej9rbK79yHWGsYGm0nzWo&nonce=a2zDPSiU5jEUvv7ETbcefpcoHfVf3E9pnjB_fk8B2sk&code_challenge=I4a5ODwM539WGxXYmxw927MQavoxGgF5BHARFYPWZgQ&co...
+[rp] oidcc-client-test-idtoken-sig-rs256: authorization response received (state, code)
+[rp] oidcc-client-test-idtoken-sig-rs256: token endpoint response validated (token_type bearer)
+[rp] oidcc-client-test-idtoken-sig-rs256: userinfo response validated
+[rp] oidcc-client-test-idtoken-sig-rs256: OK
+[rp] oidcc-client-test-idtoken-sig-none: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-idtoken-sig-none: discovered https://localhost:43729/test/a/openid-client-rp/ and registered client client_VhSvDxECxLRUiyi80383<^>#~ (client_secret_basic)
+[rp] oidcc-client-test-idtoken-sig-none: authorization request https://localhost:43729/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=bcNcpOn-jD_9MYdxLmXCVFohuzmOfGBgqxhxF-Pe6Ts&nonce=CozRBYSm0ugYJu--cNcixQxfLmZ7n7dGQB7qsqrSrgU&code_challenge=0rNH9hywYN57QOs0atH3ubIdIlPfrtby_8mrn5XgMFY&co...
+[rp] oidcc-client-test-idtoken-sig-none: authorization response received (state, code)
+[rp] oidcc-client-test-idtoken-sig-none: authorization response rejected: ClientError: unsupported operation (OAUTH_UNSUPPORTED_OPERATION)
+[rp] oidcc-client-test-idtoken-sig-none: failed: ClientError: unsupported operation (OAUTH_UNSUPPORTED_OPERATION)
+[rp] oidcc-client-test-idtoken-sig-none: NOT OK - ClientError: unsupported operation (OAUTH_UNSUPPORTED_OPERATION)
+[rp] oidcc-client-test-invalid-sig-rs256: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-invalid-sig-rs256: discovered https://localhost:46045/test/a/openid-client-rp/ and registered client client_xQobklyLGaahPdQ42437-^.%{ (client_secret_basic)
+[rp] oidcc-client-test-invalid-sig-rs256: authorization request https://localhost:46045/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=DhP2-Mtw2bUWb0ett4EC6qPm-OZ0hQ8IoqN58GE-2EQ&nonce=HSVmwOBx7lzaMgtyoR8fpgzjDLwXzcP2zc3quRrTkTc&code_challenge=TcSUIic8qktiok2UyYUHn-ILjdDb_UOBOgJWdb9S2TU&co...
+[rp] oidcc-client-test-invalid-sig-rs256: authorization response received (state, code)
+[rp] oidcc-client-test-invalid-sig-rs256: authorization response rejected: ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-invalid-sig-rs256: rejected as expected: ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-invalid-sig-rs256: OK - ClientError: invalid response encountered (OAUTH_INVALID_RESPONSE)
+[rp] oidcc-client-test-userinfo-invalid-sub: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-userinfo-invalid-sub: discovered https://localhost:44497/test/a/openid-client-rp/ and registered client client_CdQQSQeoiblBIPl02176#|:.| (client_secret_basic)
+[rp] oidcc-client-test-userinfo-invalid-sub: authorization request https://localhost:44497/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=_LrHoqjoQpIOs_j2ag2Xfl5iaL5UGCfhOu0rwqB1-4M&nonce=QpLv-7OkTwPeA21PySbPDsdxe4GYql0DhtdysahEXcY&code_challenge=vw38pJYyISONBMDcW25PE87xUy5QroMqYeYs7Fvz7WI&co...
+[rp] oidcc-client-test-userinfo-invalid-sub: authorization response received (state, code)
+[rp] oidcc-client-test-userinfo-invalid-sub: token endpoint response validated (token_type bearer)
+[rp] oidcc-client-test-userinfo-invalid-sub: authorization response rejected: ClientError: unexpected JSON attribute value encountered (OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED)
+[rp] oidcc-client-test-userinfo-invalid-sub: rejected as expected: ClientError: unexpected JSON attribute value encountered (OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED)
+[rp] oidcc-client-test-userinfo-invalid-sub: OK - ClientError: unexpected JSON attribute value encountered (OAUTH_JSON_ATTRIBUTE_COMPARISON_FAILED)
+[rp] oidcc-client-test-nonce-invalid: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-nonce-invalid: discovered https://localhost:35635/test/a/openid-client-rp/ and registered client client_aAeGPqcxLDPaPdU66129=$)>| (client_secret_basic)
+[rp] oidcc-client-test-nonce-invalid: authorization request https://localhost:35635/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid&response_type=code&state=sr8sl5aoW4y4zzWXRGARAB--FAitCjfeaXuZywm46bc&nonce=aWGbT7nDG5OvIbseQ23K4VdvUxTA5ymoFTOhBkYr5nw&code_challenge=QncJxPDAVIyLbJbpmkIUFQzQoJ9h7WU3l3-Oayc5tKc&co...
+[rp] oidcc-client-test-nonce-invalid: authorization response received (state, code)
+[rp] oidcc-client-test-nonce-invalid: authorization response rejected: ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-nonce-invalid: rejected as expected: ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-nonce-invalid: OK - ClientError: unexpected JWT claim value encountered (OAUTH_JWT_CLAIM_COMPARISON_FAILED)
+[rp] oidcc-client-test-scope-userinfo-claims: start (variant {"client_registration":"dynamic_client","request_type":"plain_http_request","response_type":"code","response_mode":"default","client_auth_type":"client_secret_basic"}, metadata defaults {})
+[rp] oidcc-client-test-scope-userinfo-claims: discovered https://localhost:33341/test/a/openid-client-rp/ and registered client client_bGxyjSKDXwdOZQF75721^}_*/ (client_secret_basic)
+[rp] oidcc-client-test-scope-userinfo-claims: authorization request https://localhost:33341/test/a/openid-client-rp/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A35163%2Fcb&scope=openid+email&response_type=code&state=ksCgmsTflHar3tn06oSoVxTunIXebrvK5t8_VvAtBJo&nonce=139kYoM0K2pcDnxtO5ZB3iCr1MQMH0epyUZ7Zmmdgr8&code_challenge=UibHjOhxknjyDg46U6dcx1jAOmWQE04nTNJd_4Nu...
+[rp] oidcc-client-test-scope-userinfo-claims: authorization response received (state, code)
+[rp] oidcc-client-test-scope-userinfo-claims: token endpoint response validated (token_type bearer)
+[rp] oidcc-client-test-scope-userinfo-claims: userinfo response validated
+[rp] oidcc-client-test-scope-userinfo-claims: OK

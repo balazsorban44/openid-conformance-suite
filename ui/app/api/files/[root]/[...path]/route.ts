@@ -1,6 +1,14 @@
 import { readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
+import { hosted } from "@/lib/mode.ts";
 import { inside, reportDir, resultsDir } from "@/lib/paths.ts";
+
+async function isFile(path: string): Promise<boolean> {
+	return stat(path).then(
+		(s) => s.isFile(),
+		() => false,
+	);
+}
 
 const TYPES: Record<string, string> = {
 	".json": "application/json; charset=utf-8",
@@ -32,11 +40,19 @@ export async function GET(_request: Request, { params }: Context): Promise<Respo
 		return new Response("not found", { status: 404 });
 	}
 	try {
-		if (!(await stat(file)).isFile()) {
+		// the bundled results keep large text files gzipped next to their name (log.html.gz): served as they are
+		const gzipped = hosted && !(await isFile(file)) && (await isFile(`${file}.gz`));
+		if (!gzipped && !(await isFile(file))) {
 			return new Response("not found", { status: 404 });
 		}
-		const body = await readFile(file);
-		const headers: Record<string, string> = { "content-type": type, "cache-control": "no-cache" };
+		const body = await readFile(gzipped ? `${file}.gz` : file);
+		const headers: Record<string, string> = {
+			"content-type": type,
+			"cache-control": hosted ? "public, max-age=300" : "no-cache",
+		};
+		if (gzipped) {
+			headers["content-encoding"] = "gzip";
+		}
 		if (type === "application/zip") {
 			headers["content-disposition"] = `attachment; filename="${path.at(-1)}"`;
 		}

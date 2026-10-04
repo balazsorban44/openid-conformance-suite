@@ -1,6 +1,9 @@
 /** Client-safe helpers: outcomes, variants, durations and times */
 import type { ModuleReport, ModuleStatus, Outcome, StripModule } from "./types.ts";
 
+/** What a refused run says in the hosted (read-only) UI: the run buttons' tooltip and the API's 405 (lib/mode.ts) */
+export const HOSTED_RUN_MESSAGE = "runs need a local checkout: pnpm ui";
+
 /** The UI outcome of a module report: an expected failure is fine, anything the analysis did not expect is not */
 export function outcomeOf(r: Pick<ModuleReport, "result" | "ok" | "status">): Outcome {
 	if (!r.ok) {

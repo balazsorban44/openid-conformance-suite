@@ -39,9 +39,18 @@ const STATE_DOT: Record<SidebarProject["state"], string> = {
 	none: "bg-muted-foreground/25",
 };
 
-export function AppSidebar({ projects, reportDir }: { projects: SidebarProject[]; reportDir: string }) {
+export function AppSidebar({
+	projects,
+	reportDir,
+	hosted = false,
+}: {
+	projects: SidebarProject[];
+	reportDir: string;
+	/** the hosted UI is read-only: no run to poll for, and the directory is the bundled sample data */
+	hosted?: boolean;
+}) {
 	const pathname = usePathname();
-	const active = useActiveRun();
+	const active = useActiveRun(!hosted);
 	const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 	return (
 		<Sidebar collapsible="icon">
@@ -127,7 +136,7 @@ export function AppSidebar({ projects, reportDir }: { projects: SidebarProject[]
 					</Link>
 				)}
 				<p className="text-muted-foreground truncate px-2 font-mono text-[10px]" title={reportDir}>
-					{reportDir}
+					{hosted ? "bundled sample results" : reportDir}
 				</p>
 			</SidebarFooter>
 			<SidebarRail />
@@ -141,12 +150,15 @@ interface ActiveRun {
 	project?: string;
 }
 
-/** The run in progress (polled); refreshes the server-rendered pages when it ends */
-function useActiveRun(): ActiveRun | null {
+/** The run in progress (polled, unless `enabled` is false); refreshes the server-rendered pages when it ends */
+function useActiveRun(enabled: boolean): ActiveRun | null {
 	const router = useRouter();
 	const [active, setActive] = useState<ActiveRun | null>(null);
 	const last = useRef<string | null>(null);
 	useEffect(() => {
+		if (!enabled) {
+			return;
+		}
 		let stopped = false;
 		const poll = async () => {
 			if (document.visibilityState !== "visible") {
@@ -177,6 +189,6 @@ function useActiveRun(): ActiveRun | null {
 			stopped = true;
 			clearInterval(timer);
 		};
-	}, [router]);
+	}, [router, enabled]);
 	return active;
 }

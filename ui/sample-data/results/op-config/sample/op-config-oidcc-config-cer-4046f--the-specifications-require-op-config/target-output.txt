@@ -1,0 +1,4 @@
+oidc-provider WARNING: a quick start development-only in-memory adapter is used, you MUST change it in order to not lose all stateful provider data upon restart and to be able to share these between processes
+oidc-provider WARNING: a quick start development-only feature devInteractions is enabled, you are expected to disable these interactions and provide your own
+oidc-provider listening, issuer https://localhost:44909, discovery https://localhost:44909/.well-known/openid-configuration
+ready

@@ -1,4 +1,5 @@
 import { rejectCrossSite } from "@/lib/http.ts";
+import { refuseWhenHosted } from "@/lib/mode.ts";
 import { cancelRun, findRun, RunError } from "@/lib/runs.ts";
 
 interface Context {
@@ -13,7 +14,7 @@ export async function GET(_request: Request, { params }: Context): Promise<Respo
 
 /** Cancels the run (stops its process group) */
 export async function DELETE(request: Request, { params }: Context): Promise<Response> {
-	const rejected = rejectCrossSite(request, { json: false });
+	const rejected = refuseWhenHosted() ?? rejectCrossSite(request, { json: false });
 	if (rejected) {
 		return rejected;
 	}

@@ -3,12 +3,14 @@ import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
 import Script from "next/script";
 import { AppSidebar, type SidebarProject } from "@/components/app-sidebar.tsx";
+import { HostedBanner } from "@/components/hosted-banner.tsx";
 import { RunDialogProvider } from "@/components/run-dialog.tsx";
 import { ThemeProvider } from "@/components/theme-toggle.tsx";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar.tsx";
 import { Toaster } from "@/components/ui/sonner.tsx";
 import { TooltipProvider } from "@/components/ui/tooltip.tsx";
 import { listConfigs, planInfos, planKind, projects } from "@/lib/catalog.ts";
+import { hosted } from "@/lib/mode.ts";
 import { displayPath, reportDir } from "@/lib/paths.ts";
 import { projectStatuses } from "@/lib/reports.ts";
 import { THEME_SCRIPT } from "@/lib/theme-script.ts";
@@ -39,10 +41,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 				</Script>
 				<ThemeProvider>
 					<TooltipProvider delayDuration={200}>
-						<RunDialogProvider catalog={catalog}>
+						<RunDialogProvider catalog={catalog} readOnly={hosted}>
 							<SidebarProvider>
-								<AppSidebar projects={sidebarProjects} reportDir={displayPath(reportDir)} />
-								<SidebarInset className="min-w-0">{children}</SidebarInset>
+								<AppSidebar projects={sidebarProjects} reportDir={displayPath(reportDir)} hosted={hosted} />
+								<SidebarInset className="min-w-0">
+									{hosted && <HostedBanner />}
+									{children}
+								</SidebarInset>
 							</SidebarProvider>
 						</RunDialogProvider>
 					</TooltipProvider>

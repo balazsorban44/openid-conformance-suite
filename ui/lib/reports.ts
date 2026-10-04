@@ -14,7 +14,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { planKind, plans, projects } from "./catalog.ts";
 import { isOk, outcomeOf, parseVariant } from "./format.ts";
-import { inside, reportDir, resultsDir } from "./paths.ts";
+import { hosted } from "./mode.ts";
+import { inside, reportDir, resultsDir, sampleDir } from "./paths.ts";
 import type { ConformanceProject, LogEntry, ModuleRecord, ModuleReport, ModuleStatus, ProjectStatus } from "./types.ts";
 
 async function exists(path: string): Promise<boolean> {
@@ -43,15 +44,28 @@ async function subdirectories(dir: string): Promise<string[]> {
 	}
 }
 
+/**
+ * When each bundled module finished (sample-data/manifest.json, written by scripts/sample-data.ts): file times do
+ * not survive a git checkout or a deployment
+ */
+async function bundledTimes(): Promise<Record<string, number>> {
+	if (!hosted) {
+		return {};
+	}
+	return (await readJson<{ finishedAt: Record<string, number> }>(join(sampleDir, "manifest.json")))?.finishedAt ?? {};
+}
+
 /** Every module-report.json under the results directory (test dirs, or test dirs inside a run's directory) */
 async function scanModuleReports(): Promise<ModuleRecord[]> {
 	const records: ModuleRecord[] = [];
+	const times = await bundledTimes();
 	const visit = async (dir: string, depth: number): Promise<void> => {
 		const file = join(dir, "module-report.json");
 		const report = await readJson<ModuleReport>(file);
 		if (report) {
 			const { mtimeMs } = await stat(file);
-			records.push({ report, dir: relative(resultsDir, dir), finishedAt: mtimeMs });
+			const rel = relative(resultsDir, dir);
+			records.push({ report, dir: rel, finishedAt: times[rel] ?? mtimeMs });
 			return;
 		}
 		if (depth < 3) {
@@ -62,10 +76,13 @@ async function scanModuleReports(): Promise<ModuleRecord[]> {
 	return records;
 }
 
+let bundledRecords: Promise<ModuleRecord[]> | undefined;
+
 /** Every module report: the test directories, and the rows of results.json that have none left */
 export async function readModuleRecords(): Promise<ModuleRecord[]> {
 	await connection();
-	const records = await scanModuleReports();
+	// the bundled results do not change while the server runs: scan them once
+	const records = hosted ? [...(await (bundledRecords ??= scanModuleReports()))] : await scanModuleReports();
 	const resultsPath = join(reportDir, "results.json");
 	const known = new Set(records.map((r) => r.report.testId));
 	for (const report of (await readJson<ModuleReport[]>(resultsPath)) ?? []) {
@@ -183,7 +200,8 @@ export async function readModuleFiles(record: ModuleRecord): Promise<ModuleFiles
 			.map((n) => join(record.dir ?? "", n)),
 		video: rel(names.find((n) => n.endsWith(".webm")) ?? "video.webm"),
 		trace: rel("trace.zip"),
-		logHtml: rel("log.html"),
+		// the bundled results keep log.html gzipped (the files route serves it as log.html)
+		logHtml: rel(names.includes("log.html.gz") ? "log.html.gz" : "log.html")?.replace(/\.gz$/, "") ?? null,
 		logJson: rel("log.json"),
 		targetOutput: rel("target-output.txt"),
 	};

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header.tsx";
 import { OUTCOME_DOT, OutcomeBadge } from "@/components/result-badge.tsx";
-import { useRunDialog } from "@/components/run-dialog.tsx";
+import { NewRunButton } from "@/components/run-dialog.tsx";
 import { RunStatusBadge } from "@/components/run-status.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
@@ -21,7 +21,6 @@ const MAX_LINES = 4000;
 /** A run's live view: per-module progress and the console, streamed from /api/runs/<id>/events */
 export function LiveRun({ initial, initialOutput }: { initial: RunInfo; initialOutput: string[] }) {
 	const router = useRouter();
-	const { open } = useRunDialog();
 	const [run, setRun] = useState(initial);
 	const [output, setOutput] = useState(initialOutput);
 	const [cancelling, setCancelling] = useState(false);
@@ -82,9 +81,9 @@ export function LiveRun({ initial, initialOutput }: { initial: RunInfo; initialO
 				crumbs={[{ label: "Runs", href: "/runs" }, { label: run.label }]}
 				actions={
 					ended ? (
-						<Button size="sm" variant="outline" onClick={() => open(rerun(run))}>
+						<NewRunButton size="sm" variant="outline" prefill={rerun(run)}>
 							<RotateCcw /> Run again
-						</Button>
+						</NewRunButton>
 					) : (
 						<Button size="sm" variant="destructive" onClick={cancel} disabled={cancelling}>
 							<Square className="fill-current" /> {cancelling ? "Cancelling..." : "Cancel run"}

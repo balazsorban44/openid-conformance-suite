@@ -29,6 +29,41 @@ The UI listens on 127.0.0.1 only: it starts processes on your machine. Runs need
 
 Results of runs started from the command line (`node bin/cli.ts ci --project op-config`) show up too.
 
+### Hosted (read-only) mode
+
+On Vercel there is no checkout to start `node bin/cli.ts ci` from, no Playwright and no long-running process, so the UI
+has a second mode: it serves the results bundled under `ui/sample-data/` instead of a report directory and starts
+nothing. It is chosen with `CONFORMANCE_UI_MODE=static`, or automatically when `VERCEL` is set (Vercel sets it at build
+and run time); `CONFORMANCE_UI_MODE=local` turns it off again.
+
+```bash
+pnpm --filter ui build
+CONFORMANCE_UI_MODE=static pnpm --filter ui start   # the demo, locally (the mode is read when the server starts)
+```
+
+In this mode the overview, plans, projects, runs history and module log views, the screenshots, `log.json` / `log.html`
+and the theme work as in the local one. What differs: a banner says it is a read-only demo; every run control (the
+New run button, the per-project and per-module play buttons, "Run again", the `n` shortcut) is visible but disabled with
+the tooltip "runs need a local checkout: pnpm ui"; `POST /api/runs` (and `DELETE /api/runs/<id>`) answer `405` with
+`{"error": "runs need a local checkout: pnpm ui"}`; the sidebar does not poll for an active run; the bundled results are
+scanned once per server instance. `CONFORMANCE_REPORT_DIR` / `CONFORMANCE_RESULTS_DIR` still win over the bundle, so
+`CONFORMANCE_UI_MODE=static` with those two is also a read-only viewer for any report.
+
+`ui/sample-data/` is a real report (3.5 MB): `rp-basic`, `op-config` and `op-dynamic` run against the bundled targets.
+It is `report/` (`results.json`, `summary.md`, `ui-runs.json` for the runs history),
+`results/<project>/<run>/<test dir>/` (`module-report.json`, `log.json` minified, `log.html.gz` served as `log.html`,
+`target-output.txt`, screenshots; no videos, traces or Playwright's `attachments` copies) and `manifest.json` (when each
+module finished: file times do not survive a checkout). Refresh it from the repository root:
+
+```bash
+rm -rf test-results conformance-report
+for p in rp-basic op-config op-dynamic; do
+  CONFORMANCE_VIDEO=off CONFORMANCE_TRACE=off PLAYWRIGHT_TEST_OUTPUT_DIR=$PWD/test-results/$p/sample \
+    node bin/cli.ts ci --project $p
+done
+pnpm --filter ui sample-data       # node scripts/sample-data.ts: copies, strips, writes ui-runs.json and manifest.json
+```
+
 ## What it does
 
 |                           |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -71,6 +106,56 @@ it. A module only `results.json` remembers (its directory was removed) is shown 
 | `GET /api/files/results/<path>`    | a file of the results directory (logs, screenshots, videos, traces)  |
 | `GET /api/files/report/<path>`     | a file of the report directory (`results.json`, `summary.md`)        |
 
+In the hosted mode `POST /api/runs` and `DELETE /api/runs/<id>` answer `405`.
+
+## Deploying to Vercel
+
+The hosted mode above makes `ui/` a normal Next.js project for Vercel: its own Vercel project with Root Directory `ui`,
+inside this pnpm workspace. Nothing else is built or installed for it (`@playwright/test` is a dev dependency of the
+screenshot script only; the functions never start Playwright), and `outputFileTracingIncludes` in `next.config.ts` ships
+`ui/sample-data/` with every route. Set it up one of two ways; use one, not both (they would deploy every commit twice).
+
+### Vercel's Git integration (recommended)
+
+1. In the Vercel dashboard: Add New... > Project > import this repository from GitHub.
+2. Before deploying, set (on the import screen, or Settings > Build and Deployment / Environment Variables):
+
+   | Setting                                                         | Value                                                                                                                                            |
+   | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | Framework Preset                                                | Next.js (detected from `ui/package.json`; `ui/vercel.json` says so too)                                                                          |
+   | Root Directory                                                  | `ui`                                                                                                                                             |
+   | Include source files outside of the Root Directory in the Build | enabled (the default): the UI imports `../src/runner/projects.ts`, and the root lockfile and workspace file are outside `ui`                     |
+   | Build Command, Output Directory                                 | the defaults (`next build`, Next.js's)                                                                                                           |
+   | Install Command                                                 | the default, not overridden: Vercel finds `pnpm-lock.yaml` and `pnpm-workspace.yaml` in the repository root and installs the workspace with pnpm |
+   | Node.js Version                                                 | 24.x (`ui/package.json` has `engines.node >= 24`)                                                                                                |
+   | Environment Variable `ENABLE_EXPERIMENTAL_COREPACK`             | `1`: from the lockfile format alone Vercel picks pnpm 9 or 10; this makes it use the root `package.json`'s `packageManager` (`pnpm@12.8.1`)      |
+   | Production Branch                                               | `main` (the default)                                                                                                                             |
+   | Skip deployment (Root Directory section)                        | optional: skips commits that touch nothing the project depends on                                                                                |
+
+   No other environment variable is needed: `VERCEL`, which Vercel sets, selects the hosted mode.
+
+3. Deploy. From then on every push to `main` is a production deployment, and every pull request (and other branch) gets
+   a preview URL that Vercel comments on the pull request.
+
+### GitHub Actions with the Vercel CLI
+
+`.github/workflows/deploy-ui.yml` runs `vercel pull`, `vercel build` and `vercel deploy --prebuilt`: production on pushes
+to `main` that touch `ui/**` (or the workflow, `src/runner/projects.ts` or the lockfiles), a preview on pull requests
+(the URL is commented on the pull request once, updated by every push, and is in the job summary). It needs the same
+Vercel project: create it once (the dashboard steps above with Git deployments disabled, or `vercel link` from the
+repository root) with Root Directory `ui` and the same settings, then add three repository secrets (Settings > Secrets
+and variables > Actions):
+
+| Secret              | Where                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `VERCEL_TOKEN`      | vercel.com/account/tokens                                                               |
+| `VERCEL_ORG_ID`     | `orgId` in `.vercel/project.json` after `vercel link`, or the team's Settings > Team ID |
+| `VERCEL_PROJECT_ID` | `projectId` in `.vercel/project.json`, or the project's Settings > Project ID           |
+
+Without the secrets (and for pull requests from forks, which never get them) the workflow succeeds and says it did
+nothing. It runs the CLI from the repository root; `vercel pull` reads the Root Directory from the project's settings.
+Do not use it together with the Git integration: Vercel would deploy every commit twice.
+
 ## Screenshots
 
 `node scripts/screenshots.ts --url http://127.0.0.1:3000 --start op-dynamic` (with the UI running) starts a run,
@@ -88,7 +173,7 @@ shoots it in progress, waits for it and shoots the other pages, light and dark:
 
 Next.js (App Router) with shadcn/ui (`components/ui`, generated) and Tailwind. Pages are server components that read
 the files directly; the client components are the run dialog, the live run, the log view, the sidebar and the
-screenshot gallery. `lib/` is the server side: `paths.ts` (directories), `catalog.ts` (plans and projects from
+screenshot gallery. `lib/` is the server side: `mode.ts` (hosted or local), `paths.ts` (directories), `catalog.ts` (plans and projects from
 `../src/runner/projects.ts`, configs), `reports.ts`, `runs.ts`; `types.ts` and `format.ts` are shared with the
 client. The report shapes are the suite's own types (`src/suite/report.ts`, `expected.ts`, `log.ts`).
 `pnpm check` at the root typechecks, lints and formats the UI too.

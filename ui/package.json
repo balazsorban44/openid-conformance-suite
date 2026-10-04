@@ -9,7 +9,8 @@
 		"build": "next build",
 		"start": "next start",
 		"typecheck": "tsc --noEmit",
-		"screenshots": "node scripts/screenshots.ts"
+		"screenshots": "node scripts/screenshots.ts",
+		"sample-data": "node scripts/sample-data.ts"
 	},
 	"dependencies": {
 		"class-variance-authority": "^0.7.1",
