@@ -133,6 +133,14 @@ function send(
 	headers.forEach((v, k) => {
 		outgoing[k] = k === "set-cookie" ? headers.getSetCookie() : v;
 	});
+	// Headers joins repeated values with ", "; an array value is sent as that many header lines
+	if (req.headers != null && !(req.headers instanceof Headers)) {
+		for (const [k, v] of Object.entries(req.headers)) {
+			if (Array.isArray(v)) {
+				outgoing[k.toLowerCase()] = v;
+			}
+		}
+	}
 	const options = {
 		method,
 		headers: outgoing,

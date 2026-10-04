@@ -4,8 +4,11 @@ import { useMswServer, useTestLog } from "../suite/testing.ts";
 import { scopesNotSupportedReason } from "./discovery.ts";
 import type { OpVariant } from "./op.ts";
 import {
+	addIdentityClaimsFromUserInfo,
 	callUserInfoEndpoint,
 	callUserInfoEndpointWithBearerTokenInBody,
+	checkForUnexpectedClaimsInUserinfo,
+	ensureIdentityClaimsContainRequestedClaims,
 	ensureMemberValuesInClaimNameReferenceToMemberNamesInClaimSources,
 	validateExtractedUserInfoResponse,
 	validateReturnedClaimsUserInfoResponse,
@@ -181,5 +184,45 @@ describe("scopesNotSupportedReason", () => {
 			{ client_id: "c", scope: "openid email" },
 		);
 		expect(reason).toBeNull();
+	});
+});
+
+describe("the identity claims of the claims parameter module", () => {
+	test("AddIdentityClaimsFromUserInfo merges the userinfo claims, equal values where both have the claim", () => {
+		const identity: Record<string, unknown> = { sub: "u", name: "Foo", address: { country: "US" } };
+		addIdentityClaimsFromUserInfo(identity, { sub: "u", email: "foo@example.com", address: { country: "US" } });
+		expect(identity).toEqual({ sub: "u", name: "Foo", email: "foo@example.com", address: { country: "US" } });
+		expect(t.entries().at(-1)).toMatchObject({
+			src: "AddIdentityClaimsFromUserInfo",
+			result: "SUCCESS",
+			msg: "Merged identity claims from userinfo with those from id_token",
+		});
+		expect(() => addIdentityClaimsFromUserInfo({ sub: "u", name: "Foo" }, { name: "Bar" })).toThrow(
+			"Value of name differs between id_token and userinfo",
+		);
+	});
+
+	test("EnsureIdentityClaimsContainRequestedClaims compares with claims.userinfo of the request", () => {
+		const request = { claims: { userinfo: { sub: null, name: { essential: true }, email: {} } } };
+		ensureIdentityClaimsContainRequestedClaims({ sub: "u", name: "Foo", email: "e" }, request, "OIDCC-5.5");
+		expect(t.entries().at(-1)).toMatchObject({
+			result: "SUCCESS",
+			msg: "id_token and userinfo combined contain all the requested claims",
+		});
+		expect(() => ensureIdentityClaimsContainRequestedClaims({ sub: "u" }, request)).toThrow(
+			"The server did not return all the requested claims.",
+		);
+		expect(t.entries().at(-1)).toMatchObject({ missing: ["name", "email"] });
+	});
+
+	test("CheckForUnexpectedClaimsInUserinfo", () => {
+		checkForUnexpectedClaimsInUserinfo({}, "OIDCC-5.1");
+		expect(t.entries().at(-1)).toMatchObject({
+			result: "SUCCESS",
+			msg: "userinfo response includes only known claims",
+		});
+		expect(() => checkForUnexpectedClaimsInUserinfo({ custom: 1 })).toThrow(
+			"userinfo response includes claims with names that are not known.",
+		);
 	});
 });

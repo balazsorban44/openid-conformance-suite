@@ -263,7 +263,13 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 				? {
 						fapi: { enabled: true, profile: "2.0" },
 						dPoP: { enabled: true, nonceSecret: randomBytes(32), requireNonce: () => true },
-						pushedAuthorizationRequests: { enabled: true, requirePushedAuthorizationRequests: true },
+						// RFC 9126 2.4: a confidential client's unregistered redirect_uri is accepted when pushed
+						// (fapi2-security-profile-final-plain-fapi-tolerate-unregistered-redirect-uri)
+						pushedAuthorizationRequests: {
+							enabled: true,
+							requirePushedAuthorizationRequests: true,
+							allowUnregisteredRedirectUris: true,
+						},
 						jwtResponseModes: { enabled: true },
 					}
 				: {}),
@@ -372,7 +378,12 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 		async findAccount(_ctx: Any, sub: string) {
 			return { accountId: sub, claims: async () => ({ sub, ...structuredClone(ACCOUNT_CLAIMS) }) };
 		},
-		ttl: { RegistrationAccessToken: 24 * 60 * 60 },
+		ttl: {
+			RegistrationAccessToken: 24 * 60 * 60,
+			// FAPI 2.0 Security Profile 5.3.2.1-11: authorization codes live at most 60 seconds
+			// (fapi2-security-profile-final-ensure-token-endpoint-fails-with-expired-auth-code)
+			...(FAPI2 ? { AuthorizationCode: 60 } : {}),
+		},
 		// outgoing requests (backchannel_logout_uri, jwks_uri, sector_identifier_uri, request_uri) go to the suite on
 		// localhost; oidc-provider's default dispatcher refuses loopback/private addresses, so use plain fetch like
 		// upstream's certification config does for oidcc-dynamic-* and oidcc-backchannel-rp-initiated-logout
@@ -401,7 +412,11 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 
 	// oidcc-frontchannel-rp-initiated-logout (CheckIdTokenSidMatchesFrontChannelLogoutRequest) and the back-channel
 	// logout plan compare the sid of the ID Token with the logout request: always include sid in ID Tokens
-	provider.Client.prototype.includeSid = () => true;
+	// (not in FAPI 2.0 mode: sid is no standard id_token claim, which
+	// fapi2-security-profile-final-test-claims-parameter-identity-claims warns about, and no FAPI 2 plan logs out)
+	if (!FAPI2) {
+		provider.Client.prototype.includeSid = () => true;
+	}
 
 	// oidcc-ensure-request-with-acr-values-succeeds etc.: like upstream, assert a static acr/amr on every login
 	const { interactionFinished } = provider;
@@ -499,7 +514,28 @@ export async function start(): Promise<{ issuer: string; close(): Promise<void> 
 	});
 
 	const server: Server = await new Promise((resolve, reject) => {
-		const s = TLS ? createHttpsServer(TLS, provider.callback()) : createServer(provider.callback());
+		// FAPI 2.0 mode: the TLS policy of FAPI 2.0 Security Profile 5.2 (TLS 1.2 with the BCP 195 recommended
+		// ciphers only, or TLS 1.3), checked by the TLS blocks of fapi2-security-profile-final-happy-flow and
+		// fapi2-security-profile-final-ensure-holder-of-key-required
+		const tlsOptions =
+			TLS && FAPI2
+				? {
+						...TLS,
+						minVersion: "TLSv1.2" as const,
+						ciphers: [
+							"TLS_AES_256_GCM_SHA384",
+							"TLS_CHACHA20_POLY1305_SHA256",
+							"TLS_AES_128_GCM_SHA256",
+							"ECDHE-ECDSA-AES128-GCM-SHA256",
+							"ECDHE-RSA-AES128-GCM-SHA256",
+							"ECDHE-ECDSA-AES256-GCM-SHA384",
+							"ECDHE-RSA-AES256-GCM-SHA384",
+							"ECDHE-ECDSA-CHACHA20-POLY1305",
+							"ECDHE-RSA-CHACHA20-POLY1305",
+						].join(":"),
+					}
+				: TLS;
+		const s = tlsOptions ? createHttpsServer(tlsOptions, provider.callback()) : createServer(provider.callback());
 		s.once("error", reject).listen(PORT, "localhost", () => resolve(s));
 	});
 	return {

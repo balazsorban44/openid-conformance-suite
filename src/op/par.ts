@@ -330,3 +330,26 @@ export function checkErrorFromParEndpointResponseErrorInvalidClientOrInvalidRequ
 	}
 	c.success(key + " error returned expected 'error' of '" + error + "'", { expected });
 }
+
+/** upstream: condition/client/EnsurePARInvalidRequestOrInvalidRequestObjectError.java */
+export function ensurePARInvalidRequestOrInvalidRequestObjectError(res: ParResponse, ...requirements: string[]): void {
+	ensureSpecifiedErrorFromPushedAuthorizationEndpointResponse(
+		"EnsurePARInvalidRequestOrInvalidRequestObjectError",
+		res,
+		["invalid_request", "invalid_request_object"],
+		requirements,
+	);
+}
+
+/** upstream: condition/client/EnsurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError.java */
+export function ensurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError(
+	res: ParResponse,
+	...requirements: string[]
+): void {
+	ensureSpecifiedErrorFromPushedAuthorizationEndpointResponse(
+		"EnsurePARUnsupportedResponseTypeOrInvalidRequestOrUnauthorizedClientError",
+		res,
+		["unsupported_response_type", "invalid_request", "unauthorized_client"],
+		requirements,
+	);
+}

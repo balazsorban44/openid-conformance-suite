@@ -17,7 +17,8 @@ import type { EndpointResponse } from "../suite/http.ts";
 import { generateJwkForAlg, type JWK, JOSEException, ParseException } from "../suite/jose.ts";
 import { createJWSSigner } from "../suite/jose-jws.ts";
 import { parseJWK, toPublicJWK } from "../suite/jose-jwk.ts";
-import { parseClaimsSet } from "../suite/jose-jwt.ts";
+import { parseClaimsSet, parseSignedJWT } from "../suite/jose-jwt.ts";
+import { getString } from "../suite/json.ts";
 import { randomAlphanumeric } from "../suite/random.ts";
 import type { ServerMetadata } from "./discovery.ts";
 import type { Client } from "./registration.ts";
@@ -264,9 +265,59 @@ export function addDpopHeaderForParEndpointRequest(req: Pick<TokenRequest, "head
 }
 
 /** upstream: condition/client/AddDpopHeaderForResourceEndpointRequest.java */
-export function addDpopHeaderForResourceEndpointRequest(headers: Record<string, string>, dpopProof: string): void {
+export function addDpopHeaderForResourceEndpointRequest(headers: DpopRequestHeaders, dpopProof: string): void {
 	headers["DPoP"] = dpopProof;
 	condition("AddDpopHeaderForResourceEndpointRequest").success("Set DPoP header", { DPoP: dpopProof });
+}
+
+/** The request headers a DPoP proof is set on (several DPoP headers for the negative test that sends two) */
+export type DpopRequestHeaders = Record<string, string | string[]>;
+
+/**
+ * What a module changes in a DPoP proof sequence (upstream: conditions inserted into / replacing the ones of
+ * CreateDpopProofSteps, e.g. the invalid proofs of fapi2-security-profile-final-dpop-negative-tests or the iat
+ * of the dpopproof-with-iat modules). Each hook names where upstream inserts the condition.
+ */
+export interface DpopProofSteps {
+	/** inserted after CreateDpopClaims */
+	afterClaims?: (claims: Record<string, unknown>) => void;
+	/** replaces SetDpopHtmHtuFor<Endpoint> */
+	htmHtu?: (claims: Record<string, unknown>) => void;
+	/** inserted after SetDpopHtmHtuFor<Endpoint> (the header or the claims) */
+	afterHtmHtu?: (proof: DpopProof) => void;
+	/** resource endpoint: replaces SetDpopAccessTokenHash, or `.skip(SetDpopAccessTokenHash, reason)` when a string */
+	ath?: ((claims: Record<string, unknown>) => void) | string;
+	/** inserted before SignDpopProof */
+	beforeSign?: (proof: DpopProof) => void | Promise<void>;
+	/** replaces SignDpopProof */
+	sign?: (proof: DpopProof) => string | Promise<string>;
+	/** inserted after SignDpopProof: returns the (altered) proof */
+	afterSign?: (proof: string) => string;
+	/** replaces AddDpopHeaderFor<Endpoint>Request */
+	addHeader?: (headers: DpopRequestHeaders, proof: string) => void | Promise<void>;
+	/** inserted after AddDpopHeaderFor<Endpoint>Request */
+	afterAddHeader?: (headers: DpopRequestHeaders) => void;
+}
+
+/** The proof's signing with the module's hooks around it (the tail of every CreateDpopProofSteps sequence) */
+async function signAndAddDpopProof(
+	proof: DpopProof,
+	client: DpopClient,
+	headers: DpopRequestHeaders,
+	addHeader: (headers: DpopRequestHeaders, proof: string) => void,
+	steps: DpopProofSteps,
+): Promise<void> {
+	await steps.beforeSign?.(proof);
+	let signed = steps.sign ? await steps.sign(proof) : await signDpopProof(proof, client);
+	if (steps.afterSign) {
+		signed = steps.afterSign(signed);
+	}
+	if (steps.addHeader) {
+		await steps.addHeader(headers, signed);
+	} else {
+		addHeader(headers, signed);
+	}
+	steps.afterAddHeader?.(headers);
 }
 
 /**
@@ -281,14 +332,26 @@ export async function createTokenEndpointDpopSteps(
 	metadata: ServerMetadata,
 	client: DpopClient,
 	req: Pick<TokenRequest, "headers">,
+	steps: DpopProofSteps = {},
 ): Promise<void> {
 	const header = createDpopHeader(client);
 	const claims = createDpopClaims();
-	setDpopHtmHtuForTokenEndpoint(claims, metadata);
+	steps.afterClaims?.(claims);
+	if (steps.htmHtu) {
+		steps.htmHtu(claims);
+	} else {
+		setDpopHtmHtuForTokenEndpoint(claims, metadata);
+	}
+	steps.afterHtmHtu?.({ header, claims });
 	soft(() => setDpopProofNonceForAuthorizationServer(claims, client.dpop), "info");
 	soft(() => ensureDpopNonceContainsAllowedCharactersOnly(claims, "DPOP-8.1"));
-	const proof = await signDpopProof({ header, claims }, client);
-	addDpopHeaderForTokenEndpointRequest(req, proof);
+	await signAndAddDpopProof(
+		{ header, claims },
+		client,
+		req.headers,
+		(_headers, proof) => addDpopHeaderForTokenEndpointRequest(req, proof),
+		steps,
+	);
 }
 
 /**
@@ -302,14 +365,26 @@ export async function createParEndpointDpopSteps(
 	client: DpopClient,
 	req: Pick<TokenRequest, "headers">,
 	method?: string,
+	steps: DpopProofSteps = {},
 ): Promise<void> {
 	const header = createDpopHeader(client);
 	const claims = createDpopClaims();
-	setDpopHtmHtuForParEndpoint(claims, metadata, method);
+	steps.afterClaims?.(claims);
+	if (steps.htmHtu) {
+		steps.htmHtu(claims);
+	} else {
+		setDpopHtmHtuForParEndpoint(claims, metadata, method);
+	}
+	steps.afterHtmHtu?.({ header, claims });
 	soft(() => setDpopProofNonceForAuthorizationServer(claims, client.dpop), "info");
 	soft(() => ensureDpopNonceContainsAllowedCharactersOnly(claims, "DPOP-8.1"));
-	const proof = await signDpopProof({ header, claims }, client);
-	addDpopHeaderForParEndpointRequest(req, proof);
+	await signAndAddDpopProof(
+		{ header, claims },
+		client,
+		req.headers,
+		(_headers, proof) => addDpopHeaderForParEndpointRequest(req, proof),
+		steps,
+	);
 }
 
 /**
@@ -324,16 +399,28 @@ export async function createResourceEndpointDpopSteps(
 	client: DpopClient,
 	resource: { url: string; method?: string },
 	accessToken: AccessToken,
-	headers: Record<string, string>,
+	headers: DpopRequestHeaders,
+	steps: DpopProofSteps = {},
 ): Promise<void> {
 	const header = createDpopHeader(client);
 	const claims = createDpopClaims();
-	setDpopHtmHtuForResourceEndpoint(claims, resource);
-	setDpopAccessTokenHash(claims, accessToken);
+	steps.afterClaims?.(claims);
+	if (steps.htmHtu) {
+		steps.htmHtu(claims);
+	} else {
+		setDpopHtmHtuForResourceEndpoint(claims, resource);
+	}
+	steps.afterHtmHtu?.({ header, claims });
+	if (typeof steps.ath === "string") {
+		condition("SetDpopAccessTokenHash").log(steps.ath);
+	} else if (steps.ath) {
+		steps.ath(claims);
+	} else {
+		setDpopAccessTokenHash(claims, accessToken);
+	}
 	soft(() => setDpopProofNonceForResourceEndpoint(claims, client.dpop), "info");
 	soft(() => ensureDpopNonceContainsAllowedCharactersOnly(claims, "DPOP-8.1"));
-	const proof = await signDpopProof({ header, claims }, client);
-	addDpopHeaderForResourceEndpointRequest(headers, proof);
+	await signAndAddDpopProof({ header, claims }, client, headers, addDpopHeaderForResourceEndpointRequest, steps);
 }
 
 /** upstream: condition/client/AddDpopJktToAuthorizationEndpointRequest.java */
@@ -569,7 +656,7 @@ export async function callProtectedResourceAllowingDpopNonceError(
 	url: string,
 	accessToken: AccessToken,
 	dpop: DpopState,
-	opts: { method?: "GET" | "POST"; headers?: Record<string, string>; requirements?: string[] } = {},
+	opts: { method?: "GET" | "POST"; headers?: DpopRequestHeaders; requirements?: string[] } = {},
 ): Promise<{ response: EndpointResponse; nonceError: string | null }> {
 	const name = "CallProtectedResourceAllowingDpopNonceError";
 	const response = await callProtectedResource(url, accessToken, { ...opts, conditionName: name });
@@ -607,4 +694,396 @@ export function checkTokenTypeIsDpop(res: TokenResponse, ...requirements: string
 		c.failure("Token type is not DPoP");
 	}
 	c.success("Token type is DPoP");
+}
+
+// ---- the claims the modules change in a proof ----
+
+const now = () => Math.floor(Date.now() / 1000);
+
+/** upstream: condition/client/SetDpopNbfToNow.java */
+export function setDpopNbfToNow(claims: Record<string, unknown>): void {
+	claims["nbf"] = now();
+	condition("SetDpopNbfToNow").success("Set 'nbf' in DPoP proof to now", claims);
+}
+
+/** upstream: condition/client/SetDpopExpToFiveMinutesInFuture.java */
+export function setDpopExpToFiveMinutesInFuture(claims: Record<string, unknown>): void {
+	claims["exp"] = now() + 5 * 60;
+	condition("SetDpopExpToFiveMinutesInFuture").success("Set 'exp' in DPoP proof to 5 minutes in the future", claims);
+}
+
+/** upstream: condition/client/SetDpopIatTo10SecondsInPast.java */
+export function setDpopIatTo10SecondsInPast(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["iat"] = now() - 10;
+	condition("SetDpopIatTo10SecondsInPast", ...requirements).success(
+		"Set DPoP proof 'iat' claim to 10 seconds in the past",
+		claims,
+	);
+}
+
+/**
+ * This condition is meant to test for 10 seconds but set to 8 to allow for network latency
+ *
+ * upstream: condition/client/SetDpopIatTo8SecondsInFuture.java
+ */
+export function setDpopIatTo8SecondsInFuture(claims: Record<string, unknown>, ...requirements: string[]): void {
+	claims["iat"] = now() + 8;
+	// UPSTREAM: the message says 10 seconds
+	condition("SetDpopIatTo8SecondsInFuture", ...requirements).success(
+		"Set DPoP proof 'iat' claim to 10 seconds in the future",
+		claims,
+	);
+}
+
+/** upstream: condition/client/SetDpopIatToOneHourInFuture.java */
+export function setDpopIatToOneHourInFuture(claims: Record<string, unknown>): void {
+	claims["iat"] = now() + 60 * 60;
+	condition("SetDpopIatToOneHourInFuture").success("Set 'iat' in DPoP proof to one hour in future", claims);
+}
+
+/** upstream: condition/client/SetDpopIatToOneHourInPast.java */
+export function setDpopIatToOneHourInPast(claims: Record<string, unknown>): void {
+	claims["iat"] = now() - 60 * 60;
+	condition("SetDpopIatToOneHourInPast").success("Set 'iat' in DPoP proof to one hour in past", claims);
+}
+
+/** upstream: condition/client/SetDpopAccessTokenHashToIncorrectValue.java */
+export function setDpopAccessTokenHashToIncorrectValue(claims: Record<string, unknown>): void {
+	const accessToken = randomAlphanumeric(10);
+	claims["ath"] = createHash("sha256").update(Buffer.from(accessToken, "latin1")).digest("base64url");
+	condition("SetDpopAccessTokenHashToIncorrectValue").success("Added ath to DPoP proof claims", {
+		claims,
+		bad_access_token: accessToken,
+	});
+}
+
+/** upstream: condition/client/SetDpopHeaderJwkToPrivateKey.java */
+export function setDpopHeaderJwkToPrivateKey(proof: DpopProof, client: DpopClient): void {
+	// UPSTREAM: a missing key is a NullPointerException
+	proof.header["jwk"] = client.dpop.key as JWK;
+	condition("SetDpopHeaderJwkToPrivateKey").success("Added private jwk to DPoP proof header", proof.header);
+}
+
+// ---- the invalid proofs of fapi2-security-profile-final-dpop-negative-tests (condition/client/Fapi2DPoPNegativeConditions.java) ----
+
+/** upstream: Fapi2DPoPNegativeConditions.ChangeDpopHeader (the header after the change) */
+function changeDpopHeader(name: string, header: Record<string, unknown>, change: () => void): void {
+	change();
+	condition(name).success("DPoP proof header", header);
+}
+
+/** upstream: Fapi2DPoPNegativeConditions.ChangeDpopClaims (the claims after the change) */
+function changeDpopClaims(name: string, claims: Record<string, unknown>, change: () => void): void {
+	change();
+	condition(name).success("DPoP proof claims", claims);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveTypFromDpopProof) */
+export function removeTypFromDpopProof(header: Record<string, unknown>): void {
+	changeDpopHeader("RemoveTypFromDpopProof", header, () => delete header["typ"]);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveJwkFromDpopProof) */
+export function removeJwkFromDpopProof(header: Record<string, unknown>): void {
+	changeDpopHeader("RemoveJwkFromDpopProof", header, () => delete header["jwk"]);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (SetDpopHeaderTypToInvalidValue) */
+export function setDpopHeaderTypToInvalidValue(header: Record<string, unknown>): void {
+	changeDpopHeader("SetDpopHeaderTypToInvalidValue", header, () => {
+		header["typ"] = "dpop+jwt+wrongyousee";
+	});
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (AddExtraClaimsToHeader) */
+export function addExtraClaimsToHeader(header: Record<string, unknown>): void {
+	changeDpopHeader("AddExtraClaimsToHeader", header, () => {
+		header["tx_id"] = now() + 60 * 60;
+	});
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (ChangeSignAlgorithm) */
+export function changeSignAlgorithm(header: Record<string, unknown>): void {
+	changeDpopHeader("ChangeSignAlgorithm", header, () => {
+		delete header["alg"];
+		header["alg"] = "RS256";
+	});
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveJtiFromDpopProof) */
+export function removeJtiFromDpopProof(claims: Record<string, unknown>): void {
+	changeDpopClaims("RemoveJtiFromDpopProof", claims, () => delete claims["jti"]);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveHtmFromDpopProof) */
+export function removeHtmFromDpopProof(claims: Record<string, unknown>): void {
+	changeDpopClaims("RemoveHtmFromDpopProof", claims, () => delete claims["htm"]);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveHtuFromDpopProof) */
+export function removeHtuFromDpopProof(claims: Record<string, unknown>): void {
+	changeDpopClaims("RemoveHtuFromDpopProof", claims, () => delete claims["htu"]);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveIatFromDpopProof) */
+export function removeIatFromDpopProof(claims: Record<string, unknown>): void {
+	changeDpopClaims("RemoveIatFromDpopProof", claims, () => delete claims["iat"]);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (AddExtraClaimsToClaims) */
+export function addExtraClaimsToClaims(claims: Record<string, unknown>): void {
+	changeDpopClaims("AddExtraClaimsToClaims", claims, () => {
+		claims["tx_id_key"] = now() + 60 * 60;
+	});
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (SetDpopHtmToPut) */
+export function setDpopHtmToPut(claims: Record<string, unknown>): void {
+	changeDpopClaims("SetDpopHtmToPut", claims, () => {
+		claims["htm"] = "PUT";
+	});
+}
+
+/**
+ * The same jti for every proof of the module's reuse test (upstream env "jti": created on the first use, cleared
+ * for a nonce retry).
+ *
+ * upstream: condition/client/Fapi2DPoPNegativeConditions.java (FixedJtiClaim)
+ */
+export function fixedJtiClaim(claims: Record<string, unknown>, state: { jti: string | null }): void {
+	changeDpopClaims("FixedJtiClaim", claims, () => {
+		if (!state.jti) {
+			state.jti = randomAlphanumeric(15);
+		}
+		claims["jti"] = state.jti;
+	});
+}
+
+/**
+ * The resource URL with the scheme and host in upper case as htu (RFC 3986 6.2.2.1: case-insensitive).
+ *
+ * upstream: condition/client/Fapi2DPoPNegativeConditions.java (DpopHtuUpperCase)
+ */
+export function dpopHtuUpperCase(claims: Record<string, unknown>, resource: { url: string; method?: string }): void {
+	changeDpopClaims("DpopHtuUpperCase", claims, () => {
+		const resourceEndpoint = resource.url;
+		claims["htm"] = resource.method || "GET";
+		const resourceURI = new URL(resourceEndpoint);
+		// java.net.URI.getHost / getScheme: the host as given (no brackets for IPv6 here), the scheme without ':'
+		const host = resourceURI.hostname;
+		const scheme = resourceURI.protocol.slice(0, -1);
+		const changedResourceEndoint = resourceEndpoint
+			.replace(host, host.toUpperCase())
+			.replace(scheme, scheme.toUpperCase());
+		claims["htu"] = changedResourceEndoint;
+		condition("DpopHtuUpperCase").success("Added htm/htu to DPoP proof claims", claims);
+	});
+}
+
+/**
+ * The resource URL with the scheme's default port spelled out as htu (RFC 3986 6.2.3).
+ *
+ * upstream: condition/client/Fapi2DPoPNegativeConditions.java (DpopHtuWithPort)
+ */
+export function dpopHtuWithPort(claims: Record<string, unknown>, resource: { url: string; method?: string }): void {
+	changeDpopClaims("DpopHtuWithPort", claims, () => {
+		const c: Condition = condition("DpopHtuWithPort");
+		let resourceEndpoint = resource.url;
+		let uri: URL;
+		try {
+			uri = new URL(resourceEndpoint);
+		} catch (e) {
+			c.failureFrom((e as Error).message, e);
+		}
+		if (uri.port === "") {
+			const scheme = uri.protocol.slice(0, -1);
+			resourceEndpoint = scheme + "://" + uri.hostname + (scheme === "https" ? ":443" : ":80") + uri.pathname;
+		}
+		claims["htm"] = resource.method || "GET";
+		claims["htu"] = resourceEndpoint;
+	});
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (AddDpopHeaderAllCapital) */
+export function addDpopHeaderAllCapital(headers: DpopRequestHeaders, dpopProof: string): void {
+	headers["DPOP"] = dpopProof;
+	condition("AddDpopHeaderAllCapital").success("Set DPoP header", { DPOP: dpopProof });
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveDpopFromResourceRequest) */
+export function removeDpopFromResourceRequest(headers: DpopRequestHeaders): void {
+	delete headers["DPoP"];
+	condition("RemoveDpopFromResourceRequest").success("Removed DPoP from resource header", { ...headers });
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (SignDpopProofWithNone) */
+export function signDpopProofWithNone(claims: Record<string, unknown>): string {
+	const ALG_NONE_HEADER = '{"alg": "none", "typ": "dpop+jwt"}';
+	const jwt =
+		Buffer.from(ALG_NONE_HEADER).toString("base64url") +
+		"." +
+		Buffer.from(JSON.stringify(claims)).toString("base64url") +
+		".";
+	condition("SignDpopProofWithNone").success("Signed the DPoP proof with none alg", { dpop_proof: jwt });
+	return jwt;
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (InvalidateDpopProofSignature; common/AbstractInvalidateJwsSignature) */
+export function invalidateDpopProofSignature(dpopProof: string): string {
+	const c: Condition = condition("InvalidateDpopProofSignature");
+	let parsed;
+	try {
+		parsed = parseSignedJWT(dpopProof);
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom("Couldn't parse JWT", e, { dpop_proof: dpopProof });
+		}
+		throw e;
+	}
+	const bytes = Buffer.from(parsed.signature ?? "", "base64url");
+	// Flip some of the bits in the signature to make it invalid
+	for (let i = 0; i < bytes.length; i++) {
+		bytes[i] ^= 0x5a;
+	}
+	const invalid = parsed.parts[0] + "." + parsed.parts[1] + "." + bytes.toString("base64url");
+	c.log("Made the dpop_proof signature invalid", { dpop_proof: invalid });
+	return invalid;
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (NotWellformedDPoP): the proof without its signature part */
+export function notWellformedDPoP(dpopProof: string): string {
+	const parts = dpopProof.split(".");
+	const jws = parts[0] + "." + parts[1];
+	condition("NotWellformedDPoP").success("Changed the DPoP proof", { dpop_proof: jws });
+	return jws;
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (SignDpopAndRemoveAlg): "alg" renamed in the signed header */
+export function signDpopAndRemoveAlg(dpopProof: string): string {
+	const parts = dpopProof.split(".");
+	parts[0] = Buffer.from(Buffer.from(parts[0], "base64url").toString().replace("alg", "alg2")).toString("base64url");
+	const jws = parts.join(".");
+	condition("SignDpopAndRemoveAlg").success("Changed the DPoP proof", { dpop_proof: jws });
+	return jws;
+}
+
+/**
+ * Replaces the client's DPoP key with a new one of the same algorithm (the old one kept for RecoverSignKey).
+ *
+ * upstream: condition/client/Fapi2DPoPNegativeConditions.java (GenerateNewSignKey; AbstractGenerateKey)
+ */
+export async function generateNewSignKey(client: DpopClient & { dpopKeyOld?: JWK | null }): Promise<void> {
+	const c: Condition = condition("GenerateNewSignKey");
+	const jwk = client.dpop.key as JWK;
+	let signingJwk;
+	try {
+		signingJwk = parseJWK(JSON.stringify(jwk));
+	} catch (e) {
+		if (e instanceof ParseException) {
+			c.failureFrom(e.message, e);
+		}
+		throw e;
+	}
+	const dpopSigningAlg = String(signingJwk["alg"]);
+	// a new key, distinct from the existing dpop_private_jwk. This is the test's whole point.
+	let key: JWK;
+	try {
+		key = await generateJwkForAlg(dpopSigningAlg);
+	} catch {
+		c.failure("Failed to generate key for alg", { alg: dpopSigningAlg });
+	}
+	// AbstractGenerateKey adds no kid (GenerateDpopKey does)
+	delete key["kid"];
+	client.dpop.key = key;
+	client.dpopKeyOld = jwk;
+	// upstream logs nothing: the framework notes that the condition ran
+	c.log("Condition ran but did not log anything");
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RecoverSignKey) */
+export function recoverSignKey(client: DpopClient & { dpopKeyOld?: JWK | null }): void {
+	client.dpop.key = client.dpopKeyOld ?? null;
+	condition("RecoverSignKey").log("Condition ran but did not log anything");
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RenameDPoPProof): the proof kept as "dpop_proof2" */
+export function renameDPoPProof(dpopProof: string): string {
+	condition("RenameDPoPProof").log("Condition ran but did not log anything");
+	return dpopProof;
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (AddMultipleDpopHeaderForResourceEndpointRequest) */
+export function addMultipleDpopHeaderForResourceEndpointRequest(
+	headers: DpopRequestHeaders,
+	dpopProof: string,
+	dpopProof2: string,
+): void {
+	// UPSTREAM: removes "DPOP", not the "DPoP" the sequence set
+	delete headers["DPOP"];
+	const element = [dpopProof, dpopProof2];
+	headers["DPoP"] = element;
+	condition("AddMultipleDpopHeaderForResourceEndpointRequest").success("Set DPoP header", { DPoP: element });
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (RemoveQueryAndFragmentFromDpopHtu) */
+export function removeQueryAndFragmentFromDpopHtu(claims: Record<string, unknown>): void {
+	const c: Condition = condition("RemoveQueryAndFragmentFromDpopHtu");
+	let htu = getString(claims["htu"]);
+	const lastIndexOf = htu.lastIndexOf("?");
+	if (lastIndexOf > 0) {
+		htu = htu.substring(0, lastIndexOf);
+	}
+	claims["htu"] = htu;
+	c.success(
+		"Remove query/fragment (which must be ignored as per 4.3-9 in DPoP spec) to htu in DPoP proof claims",
+		claims,
+	);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (AddQueryAndFragmentToDpopHtu) */
+export function addQueryAndFragmentToDpopHtu(claims: Record<string, unknown>): void {
+	const c: Condition = condition("AddQueryAndFragmentToDpopHtu");
+	let htu = getString(claims["htu"]);
+	if (htu.lastIndexOf("?") === -1) {
+		htu = htu + "?allthedoorsonthisspaceshiphavebeen#programmedtohaveacheeryandsunnydisposition";
+	}
+	claims["htu"] = htu;
+	c.success(
+		"Added query/fragment (which must be ignored as per 4.3-9 in DPoP spec) to htu in DPoP proof claims",
+		claims,
+	);
+}
+
+/** upstream: condition/client/Fapi2DPoPNegativeConditions.java (SetDpopHtuToDifferentUrl) */
+export function setDpopHtuToDifferentUrl(claims: Record<string, unknown>): void {
+	const c: Condition = condition("SetDpopHtuToDifferentUrl");
+	let htu = getString(claims["htu"]);
+	const lastIndexOf = htu.lastIndexOf("?");
+	htu = lastIndexOf > 0 ? htu.substring(0, lastIndexOf) + "ohnonotagain" : htu + "ohnonotagain";
+	claims["htu"] = htu;
+	c.success("Made htu in DPoP proof claims a different url", claims);
+}
+
+/**
+ * Calls the resource with the access token presented as a Bearer token whatever its type (the request headers,
+ * without a DPoP proof, as they are).
+ *
+ * upstream: condition/client/CallProtectedResourceForceBearer.java
+ */
+export function callProtectedResourceForceBearer(
+	resource: { url: string; method?: string },
+	accessToken: AccessToken,
+	headers: DpopRequestHeaders,
+	...requirements: string[]
+): Promise<EndpointResponse> {
+	return callProtectedResource(
+		resource.url,
+		{ ...accessToken, type: "Bearer" },
+		{
+			method: resource.method as "GET" | "POST" | undefined,
+			headers,
+			requirements,
+			conditionName: "CallProtectedResourceForceBearer",
+		},
+	);
 }

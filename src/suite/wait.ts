@@ -24,6 +24,11 @@ export function waitFor2Seconds(): Promise<void> {
 	return waitForSpecifiedSeconds("WaitFor2Seconds", 2);
 }
 
+/** The 60 s lifetime of an authorization code plus 2 s clock skew (upstream: condition/client/WaitFor62Seconds.java) */
+export function waitFor62Seconds(): Promise<void> {
+	return waitForSpecifiedSeconds("WaitFor62Seconds", 62);
+}
+
 /**
  * The 30 seconds before an authorization code is used a second time (oidcc-codereuse-30seconds), shortened by
  * `server.code_reuse_delay` in the configuration (1..30; a suite-only property for implementations under test that

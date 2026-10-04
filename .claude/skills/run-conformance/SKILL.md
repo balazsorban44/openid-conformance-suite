@@ -69,7 +69,11 @@ browser tasks of the authorization endpoint. The second client's redirect_uri is
 config's `target.env` starts oidc-provider with its FAPI 2.0 profile, PAR required, DPoP with nonces required,
 JARM and the two private_key_jwt clients of targets/oidc-provider/clients-fapi2.json (their private keys are in
 configs/oidc-provider/fapi2-_.json). The DPoP nonce retries (`use_dpop_nonce` at the PAR, token and resource
-endpoints) are exercised because the target requires nonces.
+endpoints) are exercised because the target requires nonces. The TLS blocks of the happy flow and
+ensure-holder-of-key-required make raw TLS handshakes with the OP's endpoints (TLS 1.0 / 1.1 offered, TLS 1.2 with
+the BCP 195 recommended ciphers only, TLS 1.3): in FAPI 2.0 mode the target serves https with that cipher policy.
+`fapi2-security-profile-final-user-rejects-authentication` needs the browser to reject the login: the configs'
+`override` for it clicks the "Cancel" link of oidc-provider's login page instead of logging in.
 
 ## Environment variables
 
