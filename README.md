@@ -146,10 +146,8 @@ on http://127.0.0.1:3000; see [`ui/README.md`](ui/README.md).
 [![The UI's overview](ui/docs/overview-light.png)](ui/README.md)
 
 The UI also deploys to Vercel as a read-only demo showing bundled results (`ui/sample-data/`; there are no runs
-there). Import the repository in Vercel with Root Directory `ui` (every push to `main` is a production deployment,
-every pull request a preview), or let `.github/workflows/deploy-ui.yml` deploy with the Vercel CLI once the secrets
-`VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` are set. Exact settings: [Deploying to
-Vercel](ui/README.md#deploying-to-vercel).
+there): import the repository in Vercel with Root Directory `ui`, and every push to `main` is a production
+deployment, every pull request a preview. Exact settings: [Deploying to Vercel](ui/README.md#deploying-to-vercel).
 
 ## What is in the box
 

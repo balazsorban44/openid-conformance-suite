@@ -113,7 +113,7 @@ In the hosted mode `POST /api/runs` and `DELETE /api/runs/<id>` answer `405`.
 The hosted mode above makes `ui/` a normal Next.js project for Vercel: its own Vercel project with Root Directory `ui`,
 inside this pnpm workspace. Nothing else is built or installed for it (`@playwright/test` is a dev dependency of the
 screenshot script only; the functions never start Playwright), and `outputFileTracingIncludes` in `next.config.ts` ships
-`ui/sample-data/` with every route. Set it up one of two ways; use one, not both (they would deploy every commit twice).
+`ui/sample-data/` with every route. Set it up through Vercel's Git integration:
 
 ### Vercel's Git integration (recommended)
 
@@ -136,25 +136,6 @@ screenshot script only; the functions never start Playwright), and `outputFileTr
 
 3. Deploy. From then on every push to `main` is a production deployment, and every pull request (and other branch) gets
    a preview URL that Vercel comments on the pull request.
-
-### GitHub Actions with the Vercel CLI
-
-`.github/workflows/deploy-ui.yml` runs `vercel pull`, `vercel build` and `vercel deploy --prebuilt`: production on pushes
-to `main` that touch `ui/**` (or the workflow, `src/runner/projects.ts` or the lockfiles), a preview on pull requests
-(the URL is commented on the pull request once, updated by every push, and is in the job summary). It needs the same
-Vercel project: create it once (the dashboard steps above with Git deployments disabled, or `vercel link` from the
-repository root) with Root Directory `ui` and the same settings, then add three repository secrets (Settings > Secrets
-and variables > Actions):
-
-| Secret              | Where                                                                                   |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `VERCEL_TOKEN`      | vercel.com/account/tokens                                                               |
-| `VERCEL_ORG_ID`     | `orgId` in `.vercel/project.json` after `vercel link`, or the team's Settings > Team ID |
-| `VERCEL_PROJECT_ID` | `projectId` in `.vercel/project.json`, or the project's Settings > Project ID           |
-
-Without the secrets (and for pull requests from forks, which never get them) the workflow succeeds and says it did
-nothing. It runs the CLI from the repository root; `vercel pull` reads the Root Directory from the project's settings.
-Do not use it together with the Git integration: Vercel would deploy every commit twice.
 
 ## Screenshots
 
