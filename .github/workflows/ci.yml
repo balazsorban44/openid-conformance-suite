@@ -98,3 +98,5 @@ jobs:
           node-version: latest
       - run: pnpm typecheck
       - run: node bin/cli.ts ci --project op-basic-dynamic -- --grep "oidcc-server:"
+        env:
+          CONFORMANCE_STEP_SUMMARY: "off"

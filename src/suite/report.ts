@@ -497,7 +497,8 @@ export default class ConformanceReporter implements Reporter {
 			reportUrl: runUrl,
 		});
 		writeFileSync(join(this.outDir, "summary.md"), md);
-		const stepSummary = env["GITHUB_STEP_SUMMARY"];
+		// CONFORMANCE_STEP_SUMMARY=off: a run that should not appear on the workflow run page (the smoke job)
+		const stepSummary = env["CONFORMANCE_STEP_SUMMARY"] === "off" ? undefined : env["GITHUB_STEP_SUMMARY"];
 		if (stepSummary) {
 			appendFileSync(stepSummary, md + "\n");
 		}
