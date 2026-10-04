@@ -55,18 +55,35 @@ jobs:
 
   # One conformance workflow per browser (CONFORMANCE_BROWSER), each a matrix over the projects it runs: every
   # project on chromium, and the projects where the implementation under test sees the suite's browser also on
-  # firefox, webkit and chrome-mobile. The Actions view groups the jobs as "<browser> / <project>".
-  conformance:
-    name: ${{ matrix.browser }}
+  # firefox, webkit and chrome-mobile. Four explicit jobs, not a browser matrix, so the workflow graph shows a
+  # column with one node per browser, each expanding to its projects.
+  chromium:
     needs: setup
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chromium, firefox, webkit, chrome-mobile]
     uses: ./.github/workflows/conformance.yml
     with:
-      browser: ${{ matrix.browser }}
-      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix)[matrix.browser]) }}
+      browser: chromium
+      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).chromium) }}
+
+  firefox:
+    needs: setup
+    uses: ./.github/workflows/conformance.yml
+    with:
+      browser: firefox
+      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).firefox) }}
+
+  webkit:
+    needs: setup
+    uses: ./.github/workflows/conformance.yml
+    with:
+      browser: webkit
+      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).webkit) }}
+
+  chrome-mobile:
+    needs: setup
+    uses: ./.github/workflows/conformance.yml
+    with:
+      browser: chrome-mobile
+      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).chrome-mobile) }}
 
   node-latest:
     name: smoke on latest Node

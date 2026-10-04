@@ -124,8 +124,9 @@ site may behave differently in WebKit, which is what the browser dimension is fo
 `src/runner/projects.ts` is the matrix: each entry (name, plan, variant, config, optional `skipModules`, optional
 `browsers`) runs as one GitHub Actions job per browser, `node bin/cli.ts ci --project <name> --browser <browser>`.
 `.github/workflows/ci.yml` reads `matrixByBrowser()` (`{browser: [projects]}`; `node bin/cli.ts projects --json`
-prints the pairs) and calls `.github/workflows/conformance.yml` once per browser with that browser's projects as
-its own matrix, so the Actions view groups the jobs as `<browser> / <project>`. Without `browsers` a project runs
+prints the pairs) and has one job per browser (`chromium`, `firefox`, `webkit`, `chrome-mobile`) that calls
+`.github/workflows/conformance.yml` with that browser's projects as its own matrix, so the workflow graph shows a
+column of browsers, each expanding to its projects (`firefox / op-session-management`). Without `browsers` a project runs
 on chromium only; the projects where the implementation under test sees the suite's browser list all four. Adding
 a project there adds the CI jobs. The setup job installs and caches every browser once (one cache per browser,
 keyed on the Playwright version); each job restores only its own (an RP project on firefox or webkit also gets the
