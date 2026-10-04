@@ -134,7 +134,8 @@ worker starts its own target). Nothing waits for an install: a tiny matrix job p
 job restores its own caches (node_modules keyed on the lockfile, one browser cache per browser keyed on the
 Playwright version; after a bump the first job downloads and saves it) (an RP project on firefox or webkit also gets the
 Chromium headless shell, which the bundled RP target drives to log in), and runs `playwright install-deps` only when
-Playwright reports missing system libraries (WebKit on the ubuntu images).
+Playwright reports missing system libraries (WebKit on the ubuntu images; its .deb files are cached per runner image
+so apt only unpacks them).
 
 ## Reading the output
 

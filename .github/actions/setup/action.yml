@@ -78,6 +78,19 @@ runs:
           ~/.cache/ms-playwright/webkit-*
           ~/.cache/ms-playwright/ffmpeg-*
         key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-webkit
+    # WebKit's system libraries: Playwright installs 187 apt packages (125 MB, ~35 s of download). The .deb files are
+    # cached per runner image and Playwright version and copied into apt's archive before the install, so apt only
+    # unpacks them (~10 s). A changed image invalidates the cache (its package versions change); a stale .deb is
+    # simply re-downloaded by apt.
+    - if: ${{ inputs.browser == 'webkit' }}
+      id: image
+      shell: bash
+      run: echo "id=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+    - if: ${{ inputs.browser == 'webkit' }}
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/apt-webkit
+        key: apt-webkit-${{ steps.image.outputs.id }}-${{ steps.playwright.outputs.version }}
     # `playwright install` is a no-op after a cache hit. It then checks the browser's system libraries and reports
     # the missing ones (a warning, exit 0); apt is never cached, so `install-deps` runs only when that check fails.
     # The ubuntu runner images ship what the headless shell needs (Chrome needs the same libraries); WebKit needs GTK
@@ -107,7 +120,15 @@ runs:
           # `all` only fills the caches; the job that runs a browser installs its libraries
           if [ "$BROWSER" != all ] && grep -q "missing dependencies" <<<"$out"; then
             echo "::group::playwright install-deps $b"
+            if [ "$b" = webkit ] && [ -n "$(ls ~/.cache/apt-webkit/*.deb 2>/dev/null)" ]; then
+              sudo cp ~/.cache/apt-webkit/*.deb /var/cache/apt/archives/
+            fi
             pnpm exec playwright install-deps "$b"
+            if [ "$b" = webkit ]; then
+              mkdir -p ~/.cache/apt-webkit
+              sudo cp /var/cache/apt/archives/*.deb ~/.cache/apt-webkit/ 2>/dev/null || true
+              sudo chown -R "$(id -u):$(id -g)" ~/.cache/apt-webkit
+            fi
             echo "::endgroup::"
           fi
         done

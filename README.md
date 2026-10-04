@@ -3,10 +3,7 @@
 [![CI](https://github.com/balazsorban44/openid-conformance-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/balazsorban44/openid-conformance-suite/actions/workflows/ci.yml)
 
 The [OpenID Foundation conformance suite](https://gitlab.com/openid/Conformance-suite) in TypeScript, driven by
-[Playwright](https://playwright.dev), made for CI. Point it at your OpenID Provider or Relying Party and get the
-official suite's checks, messages and spec references as a job with a readable summary.
-
-What is ported:
+[Playwright](https://playwright.dev), made for CI. Same checks, messages and spec references as the official suite.
 
 - [x] OpenID Connect Core, OpenID Provider
   - [x] basic, config, dynamic client registration
@@ -19,10 +16,7 @@ What is ported:
 - [ ] FAPI 1 Advanced, FAPI 2 Security Profile and Message Signing, FAPI-CIBA
 - [ ] OpenID Federation, Shared Signals Framework, OpenID4VC issuer / wallet / verifier, eKYC, AuthZEN
 
-A weekly job compares the ported code with upstream and keeps a "Sync with upstream" pull request open with the
-diffs to port.
-
-## Test your OP in GitHub Actions
+## OP
 
 ```yaml
 # .github/workflows/conformance.yml
@@ -32,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: npm start & # or use `target` in the config file
+      - run: npm start & # or `target` in the config
       - uses: balazsorban44/openid-conformance-suite@main
         with:
           plan: oidcc-basic-certification-test-plan
@@ -40,13 +34,11 @@ jobs:
           config: ./conformance/my-op.json
 ```
 
-The job summary lists unexpected failures first (condition, message, log), then skipped, review and expected-failure
-modules. On failure the artifact has the full event log (`log.html`), screenshots, videos and `results.json`.
+The job summary lists unexpected failures first, then skipped, review and expected-failure modules. On failure the
+artifact has the event log (`log.html`), screenshots, videos and `results.json`. `browser: firefox`, `webkit` or
+`chrome-mobile` runs the plan in another browser.
 
-The action installs and caches the browser it drives. `browser: firefox`, `webkit` or `chrome-mobile` runs the
-plan in another browser.
-
-`my-op.json` uses the official suite's configuration format:
+`my-op.json` is the official suite's configuration format:
 
 ```json
 {
@@ -79,33 +71,14 @@ plan in another browser.
 }
 ```
 
-- `browser` scripts your login and consent pages like the official suite (`click`, `text`, `wait`,
-  `wait-element-visible`, `wait-element-invisible`; selectors `id`, `name`, `css`, `xpath`, `class`). A `.ts`
-  config can export a Playwright function instead:
+- `browser`: the official suite's scripted login (`click`, `text`, `wait`, `wait-element-visible`,
+  `wait-element-invisible`; selectors `id`, `name`, `css`, `xpath`, `class`). A `.ts` config can export a
+  Playwright function `browser: async ({ page, url }) => { ... }` instead.
+- `target` (optional): starts your implementation before the plan. `"url": "http://localhost:${PORT}"` gets a free
+  port, passed as `PORT` and as `${TARGET_URL}` in the configuration.
+- `expectedFailures`, `expectedSkips` (optional): lists in the official suite's `expected-failures-*.json` format.
 
-  ```ts
-  export default {
-  	alias: "my-op",
-  	server: { discoveryUrl: "http://localhost:3000/.well-known/openid-configuration" },
-  	client: { client_name: "first-client" },
-  	browser: async ({ page, url }) => {
-  		await page.getByLabel("Username").fill("user");
-  		await page.getByLabel("Password").fill("secret");
-  		await page.getByRole("button", { name: "Sign in" }).click();
-  		await page.waitForURL("**/callback*");
-  	},
-  };
-  ```
-
-- `target` (optional) starts your implementation before the plan and stops it afterwards. With
-  `"url": "http://localhost:${PORT}"` the suite picks a free port, passes it as `PORT` and replaces `${TARGET_URL}`
-  in the configuration.
-- `expectedFailures` / `expectedSkips` (optional) point at lists in the official suite's `expected-failures-*.json`
-  format.
-
-## Test your RP in GitHub Actions
-
-The suite emulates an OP and drives your RP through it once per test module:
+## RP
 
 ```json
 {
@@ -116,9 +89,9 @@ The suite emulates an OP and drives your RP through it once per test module:
 }
 ```
 
-The suite calls `GET {startUrl}?issuer=<emulated OP>&module=<test name>&variant=<json>` and your RP logs in against
-that issuer. [`targets/openid-client-rp/README.md`](targets/openid-client-rp/README.md) has the contract and a
-reference implementation.
+The suite emulates an OP and calls `GET {startUrl}?issuer=<emulated OP>&module=<test name>&variant=<json>` once
+per module; your RP logs in against that issuer. Contract and reference implementation:
+[`targets/openid-client-rp/README.md`](targets/openid-client-rp/README.md).
 
 ## CLI
 
@@ -132,43 +105,22 @@ pnpm exec openid-conformance run --plan oidcc-basic-certification-test-plan \
    --config ./conformance/my-op.json [--module 'oidcc-server*'] [--browser webkit] [--headed]
 ```
 
-Node.js 24 or newer. `--browser` is `chromium` (default), `firefox`, `webkit` or `chrome-mobile`.
+Node.js 24 or newer.
 
 ## Web UI
 
-A checkout has a local web UI like the official suite's: plans and projects with every module's latest result, a
-dialog to start a run, live progress, and each module's log with its conditions, HTTP exchanges and screenshots.
-`pnpm install && pnpm ui` serves it on http://127.0.0.1:3000; see [`ui/README.md`](ui/README.md), which also has
-the Vercel settings for a hosted read-only copy.
+`pnpm install && pnpm ui` in a checkout: plans and projects with every module's latest result, runs with live
+progress, each module's log with its conditions, HTTP exchanges and screenshots. See
+[`ui/README.md`](ui/README.md).
 
 [![The UI's overview](ui/docs/overview-light.png)](ui/README.md)
 
-## What is in the box
-
-|                                              |                                                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `tests/op/*.spec.ts`, `tests/rp/*.spec.ts`   | one Playwright test per upstream test module, one spec file per plan                     |
-| `tests/fixtures.ts`, `tests/suite-target.ts` | the `op` / `client` / `rp` fixtures, the after-test analysis, suite-vs-suite             |
-| `src/suite/`                                 | the engine: event log, checks, HTTP, scripted browser, config, report                    |
-| `src/op/`, `src/rp/`                         | upstream's conditions as functions: testing an OP, and the emulated OP for RP tests      |
-| `src/runner/`, `bin/cli.ts`                  | the plans, the CI projects and the `openid-conformance` CLI                              |
-| `ui/`                                        | the web UI                                                                               |
-| `scripts/`                                   | upstream sync, lock symbols, log fidelity diff                                           |
-| `targets/`                                   | the implementations this repo's CI tests: panva's `oidc-provider`, an `openid-client` RP |
-| `configs/`                                   | the CI configurations and expected-failure lists                                         |
-| `action.yml`                                 | the composite GitHub Action                                                              |
-
-CI runs every OP plan against `oidc-provider`, every RP plan against the `openid-client` RP and the OP basic plan
-against the suite's own emulated OP, on Chromium, and the browser-driven projects on Firefox, WebKit and Chrome
-mobile too.
-
 ## Maintaining
 
-`upstream.lock.json` pins the upstream commit and maps every ported Java file to the function or test that ports it
-(from the `upstream:` comments). `pnpm sync-upstream` shows what changed upstream. The rules are in `.claude/skills/`:
-`writing-tests` (design and porting rules), `sync-upstream`, `run-conformance`.
+`upstream.lock.json` pins the upstream commit and maps every ported Java file to its function or test. A weekly
+job opens a "Sync with upstream" pull request with the diffs to port. Rules: `.claude/skills/`.
 
 ## License
 
-MIT, like upstream. A derivative work of the OpenID Foundation conformance suite, not affiliated with or endorsed
-by the OpenID Foundation; it does not grant certification.
+MIT. A derivative work of the OpenID Foundation conformance suite; not affiliated with or endorsed by the OpenID
+Foundation, and no certification.
