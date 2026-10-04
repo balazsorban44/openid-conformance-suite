@@ -83,7 +83,7 @@ jobs:
     uses: ./.github/workflows/conformance.yml
     with:
       browser: chrome-mobile
-      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix).chrome-mobile) }}
+      projects: ${{ toJSON(fromJSON(needs.setup.outputs.matrix)['chrome-mobile']) }}
 
   node-latest:
     name: smoke on latest Node
