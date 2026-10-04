@@ -145,14 +145,21 @@ export function validateClientIdAndSecret(
  * upstream: sequence/as/OIDCCValidateClientAuthenticationWithClientSecretBasic.java,
  * OIDCCValidateClientAuthenticationWithClientSecretPost.java, OIDCCValidateClientAuthenticationWithNone.java
  */
-export function validateClientAuthentication(req: IncomingRequest, client: RpClient, clientAuthType: string): void {
+export function validateClientAuthentication(
+	req: IncomingRequest,
+	client: RpClient,
+	clientAuthType: string,
+	/** opUnderTest: a failed authentication rejects the request (upstream's RP test records it and goes on) */
+	strict = false,
+): void {
+	const check = strict ? <T>(fn: () => T) => fn() : soft;
 	if (clientAuthType === "client_secret_basic") {
 		const authentication = extractClientCredentialsFromBasicAuthorizationHeader(req, "OIDCC-9");
-		soft(() => validateClientIdAndSecret(authentication, client, "RFC6749-2.3.1"));
+		check(() => validateClientIdAndSecret(authentication, client, "RFC6749-2.3.1"));
 	} else if (clientAuthType === "client_secret_post") {
-		const authentication = soft(() => extractClientCredentialsFromFormPost(req, "OIDCC-9"));
+		const authentication = check(() => extractClientCredentialsFromFormPost(req, "OIDCC-9"));
 		if (authentication != null) {
-			soft(() => validateClientIdAndSecret(authentication, client, "RFC6749-2.3.1"));
+			check(() => validateClientIdAndSecret(authentication, client, "RFC6749-2.3.1"));
 		}
 	} else if (clientAuthType !== "none") {
 		// "none": upstream does not check anything (yet)
@@ -160,13 +167,16 @@ export function validateClientAuthentication(req: IncomingRequest, client: RpCli
 	}
 }
 
-/** The client a token request names: in its Basic authorization header, else its client_id parameter (opUnderTest) */
-function clientIdOfTokenRequest(req: IncomingRequest): string | null {
+/**
+ * The client a token request names: in its Basic authorization header (form-urlencoded, RFC 6749 2.3.1: a '+' is
+ * a space), else its client_id parameter (opUnderTest)
+ */
+export function clientIdOfTokenRequest(req: IncomingRequest): string | null {
 	const auth = req.headers["authorization"];
 	if (typeof auth === "string" && auth.toLowerCase().startsWith("basic ")) {
 		const user = Buffer.from(auth.substring("Basic ".length), "base64").toString("utf8").split(":")[0];
 		try {
-			return decodeURIComponent(user);
+			return formDecode(user);
 		} catch {
 			return user;
 		}
@@ -285,7 +295,7 @@ export async function handleTokenRequest(
 			throw new Error("The RP sent a token request before it registered a client");
 		}
 		soft(() => checkClientIdMatchesOnTokenRequestIfPresent(req, client, "RFC6749-3.2.1"));
-		validateClientAuthentication(req, client, op.clientAuthType);
+		validateClientAuthentication(req, client, op.clientAuthType, op.options.opUnderTest);
 		if (grantType === "refresh_token") {
 			if (!op.options.refresh) {
 				failTest("refresh_token grant type is not implemented for this test");
