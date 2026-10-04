@@ -25,7 +25,7 @@
 		"lint": "oxlint",
 		"fmt": "oxfmt",
 		"fmt:check": "oxfmt --check",
-		"check": "pnpm typecheck && pnpm --filter ui typecheck && pnpm lint && pnpm fmt:check",
+		"check": "pnpm typecheck && pnpm --filter ui typecheck && pnpm lint && pnpm fmt:check && node scripts/upstream-lock-symbols.ts --check",
 		"test": "playwright test",
 		"test:unit": "vitest run",
 		"ui": "pnpm --filter ui dev",

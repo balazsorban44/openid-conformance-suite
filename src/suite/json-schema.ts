@@ -378,11 +378,11 @@ export class JsonSchemaValidationResult {
 	}
 }
 
-/** upstream: util/validation/JsonSchemaValidationException.java */
 function isValidationResult(v: unknown): v is JsonSchemaValidationResult {
 	return v != null && typeof v === "object" && "getValidationMessages" in v;
 }
 
+/** upstream: util/validation/JsonSchemaValidationException.java */
 export class JsonSchemaValidationException extends NamedError {
 	private readonly validationResult: JsonSchemaValidationResult | null;
 
